@@ -209,38 +209,6 @@ screen -r gki-bot
 
 ---
 
-## 🔒 Push code sạch lên GitHub
-
-File `.gitignore` đã được cấu hình sẵn để loại trừ:
-- `.env` — chứa token và thông tin nhạy cảm
-- `data.json` — dữ liệu runtime của bot
-- `__pycache__/` — cache Python
-
-### Push lần đầu
-
-```bash
-git init
-git add .
-git commit -m "Initial commit"
-git branch -M main
-git remote add origin https://github.com/<username>/<repo>.git
-git push -u origin main
-```
-
-### Nếu đã lỡ commit file nhạy cảm
-
-```bash
-# Xóa file khỏi git (giữ lại trên máy)
-git rm --cached .env
-git rm --cached data.json
-git commit -m "Remove sensitive files from tracking"
-git push
-```
-
-> ⚠️ **Quan trọng**: Nếu đã từng push `.env` lên GitHub, hãy **đổi lại tất cả token** ngay lập tức vì chúng đã bị lộ trong lịch sử commit.
-
----
-
 ## 📄 License
 
 MIT
