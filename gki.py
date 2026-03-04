@@ -347,7 +347,9 @@ class GKIFlow:
         if not user_is_admin:
             uses = await self.storage.get_uses(key or "")
             if not key or uses <= 0:
-                await q.edit_message_text("❌ Key không hợp lệ hoặc hết lượt.")
+                m = await q.edit_message_text("❌ Key không hợp lệ hoặc hết lượt.")
+                if context.job_queue:
+                    context.job_queue.run_once(_del_msg_job, when=60, chat_id=m.chat_id, data=m.message_id)
                 _cleanup(context)
                 return ConversationHandler.END
 
@@ -358,6 +360,7 @@ class GKIFlow:
         # Kiểm tra concurrency (chống đè build dẫn tới bị hủy)
         await q.edit_message_text("⏳ Đang kiểm tra trạng thái server...")
         is_busy = False
+        busy_run = None
         for status in ["in_progress", "queued"]:
             url = f"{self.gh.base}/repos/{self.config.GITHUB_OWNER}/{self.config.GKI_REPO}/actions/runs?status={status}&per_page=10"
             check_res = await self.gh._request("GET", url)
@@ -366,15 +369,32 @@ class GKIFlow:
                 for r in runs:
                     if r.get("head_branch") == self.config.GKI_DEFAULT_BRANCH and wf in r.get("path", ""):
                         is_busy = True
+                        busy_run = r
                         break
             if is_busy:
                 break
                 
         if is_busy:
+            # Tính thời gian ước tính còn lại (giả sử tổng ~45 phút)
+            eta_line = ""
+            if busy_run and busy_run.get("created_at"):
+                from datetime import datetime, timezone
+                try:
+                    created = datetime.fromisoformat(busy_run["created_at"].replace("Z", "+00:00"))
+                    elapsed = (datetime.now(timezone.utc) - created).total_seconds()
+                    remaining = max(0, 2700 - elapsed)  # 2700s = 45 phút
+                    rem_m = int(remaining // 60)
+                    if rem_m > 0:
+                        eta_line = f"• Ước tính hoàn tất sau: ~{rem_m} phút.\n"
+                    else:
+                        eta_line = "• Ước tính sắp hoàn tất.\n"
+                except Exception:
+                    pass
             msg = (
                 "❌ <b>Có tiến trình đang chạy!</b>\n\n"
                 "• Hiện tại chưa thể thực hiện yêu cầu của bạn bây giờ.\n"
-                "• Bot sẽ thông báo ngay cho bạn khi tiến trình này hoàn tất!\n\n"
+                "• Bot sẽ thông báo ngay cho bạn khi tiến trình này hoàn tất!\n"
+                f"{eta_line}\n"
                 "<i>Hãy nhớ rằng thông báo sẽ gửi cho tất cả những người có yêu cầu "
                 "nên hãy gửi lại lệnh ngay để bot xử lý nhé!</i>"
             )
@@ -425,7 +445,9 @@ class GKIFlow:
             )
             await q.edit_message_text(msg_text, reply_markup=btn, parse_mode="HTML")
         else:
-            await q.edit_message_text(f"⚠️ Dispatch lỗi: {res['status']} {res.get('json')}")
+            m = await q.edit_message_text(f"⚠️ Dispatch lỗi: {res['status']} {res.get('json')}")
+            if context.job_queue:
+                context.job_queue.run_once(_del_msg_job, when=60, chat_id=m.chat_id, data=m.message_id)
         _cleanup(context)
         return ConversationHandler.END
 

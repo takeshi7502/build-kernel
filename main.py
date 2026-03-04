@@ -86,6 +86,13 @@ class JSONStorage(StorageBase):
             data = self._load()
             return int(data.get("keys", {}).get(code, {}).get("uses", 0))
 
+    async def get_all_keys(self) -> Dict[str, int]:
+        """Trả về dict {code: số_lượt_còn} cho tất cả key."""
+        async with self._lock:
+            data = self._load()
+            keys = data.get("keys", {})
+            return {code: int(info.get("uses", 0)) for code, info in keys.items()}
+
     async def consume(self, code: str) -> bool:
         async with self._lock:
             data = self._load()
@@ -408,6 +415,10 @@ class GitHubAPI:
         url = f"{self.base}/repos/{config.GITHUB_OWNER}/{repo}/actions/runs/{run_id}/cancel"
         return await self._request("POST", url)
 
+    async def delete_run(self, repo: str, run_id: int):
+        url = f"{self.base}/repos/{config.GITHUB_OWNER}/{repo}/actions/runs/{run_id}"
+        return await self._request("DELETE", url)
+
 
 
 def tg_mention_html(user) -> str:
@@ -560,8 +571,6 @@ async def cmd_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     storage: StorageBase = context.application.bot_data["storage"]
     if not is_owner(user.id):
-        m = await update.message.reply_text("⚠️ Bạn không có quyền dùng lệnh này.")
-        context.job_queue.run_once(_del_msg_job, when=60, chat_id=m.chat_id, data=m.message_id)
         return
     try:
         _, code, uses = update.message.text.strip().split(maxsplit=2)
@@ -572,13 +581,29 @@ async def cmd_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"Đã set key `{code}` với {uses} lượt.", parse_mode=constants.ParseMode.MARKDOWN)
 
 
+async def cmd_keys(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    storage: StorageBase = context.application.bot_data["storage"]
+    if not is_owner(user.id):
+        return
+    keys = await storage.get_all_keys()
+    if not keys:
+        m = await update.message.reply_text("ℹ️ Chưa có key nào được tạo.")
+        context.job_queue.run_once(_del_msg_job, when=60, chat_id=m.chat_id, data=m.message_id)
+        return
+    lines = ["🔑 <b>Danh sách Key</b>\n"]
+    for i, (code, uses) in enumerate(keys.items(), 1):
+        status = f"✅ {uses} lượt" if uses > 0 else "❌ Hết lượt"
+        lines.append(f"{i}. <code>{code}</code> — {status}")
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Đóng", callback_data=f"closemsg:{update.message.message_id}")]])
+    await update.message.reply_text("\n".join(lines), parse_mode=constants.ParseMode.HTML, reply_markup=kb)
+
+
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     storage: StorageBase = context.application.bot_data["storage"]
     
     if not await is_admin(user.id, storage):
-        m = await update.message.reply_text("⚠️ Bạn không có quyền dùng lệnh này.")
-        context.job_queue.run_once(_del_msg_job, when=60, chat_id=m.chat_id, data=m.message_id)
         return
 
     jobs = await storage.get_jobs()
@@ -620,7 +645,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
             url = f"https://github.com/{config.GITHUB_OWNER}/{repo}/actions/runs/{run_id}"
             buttons[0] = [InlineKeyboardButton("Xem trên GitHub 🌐", url=url)]
             
-        buttons.append([InlineKeyboardButton("❌ Đóng", callback_data=f"runctl:close:gki:{job.get('run_id', job_id)}")])
+        buttons.append([InlineKeyboardButton("❌ Đóng", callback_data=f"closemsg:{update.message.message_id}")])
         kb = InlineKeyboardMarkup(buttons)
         await update.message.reply_text(text, parse_mode=constants.ParseMode.HTML, reply_markup=kb)
 
@@ -630,7 +655,7 @@ def _run_button_text(repo_label: str, run: dict) -> str:
     name = run.get("name") or run.get("display_title") or "workflow"
     return f"{repo_label} • #{n} • {status} • {name[:24]}"
 
-async def show_list_page(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int, message_to_edit=None):
+async def show_list_page(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int, message_to_edit=None, cmd_msg_id: int = 0):
     gh: GitHubAPI = context.application.bot_data["gh"]
     storage: StorageBase = context.application.bot_data["storage"]
     repo = config.GKI_REPO
@@ -741,7 +766,7 @@ async def show_list_page(update: Update, context: ContextTypes.DEFAULT_TYPE, pag
             InlineKeyboardButton(f"{page}/{total_pages}", callback_data="none"),
             InlineKeyboardButton("Sau ➡️", callback_data=f"listpage:{page+1}")
         ])
-    kb.append([InlineKeyboardButton("❌ Đóng", callback_data="closemsg")])
+    kb.append([InlineKeyboardButton("❌ Đóng", callback_data=f"closemsg:{cmd_msg_id}")])
     reply_markup = InlineKeyboardMarkup(kb)
     await message_to_edit.edit_text(text, parse_mode=constants.ParseMode.HTML, reply_markup=reply_markup, disable_web_page_preview=True)
 
@@ -750,11 +775,9 @@ async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     storage: StorageBase = context.application.bot_data["storage"]
     if not await is_admin(user.id, storage):
-        m = await update.message.reply_text("⚠️ Bạn không có quyền dùng lệnh này.")
-        context.job_queue.run_once(_del_msg_job, when=60, chat_id=m.chat_id, data=m.message_id)
         return
         
-    await show_list_page(update, context, page=1)
+    await show_list_page(update, context, page=1, cmd_msg_id=update.message.message_id)
 
 async def cb_list_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -764,7 +787,17 @@ async def cb_list_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
         page = int(page_str)
     except:
         page = 1
-    await show_list_page(update, context, page=page, message_to_edit=q.message)
+    # Tìm cmd_msg_id từ nút Đóng trong reply_markup hiện tại
+    cmd_msg_id = 0
+    if q.message and q.message.reply_markup:
+        for row in q.message.reply_markup.inline_keyboard:
+            for btn in row:
+                if btn.callback_data and btn.callback_data.startswith("closemsg:"):
+                    try:
+                        cmd_msg_id = int(btn.callback_data.split(":")[1])
+                    except:
+                        pass
+    await show_list_page(update, context, page=page, message_to_edit=q.message, cmd_msg_id=cmd_msg_id)
 
 
 async def cb_run_controls(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -795,16 +828,27 @@ async def cb_run_control_action(update: Update, context: ContextTypes.DEFAULT_TY
     if action == "cancel":
         res = await gh.cancel_run(repo, run_id)
         if res["status"] in (202, 204):
-            m = await q.edit_message_text(f"✅ Đã gửi yêu cầu hủy run #{run_id}.")
+            # Đợi 1 chút rồi xóa luôn run dở
+            import asyncio
+            await asyncio.sleep(3)
+            await gh.delete_run(repo, run_id)
+            m = await q.edit_message_text(f"✅ Đã hủy và xóa run #{run_id}.")
         else:
             m = await q.edit_message_text(f"❌ Hủy thất bại: {res['status']}")
         if context.job_queue and m:
             context.job_queue.run_once(_del_msg_job, when=60, chat_id=m.chat_id, data=m.message_id)
     elif action == "close":
+        # Xóa cả tin nhắn bot và lệnh gọi
+        chat_id = q.message.chat_id
         try:
             await q.delete_message()
         except Exception:
-            await q.edit_message_text("Đã đóng.")
+            pass
+        # run_id_str ở đây thực chất là cmd_msg_id (nếu có)
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=run_id)
+        except Exception:
+            pass
 
 async def check_user_job_limit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     user = update.effective_user
@@ -815,9 +859,9 @@ async def check_user_job_limit(update: Update, context: ContextTypes.DEFAULT_TYP
     if active:
         job_created_at = datetime.fromisoformat(active[0]["created_at"])
         elapsed = (datetime.now(timezone.utc) - job_created_at).total_seconds()
-        if elapsed < 3 * 3600:
-            remaining = int((3 * 3600 - elapsed) // 60) + 1
-            m = await update.message.reply_text(f"⚠️ Chỉ được 1 job/3h. Vui lòng đợi {remaining} phút.")
+        if elapsed < 3600:
+            remaining = int((3600 - elapsed) // 60) + 1
+            m = await update.message.reply_text(f"⚠️ Chỉ được 1 job/1h. Vui lòng đợi {remaining} phút.")
             context.job_queue.run_once(_del_msg_job, when=60, chat_id=m.chat_id, data=m.message_id)
             return False
     return True
@@ -825,10 +869,25 @@ async def check_user_job_limit(update: Update, context: ContextTypes.DEFAULT_TYP
 async def cb_close_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
+    chat_id = q.message.chat_id
+    # Parse cmd_msg_id từ callback data
+    cmd_msg_id = 0
+    if ":" in q.data:
+        try:
+            cmd_msg_id = int(q.data.split(":")[1])
+        except:
+            pass
+    # Xóa tin nhắn bot
     try:
         await q.delete_message()
     except Exception:
-        await q.edit_message_text("Đã đóng.")
+        pass
+    # Xóa lệnh gọi
+    if cmd_msg_id:
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=cmd_msg_id)
+        except Exception:
+            pass
 
 def main():
     storage = JSONStorage(DATA_JSON)
@@ -843,12 +902,13 @@ def main():
 
     # Owner-only commands
     app.add_handler(CommandHandler("key", cmd_key, filters=filters.User(user_id=config.OWNER_ID)))
+    app.add_handler(CommandHandler("keys", cmd_keys, filters=filters.User(user_id=config.OWNER_ID)))
 
     # Admin commands (owner + static admins in .env)
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("list", cmd_list))
     app.add_handler(CallbackQueryHandler(cb_list_page, pattern=r"^listpage:\d+$"))
-    app.add_handler(CallbackQueryHandler(cb_close_msg, pattern=r"^closemsg$"))
+    app.add_handler(CallbackQueryHandler(cb_close_msg, pattern=r"^closemsg"))
     app.add_handler(CallbackQueryHandler(cb_run_controls, pattern=r"^run:gki:\d+$"))
     app.add_handler(CallbackQueryHandler(cb_run_control_action, pattern=r"^runctl:(cancel|close):gki:\d+$"))
 
