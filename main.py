@@ -598,6 +598,13 @@ async def cmd_keys(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Đóng", callback_data=f"closemsg:{update.message.message_id}")]])
     await update.message.reply_text("\n".join(lines), parse_mode=constants.ParseMode.HTML, reply_markup=kb)
 
+async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    m = await update.message.reply_text("🏓 Pong! Bot đang hoạt động bình thường.")
+    if context.job_queue:
+        context.job_queue.run_once(_del_msg_job, when=60, chat_id=m.chat_id, data=m.message_id)
+        if update.message:
+            context.job_queue.run_once(_del_msg_job, when=60, chat_id=update.message.chat_id, data=update.message.message_id)
+
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -907,6 +914,7 @@ def main():
     # Admin commands (owner + static admins in .env)
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("list", cmd_list))
+    app.add_handler(CommandHandler("ping", cmd_ping))
     app.add_handler(CallbackQueryHandler(cb_list_page, pattern=r"^listpage:\d+$"))
     app.add_handler(CallbackQueryHandler(cb_close_msg, pattern=r"^closemsg"))
     app.add_handler(CallbackQueryHandler(cb_run_controls, pattern=r"^run:gki:\d+$"))
