@@ -6,7 +6,7 @@ Telegram bot để tự động build GKI Kernel thông qua GitHub Actions.
 
 - 🚀 **Build GKI Kernel** — Chọn variant, nhánh, phiên bản Android và dispatch workflow trực tiếp từ Telegram
 - 📋 **Lịch sử build** (`/list`) — Xem danh sách build thành công với phân trang, link tải qua Telegraph
-- 📊 **Trạng thái** (`/status`) — Theo dõi build đang chạy, ước tính thời gian còn lại, hủy build
+- 📊 **Trạng thái** (`/st`) — Theo dõi build đang chạy, ước tính thời gian còn lại, hủy build
 - 🔐 **Phân quyền** — Owner / Admin / User với key system
 - 🔔 **Thông báo tự động** — Bot gửi kết quả khi build xong, thông báo khi hệ thống rảnh
 - 📰 **Telegraph** — Tự động tạo trang Telegraph chứa danh sách file tải về (gọn gàng)
@@ -30,8 +30,8 @@ Telegram bot để tự động build GKI Kernel thông qua GitHub Actions.
 
 | Role | Quyền | Cách thiết lập |
 |------|-------|----------------|
-| **Owner** | Toàn quyền: `/key`, `/status`, `/list`, bypass key & job limit | `OWNER_ID` trong `.env` |
-| **Admin** | `/status`, `/list`, build không cần key, bypass job limit | `ADMIN_IDS` trong `.env` |
+| **Owner** | Toàn quyền: `/key`, `/st`, `/list`, bypass key & job limit | `OWNER_ID` trong `.env` |
+| **Admin** | `/st`, `/list`, build không cần key, bypass job limit | `ADMIN_IDS` trong `.env` |
 | **User** | Build bằng `/gki {key}`, giới hạn 1 job / 3 giờ | Ai cũng được |
 
 ## 📝 Danh sách lệnh
@@ -39,7 +39,7 @@ Telegram bot để tự động build GKI Kernel thông qua GitHub Actions.
 | Lệnh | Quyền | Mô tả |
 |------|-------|-------|
 | `/gki` hoặc `/gki {key}` | Admin / User | Bắt đầu build GKI Kernel |
-| `/status` | Admin | Xem build đang chạy + nút hủy |
+| `/st` | Admin | Xem build đang chạy + nút hủy |
 | `/list` | Admin | Lịch sử build thành công (phân trang) |
 | `/key {mã} {số_lượt}` | Owner | Tạo/cập nhật key cho user |
 
@@ -237,17 +237,17 @@ Lần đầu chạy, Telethon sẽ yêu cầu nhập số điện thoại, mã O
 
 ### Lệnh trong user mode
 
-- `/help`
-- `/ping`
-- `/status`
-- `/list` hoặc `/list 2`
-- `/cancel <run_id>`
-- `/gki [key=value ...]`
+- `/pings`
+- `/sts`
+- `/keyss`
+- `/lists` hoặc `/lists 2`
+- `/cancels <run_id>`
+- `/gkis [key=value ...]`
 
 Ví dụ:
 
 ```text
-/gki target=a13 variant=ReSukiSU version=HzzMonet release=actions subs=74,78
+/gkis target=a13 variant=ReSukiSU version=HzzMonet release=actions subs=74,78
 ```
 
 ## 📄 License

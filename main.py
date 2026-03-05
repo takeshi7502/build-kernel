@@ -980,7 +980,7 @@ def main():
     app.add_handler(CommandHandler("keys", cmd_keys, filters=filters.User(user_id=config.OWNER_ID)))
 
     # Admin commands (owner + static admins in .env)
-    app.add_handler(CommandHandler("status", cmd_status))
+    app.add_handler(CommandHandler("st", cmd_status))
     app.add_handler(CommandHandler("list", cmd_list))
     app.add_handler(CommandHandler("ping", cmd_ping))
     app.add_handler(CallbackQueryHandler(cb_list_page, pattern=r"^listpage:\d+$"))

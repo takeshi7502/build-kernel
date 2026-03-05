@@ -6,6 +6,7 @@ os.environ.pop("ALL_PROXY", None)
 os.environ["AIOHTTP_NO_EXTENSIONS"] = "1"
 
 import asyncio
+import json
 import logging
 import shlex
 from datetime import datetime, timezone, timedelta
@@ -70,6 +71,7 @@ if not GKI_WORKFLOWS:
 
 WORKFLOW_FILE = list(GKI_WORKFLOWS.values())[0]
 ALLOWED_CHAT_IDS = set(_parse_int_list(os.getenv("USERBOT_ALLOWED_CHAT_IDS", "")))
+DATA_JSON = os.getenv("USERBOT_DATA_FILE", "data.json").strip() or "data.json"
 
 TARGET_KEYS = ["build_a12_5_10", "build_a13_5_15", "build_a14_6_1", "build_a15_6_6"]
 TARGET_ALIASES = {
@@ -311,22 +313,33 @@ def _is_allowed_chat(chat_id: Optional[int]) -> bool:
         return True
     return chat_id in ALLOWED_CHAT_IDS
 
+def _load_shared_data() -> Dict[str, Any]:
+    if not os.path.exists(DATA_JSON):
+        return {"keys": {}, "jobs": [], "messages": {}}
+    try:
+        with open(DATA_JSON, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            if isinstance(data, dict):
+                return data
+    except Exception:
+        pass
+    return {"keys": {}, "jobs": [], "messages": {}}
 
 HELP_TEXT = (
     "GKI User Mode commands:\n"
-    "/ping\n"
-    "/status\n"
-    "/list [page]\n"
-    "/cancel <run_id>\n"
-    "/gki [key=value ...]\n\n"
-    "Supported /gki keys:\n"
+    "/pings\n"
+    "/sts\n/keyss\n"
+    "/lists [page]\n"
+    "/cancels <run_id>\n"
+    "/gkis [key=value ...]\n\n"
+    "Supported /gkis keys:\n"
     "variant=..., branch=stable|dev, version=..., build_time=...\n"
     "zram=true|false, bbg=true|false, kpm=true|false, susfs=true|false\n"
     "target=a12|a13|a14|a15 (hoac build_a12_5_10, ...)\n"
     "subs=all|66,81,101\n"
     "release=actions|pre-release|release\n\n"
     "Example:\n"
-    "/gki target=a13 variant=ReSukiSU version=HzzMonet release=actions subs=74,78"
+    "/gkis target=a13 variant=ReSukiSU version=HzzMonet release=actions subs=74,78"
 )
 
 
@@ -338,21 +351,15 @@ async def _reply(event, text: str):
     await event.reply(text, link_preview=False)
 
 
-@client.on(events.NewMessage(pattern=r"^/help(?:@\w+)?$"))
-async def help_cmd(event):
-    if not event.out or not _is_allowed_chat(event.chat_id):
-        return
-    await _reply(event, HELP_TEXT)
 
-
-@client.on(events.NewMessage(pattern=r"^/ping(?:@\w+)?$"))
+@client.on(events.NewMessage(pattern=r"^/pings(?:@\w+)?$"))
 async def ping_cmd(event):
     if not event.out or not _is_allowed_chat(event.chat_id):
         return
     await _reply(event, "Pong. User mode is running.")
 
 
-@client.on(events.NewMessage(pattern=r"^/status(?:@\w+)?$"))
+@client.on(events.NewMessage(pattern=r"^/sts(?:@\w+)?$"))
 async def status_cmd(event):
     if not event.out or not _is_allowed_chat(event.chat_id):
         return
@@ -388,7 +395,32 @@ async def status_cmd(event):
     await _reply(event, "\n".join(lines))
 
 
-@client.on(events.NewMessage(pattern=r"^/list(?:@\w+)?(?:\s+(\d+))?$"))
+
+@client.on(events.NewMessage(pattern=r"^/keyss(?:@\w+)?$"))
+async def keyss_cmd(event):
+    if not event.out or not _is_allowed_chat(event.chat_id):
+        return
+
+    data = _load_shared_data()
+    keys_obj = data.get("keys", {}) if isinstance(data, dict) else {}
+    if not isinstance(keys_obj, dict) or not keys_obj:
+        await _reply(event, "Chua co key nao trong data dung chung.")
+        return
+
+    lines = ["Danh sach key (shared data):"]
+    for idx, (code, info) in enumerate(keys_obj.items(), start=1):
+        uses = 0
+        if isinstance(info, dict):
+            try:
+                uses = int(info.get("uses", 0))
+            except Exception:
+                uses = 0
+        status = "con luot" if uses > 0 else "het luot"
+        lines.append(f"{idx}. {code} -> {uses} ({status})")
+
+    await _reply(event, "\n".join(lines))
+
+@client.on(events.NewMessage(pattern=r"^/lists(?:@\w+)?(?:\s+(\d+))?$"))
 async def list_cmd(event):
     if not event.out or not _is_allowed_chat(event.chat_id):
         return
@@ -441,7 +473,7 @@ async def list_cmd(event):
     await _reply(event, "\n\n".join(lines))
 
 
-@client.on(events.NewMessage(pattern=r"^/cancel(?:@\w+)?\s+(\d+)$"))
+@client.on(events.NewMessage(pattern=r"^/cancels(?:@\w+)?\s+(\d+)$"))
 async def cancel_cmd(event):
     if not event.out or not _is_allowed_chat(event.chat_id):
         return
@@ -466,7 +498,7 @@ async def cancel_cmd(event):
     await _reply(event, f"Chua xac nhan duoc trang thai cua run #{run_id}. Kiem tra tren GitHub.")
 
 
-@client.on(events.NewMessage(pattern=r"^/gki(?:@\w+)?(?:\s+(.+))?$"))
+@client.on(events.NewMessage(pattern=r"^/gkis(?:@\w+)?(?:\s+(.+))?$"))
 async def gki_cmd(event):
     if not event.out or not _is_allowed_chat(event.chat_id):
         return
@@ -497,7 +529,7 @@ async def gki_cmd(event):
         await _reply(
             event,
             f"Dang co tien trinh khac chay (run #{run_id}).\n"
-            f"Vui long doi xong roi gui lai /gki.\n{run_url}",
+            f"Vui long doi xong roi gui lai /gkis.\n{run_url}",
         )
         return
 
