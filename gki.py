@@ -17,9 +17,10 @@ from permissions import is_admin
     GKI_TOGGLE_KPM,
     GKI_TOGGLE_SUSFS,
     GKI_BUILD_TARGET,
+    GKI_SUB_VERSION,
     GKI_RELEASE_TYPE,
     GKI_CONFIRM
-) = range(11)
+) = range(12)
 
 VARIANTS = ["SukiSU", "ReSukiSU", "Official", "Next", "MKSU"]
 BRANCHES = ["Stable(标准)", "Dev(开发)"]
@@ -30,6 +31,14 @@ BUILD_TARGETS = [
     ("Android 14 - 6.1", "build_a14_6_1"),
     ("Android 15 - 6.6", "build_a15_6_6"),
 ]
+
+# Sub-version (sub_level) lists per build target
+SUB_LEVELS = {
+    "build_a12_5_10": ["66","81","101","110","117","136","149","160","168","177","185","198","205","209","218","226","233","236","237","240","246"],
+    "build_a13_5_15": ["74","78","94","104","119","123","137","144","148","149","151","153","167","170","178","180","185","189","194"],
+    "build_a14_6_1": ["25","43","57","68","75","78","84","90","93","99","112","115","118","124","128","129","134","138","141","145","157"],
+    "build_a15_6_6": ["50","56","57","58","66","77","82","87","89","92","98","102","118"],
+}
 
 
 def _kb_from_list(prefix: str, values: List[str]):
@@ -78,10 +87,16 @@ async def _ensure_owner(update: Update, context: ContextTypes.DEFAULT_TYPE) -> b
         return True
         
     try:
-        await update.callback_query.answer("Phiên này không thuộc về bạn.", show_alert=True)
+        await update.callback_query.answer()
     except Exception:
         pass
     return False
+
+
+def _task_header(context) -> str:
+    owner_name = context.chat_data.get("gki_owner_name", "Unknown")
+    owner_id = context.chat_data.get("gki_owner", 0)
+    return f'📋 <b>Task by <a href="tg://user?id={owner_id}">{owner_name}</a></b>\n\n'
 
 
 async def _safe_delete(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_id: int):
@@ -155,6 +170,7 @@ class GKIFlow:
         await _safe_delete(context, chat_id, update.message.message_id)
 
         context.chat_data["gki_owner"] = update.effective_user.id
+        context.chat_data["gki_owner_name"] = update.effective_user.full_name
         context.user_data["gki"] = {"inputs": {
             "kernelsu_variant": "SukiSU",
             "kernelsu_branch": "Stable(标准)",
@@ -168,13 +184,17 @@ class GKIFlow:
             "build_a13_5_15": False,
             "build_a14_6_1": False,
             "build_a15_6_6": False,
+            "build_all": False,
             "release_type": "Actions",
+            "sub_levels": "",
         }}
 
+        header = _task_header(context)
         msg = await context.bot.send_message(
             chat_id=chat_id,
-            text="Chọn KernelSU variant:",
-            reply_markup=_kb_from_list("gkivar", VARIANTS)
+            text=header + "Chọn KernelSU variant:",
+            reply_markup=_kb_from_list("gkivar", VARIANTS),
+            parse_mode="HTML"
         )
         context.user_data["gki_bot_msg_id"] = msg.message_id
         return GKI_VARIANT
@@ -184,7 +204,7 @@ class GKIFlow:
             return ConversationHandler.END
         q = update.callback_query
         await q.answer()
-        await q.edit_message_text("❌ Đã huỷ phiên. (Tin nhắn này sẽ tự xoá sau 60s)")
+        await q.edit_message_text("❌ Đã huỷ phiên.")
         
         if context.job_queue:
             context.job_queue.run_once(
@@ -203,7 +223,8 @@ class GKIFlow:
         q = update.callback_query; await q.answer()
         _, val = q.data.split(":", 1)
         context.user_data["gki"]["inputs"]["kernelsu_variant"] = val
-        await q.edit_message_text("Chọn nhánh KernelSU:", reply_markup=_kb_from_list("gkibr", BRANCHES))
+        header = _task_header(context)
+        await q.edit_message_text(header + "Chọn nhánh KernelSU:", reply_markup=_kb_from_list("gkibr", BRANCHES), parse_mode="HTML")
         return GKI_BRANCH
 
     # === BRANCH ===
@@ -216,9 +237,10 @@ class GKIFlow:
             [InlineKeyboardButton("⏭️ Dùng mặc định", callback_data="gkiver:none")],
             [InlineKeyboardButton("❌ Hủy", callback_data="gki:cancel")]
         ])
+        header = _task_header(context)
         await q.edit_message_text(
-            "⏭️ Nhập `tên version`.\nVD: JinYan thì sẽ có dạng: 5.10.209-JinYan\nHoặc bấm nút để bỏ qua.",
-            reply_markup=kb, parse_mode="Markdown"
+            header + "⏭️ Nhập <code>tên version</code>.\nVD: JinYan thì sẽ có dạng: 5.10.209-JinYan\nHoặc bấm nút để bỏ qua.",
+            reply_markup=kb, parse_mode="HTML"
         )
         return GKI_VERSION
 
@@ -242,9 +264,10 @@ class GKIFlow:
             [InlineKeyboardButton("⏭️ Dùng mặc định", callback_data="gkibtime:none")],
             [InlineKeyboardButton("❌ Hủy", callback_data="gki:cancel")]
         ])
+        header = _task_header(context)
         await _update_bot_msg(context, chat_id,
-            "⏭️ Nhập `build_time`.\nHoặc bấm nút để dùng mặc định.",
-            reply_markup=kb, parse_mode="Markdown")
+            header + "⏭️ Nhập <code>build_time</code>.\nHoặc bấm nút để dùng mặc định.",
+            reply_markup=kb, parse_mode="HTML")
         return GKI_BUILD_TIME
 
     # === BUILD TIME (text input or button) ===
@@ -259,7 +282,8 @@ class GKIFlow:
             context.user_data["gki"]["inputs"]["build_time"] = "" if txt.lower() == "none" else txt
             await _safe_delete(context, chat_id, update.message.message_id)
             
-        await _update_bot_msg(context, chat_id, "Bật ZRAM? (mặc định: bật)", reply_markup=_yes_no("gkizr"))
+        header = _task_header(context)
+        await _update_bot_msg(context, chat_id, header + "Bật ZRAM? (mặc định: bật)", reply_markup=_yes_no("gkizr"), parse_mode="HTML")
         return GKI_TOGGLE_ZRAM
 
     # === TOGGLES ===
@@ -268,7 +292,8 @@ class GKIFlow:
         q = update.callback_query; await q.answer()
         _, val = q.data.split(":", 1)
         context.user_data["gki"]["inputs"]["use_zram"] = (val == "true")
-        await q.edit_message_text("Bật BBG? (mặc định: bật)", reply_markup=_yes_no("gkibb"))
+        header = _task_header(context)
+        await q.edit_message_text(header + "Bật BBG? (mặc định: bật)", reply_markup=_yes_no("gkibb"), parse_mode="HTML")
         return GKI_TOGGLE_BBG
 
     async def toggle_bbg(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -276,7 +301,8 @@ class GKIFlow:
         q = update.callback_query; await q.answer()
         _, val = q.data.split(":", 1)
         context.user_data["gki"]["inputs"]["use_bbg"] = (val == "true")
-        await q.edit_message_text("Bật KPM? (mặc định: bật)", reply_markup=_yes_no("gkikpm"))
+        header = _task_header(context)
+        await q.edit_message_text(header + "Bật KPM? (mặc định: bật)", reply_markup=_yes_no("gkikpm"), parse_mode="HTML")
         return GKI_TOGGLE_KPM
 
     async def toggle_kpm(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -284,7 +310,8 @@ class GKIFlow:
         q = update.callback_query; await q.answer()
         _, val = q.data.split(":", 1)
         context.user_data["gki"]["inputs"]["use_kpm"] = (val == "true")
-        await q.edit_message_text("Tắt SUSFS? (mặc định: không tắt)", reply_markup=_yes_no("gkisusfs"))
+        header = _task_header(context)
+        await q.edit_message_text(header + "Tắt SUSFS? (mặc định: không tắt)", reply_markup=_yes_no("gkisusfs"), parse_mode="HTML")
         return GKI_TOGGLE_SUSFS
 
     async def toggle_susfs(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -293,8 +320,9 @@ class GKIFlow:
         _, val = q.data.split(":", 1)
         context.user_data["gki"]["inputs"]["cancel_susfs"] = (val == "true")
         # Hiển thị chọn build target (chỉ được chọn 1)
-        await q.edit_message_text("Chọn phiên bản Android để build:",
-                                  reply_markup=_build_target_keyboard())
+        header = _task_header(context)
+        await q.edit_message_text(header + "Chọn phiên bản Android để build:",
+                                  reply_markup=_build_target_keyboard(), parse_mode="HTML")
         return GKI_BUILD_TARGET
 
     # === BUILD TARGET (single-select) ===
@@ -304,14 +332,105 @@ class GKIFlow:
         _, key = q.data.split(":", 1)
 
         inputs = context.user_data["gki"]["inputs"]
-        # Tắt hết rồi chỉ
-        #  bật cái được chọn
+        # Tắt hết rồi chỉ bật cái được chọn
         for _, k in BUILD_TARGETS:
             inputs[k] = (k == key)
 
-        # Chuyển thẳng sang chọn release type
-        await q.edit_message_text("Chọn loại release: (Nên chọn Actions)", reply_markup=_kb_from_list("gkirel", RELEASE_TYPES))
-        return GKI_RELEASE_TYPE
+        # Lưu target key và khởi tạo selected sub-versions = all
+        context.user_data["gki"]["selected_target"] = key
+        available = SUB_LEVELS.get(key, [])
+        context.user_data["gki"]["selected_subs"] = set()  # mặc định không chọn gì
+
+        # Hiển thị chọn sub-version
+        header = _task_header(context)
+        target_label = next((label for label, k in BUILD_TARGETS if k == key), key)
+        kb = self._sub_version_keyboard(context)
+        await q.edit_message_text(
+            header + f"Chọn sub-version cho <b>{target_label}</b>:\n"
+                     f"<i>(Bấm để bật/tắt, ✅ = sẽ build)</i>",
+            reply_markup=kb, parse_mode="HTML")
+        return GKI_SUB_VERSION
+
+    # === SUB-VERSION KEYBOARD BUILDER ===
+    def _sub_version_keyboard(self, context):
+        target_key = context.user_data["gki"]["selected_target"]
+        available = SUB_LEVELS.get(target_key, [])
+        selected = context.user_data["gki"]["selected_subs"]
+        all_selected = len(selected) == len(available)
+
+        rows = []
+        # Build All toggle
+        all_icon = "✅" if all_selected else "⬜"
+        rows.append([InlineKeyboardButton(f"{all_icon} Build All", callback_data="gkisub:all")])
+
+        # Sub-version buttons (4 per row)
+        row = []
+        for sv in available:
+            icon = "✅" if sv in selected else "⬜"
+            row.append(InlineKeyboardButton(f"{icon} .{sv}", callback_data=f"gkisub:{sv}"))
+            if len(row) == 4:
+                rows.append(row)
+                row = []
+        if row:
+            rows.append(row)
+
+        # Confirm + Cancel
+        rows.append([
+            InlineKeyboardButton("➡️ Tiếp tục", callback_data="gkisub:done"),
+            InlineKeyboardButton("❌ Hủy", callback_data="gki:cancel")
+        ])
+        return InlineKeyboardMarkup(rows)
+
+    # === SUB-VERSION TOGGLE ===
+    async def toggle_sub_version(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await _ensure_owner(update, context): return GKI_SUB_VERSION
+        q = update.callback_query; await q.answer()
+        _, val = q.data.split(":", 1)
+
+        target_key = context.user_data["gki"]["selected_target"]
+        available = SUB_LEVELS.get(target_key, [])
+        selected = context.user_data["gki"]["selected_subs"]
+
+        if val == "done":
+            # Validate at least 1 selected
+            if not selected:
+                await q.answer("⚠️ Chọn ít nhất 1 sub-version!", show_alert=True)
+                return GKI_SUB_VERSION
+            # Save sub_levels to inputs
+            if len(selected) == len(available):
+                context.user_data["gki"]["inputs"]["sub_levels"] = ""  # empty = all
+            else:
+                context.user_data["gki"]["inputs"]["sub_levels"] = ",".join(sorted(selected, key=lambda x: int(x)))
+            # Move to release type
+            header = _task_header(context)
+            await q.edit_message_text(header + "Chọn loại release: (Nên chọn Actions)", reply_markup=_kb_from_list("gkirel", RELEASE_TYPES), parse_mode="HTML")
+            return GKI_RELEASE_TYPE
+
+        if val == "all":
+            # Toggle all
+            if len(selected) == len(available):
+                selected.clear()
+            else:
+                selected.update(available)
+        else:
+            # Toggle single
+            if val in selected:
+                selected.discard(val)
+            else:
+                selected.add(val)
+
+        context.user_data["gki"]["selected_subs"] = selected
+        # Update keyboard
+        header = _task_header(context)
+        target_label = next((label for label, k in BUILD_TARGETS if k == target_key), target_key)
+        count = len(selected)
+        total = len(available)
+        kb = self._sub_version_keyboard(context)
+        await q.edit_message_text(
+            header + f"Chọn sub-version cho <b>{target_label}</b>:\n"
+                     f"<i>(Đã chọn: {count}/{total})</i>",
+            reply_markup=kb, parse_mode="HTML")
+        return GKI_SUB_VERSION
 
     # === RELEASE TYPE ===
     async def set_release_type(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -329,8 +448,9 @@ class GKIFlow:
             [InlineKeyboardButton("✅ Xác nhận", callback_data="gkiconfirm")],
             [InlineKeyboardButton("❌ Hủy", callback_data="gki:cancel")]
         ])
+        header = _task_header(context)
         await q.edit_message_text(
-            f"<b>Xác nhận build GKI</b>\n<pre>{pretty}</pre>",
+            header + f"<b>Xác nhận build GKI</b>\n<pre>{pretty}</pre>",
             reply_markup=kb, parse_mode="HTML"
         )
         return GKI_CONFIRM
@@ -378,10 +498,9 @@ class GKIFlow:
             # Tính thời gian ước tính còn lại (giả sử tổng ~45 phút)
             eta_line = ""
             if busy_run and busy_run.get("created_at"):
-                from datetime import datetime, timezone
                 try:
-                    created = datetime.fromisoformat(busy_run["created_at"].replace("Z", "+00:00"))
-                    elapsed = (datetime.now(timezone.utc) - created).total_seconds()
+                    created_dt = datetime.fromisoformat(busy_run["created_at"].replace("Z", "+00:00"))
+                    elapsed = (datetime.now(timezone.utc) - created_dt).total_seconds()
                     remaining = max(0, 2700 - elapsed)  # 2700s = 45 phút
                     rem_m = int(remaining // 60)
                     if rem_m > 0:
@@ -475,6 +594,7 @@ def build_gki_conversation(gh, storage, config):
             GKI_TOGGLE_KPM: [CallbackQueryHandler(flow.toggle_kpm, pattern=r"^gkikpm:(true|false)$"), cancel_handler],
             GKI_TOGGLE_SUSFS: [CallbackQueryHandler(flow.toggle_susfs, pattern=r"^gkisusfs:(true|false)$"), cancel_handler],
             GKI_BUILD_TARGET: [CallbackQueryHandler(flow.set_build_target, pattern=r"^gkitgt:.+"), cancel_handler],
+            GKI_SUB_VERSION: [CallbackQueryHandler(flow.toggle_sub_version, pattern=r"^gkisub:.+"), cancel_handler],
             GKI_RELEASE_TYPE: [CallbackQueryHandler(flow.set_release_type, pattern=r"^gkirel:.+"), cancel_handler],
             GKI_CONFIRM: [CallbackQueryHandler(flow.do_dispatch, pattern=r"^gkiconfirm$"), cancel_handler],
         },

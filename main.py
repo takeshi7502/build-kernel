@@ -613,45 +613,71 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_admin(user.id, storage):
         return
 
-    jobs = await storage.get_jobs()
-    active_jobs = [j for j in jobs if j.get("status") in ("dispatched", "in_progress")]
+    gh: GitHubAPI = context.application.bot_data["gh"]
     
-    if not active_jobs:
+    # Lấy thông tin run trực tiếp từ GitHub để luôn chính xác nhất
+    active_runs = []
+    for status in ["in_progress", "queued"]:
+        url = f"{gh.base}/repos/{config.GITHUB_OWNER}/{config.GKI_REPO}/actions/runs?status={status}&per_page=10"
+        res = await gh._request("GET", url)
+        if res.get("status") == 200:
+            runs = res["json"].get("workflow_runs", [])
+            for r in runs:
+                # Lọc đúng branch
+                if r.get("head_branch") == config.GKI_DEFAULT_BRANCH:
+                    active_runs.append(r)
+
+    if not active_runs:
         m = await update.message.reply_text("ℹ️ Hiện không có tiến trình build nào đang chạy.")
-        context.job_queue.run_once(_del_msg_job, when=60, chat_id=m.chat_id, data=m.message_id)
+        if context.job_queue:
+            context.job_queue.run_once(_del_msg_job, when=60, chat_id=m.chat_id, data=m.message_id)
+            if update.message:
+                context.job_queue.run_once(_del_msg_job, when=60, chat_id=update.message.chat_id, data=update.message.message_id)
         return
 
-    for job in active_jobs:
-        job_id = job.get("_id")
-        created_at = datetime.fromisoformat(job.get("created_at"))
-        elapsed = datetime.now(timezone.utc) - created_at
+    # Lấy danh sách jobs local để map user_id nếu có
+    jobs = await storage.get_jobs()
+    run_to_job = {j.get("run_id"): j for j in jobs if j.get("run_id")}
+
+    for run in active_runs:
+        run_id = run["id"]
+        status = run["status"]
+        name = run.get("name") or run.get("display_title") or "workflow"
         
-        # Estimate remaining time: assume 45 minutes total (2700 seconds)
-        total_estimated_s = 2700
-        remaining_s = max(0, total_estimated_s - elapsed.total_seconds())
-        rem_m, rem_s = divmod(remaining_s, 60)
-        
-        mention = f'<a href="tg://user?id={job.get("user_id")}">{job.get("user_name", job.get("user_id"))}</a>'
+        created_at_str = run.get("created_at")
+        elapsed_min = 0
+        rem_m = 45
+        if created_at_str:
+            try:
+                created_at = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
+                elapsed = datetime.now(timezone.utc) - created_at
+                elapsed_min = int(elapsed.total_seconds() // 60)
+                remaining_s = max(0, 2700 - elapsed.total_seconds())
+                rem_m = int(remaining_s // 60)
+            except:
+                pass
+
+        job = run_to_job.get(run_id, {})
+        user_id = job.get("user_id", "Unknown")
+        user_name = job.get("user_name", "Unknown")
+        if user_id != "Unknown":
+            mention = f'<a href="tg://user?id={user_id}">{user_name}</a>'
+        else:
+            mention = "GitHub / Manual"
+
         text = (
-            f"🔄 <b>Job #{job_id} đang chạy</b>\n"
+            f"🔄 <b>Run #{run_id} đang chạy</b>\n"
             f"👤 Yêu cầu bởi: {mention}\n"
-            f"⏱️ Đã chạy: {int(elapsed.total_seconds() // 60)} phút\n"
-            f"⏳ Ước tính còn: ~{int(rem_m)} phút\n"
-            f"🔗 Tình trạng: <b>{job.get('status')}</b>"
+            f"⏱️ Đã chạy: {elapsed_min} phút\n"
+            f"⏳ Ước tính còn: ~{rem_m} phút\n"
+            f"🔗 Tình trạng: <b>{status}</b> ({name[:20]})"
         )
         
+        url = f"https://github.com/{config.GITHUB_OWNER}/{config.GKI_REPO}/actions/runs/{run_id}"
         buttons = [
-            [InlineKeyboardButton("Đang lấy link...", callback_data="none")],
-            [InlineKeyboardButton("Hủy Build ❌", callback_data=f"runctl:cancel:gki:{job.get('run_id', 0)}")]
+            [InlineKeyboardButton("Xem trên GitHub 🌐", url=url)],
+            [InlineKeyboardButton("Hủy Build ❌", callback_data=f"runctl:cancel:gki:{run_id}:{update.message.message_id}")]
         ]
-        
-        # If we have a run_id, give proper github links
-        if job.get("run_id"):
-            run_id = job["run_id"]
-            repo = job["repo"]
-            url = f"https://github.com/{config.GITHUB_OWNER}/{repo}/actions/runs/{run_id}"
-            buttons[0] = [InlineKeyboardButton("Xem trên GitHub 🌐", url=url)]
-            
         buttons.append([InlineKeyboardButton("❌ Đóng", callback_data=f"closemsg:{update.message.message_id}")])
         kb = InlineKeyboardMarkup(buttons)
         await update.message.reply_text(text, parse_mode=constants.ParseMode.HTML, reply_markup=kb)
@@ -662,110 +688,103 @@ def _run_button_text(repo_label: str, run: dict) -> str:
     name = run.get("name") or run.get("display_title") or "workflow"
     return f"{repo_label} • #{n} • {status} • {name[:24]}"
 
-async def show_list_page(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int, message_to_edit=None, cmd_msg_id: int = 0):
+async def show_list_page(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 1, message_to_edit=None, cmd_msg_id=0):
     gh: GitHubAPI = context.application.bot_data["gh"]
-    storage: StorageBase = context.application.bot_data["storage"]
     repo = config.GKI_REPO
-    
-    builds = await storage.get_successful_builds()
-    if not builds:
-        # Tự động lấy lịch sử cũ nếu chưa có
-        url = f"{gh.base}/repos/{config.GITHUB_OWNER}/{repo}/actions/runs?status=success&per_page=10"
-        out = await gh._request("GET", url)
-        runs = out.get("json", {}).get("workflow_runs", []) if isinstance(out.get("json"), dict) else []
-        for r in reversed(runs):
-            # parse the time dummy
-            try:
-                dt_obj = datetime.strptime(r["created_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-            except Exception:
-                dt_obj = datetime.now(timezone.utc)
-            # manually inject to cache
-            build = {
-                "run_id": r["id"],
-                "user_id": 0, # Unknown old user
-                "branch": r.get("head_branch", "unknown"),
-                "timestamp": dt_obj.isoformat()
-            }
-            storage_data = storage._load()
-            bl = storage_data.setdefault("successful_builds", [])
-            bl.insert(0, build)
-            storage_data["successful_builds"] = bl[:50]
-            storage._save(storage_data)
-        
-        builds = await storage.get_successful_builds()
 
-    if not builds:
-        text = "Chưa có bản build thành công nào được lưu."
+    url = f"{gh.base}/repos/{config.GITHUB_OWNER}/{repo}/actions/runs?status=completed&per_page=100"
+    res = await gh._request("GET", url)
+    if res.get("status") == 200:
+        github_runs = res["json"].get("workflow_runs", [])
+    else:
+        github_runs = []
+
+    workflow_files = list(config.GKI_WORKFLOWS.values())
+
+    def _is_target_success_run(run: dict) -> bool:
+        # GitHub list-runs endpoint có thể trả về nhiều workflow/conclusion,
+        # nên lọc lại thủ công để khớp với "build GKI thành công".
+        if run.get("status") != "completed":
+            return False
+        if run.get("conclusion") != "success":
+            return False
+        if run.get("head_branch") != config.GKI_DEFAULT_BRANCH:
+            return False
+        run_path = run.get("path", "")
+        if workflow_files and not any(wf in run_path for wf in workflow_files):
+            return False
+        return True
+
+    github_runs = [r for r in github_runs if _is_target_success_run(r)]
+
+    if not github_runs:
+        text = "ℹ️ Hiện không có lịch sử build GKI nào thành công."
         if message_to_edit:
             return await message_to_edit.edit_text(text)
         else:
             return await update.message.reply_text(text)
-            
+
     items_per_page = 5
-    total_pages = max(1, (len(builds) + items_per_page - 1) // items_per_page)
-    if page < 1: page = total_pages
-    if page > total_pages: page = 1
-    
+    total_pages = max(1, (len(github_runs) + items_per_page - 1) // items_per_page)
+    if page < 1:
+        page = total_pages
+    if page > total_pages:
+        page = 1
+
     start_idx = (page - 1) * items_per_page
     end_idx = start_idx + items_per_page
-    current_builds = builds[start_idx:end_idx]
-    
+    current_builds = github_runs[start_idx:end_idx]
+
+    storage: StorageBase = context.application.bot_data["storage"]
+    jobs = await storage.get_jobs()
+    run_to_job = {j.get("run_id"): j for j in jobs if j.get("run_id")}
+
     if message_to_edit:
         await message_to_edit.edit_text("⏳ Đang tải thông tin trang...")
     else:
         message_to_edit = await update.message.reply_text("⏳ Đang tải thông tin trang...")
-        
-    text = f"🗂 **Danh sách các bản build GKI thành công (Trang {page}/{total_pages})**\n\n"
-    
+
+    text = f"🗂 <b>Danh sách các bản build GKI thành công (Trang {page}/{total_pages})</b>\n\n"
+
     # Render text for the 5 items
-    for i, b in enumerate(current_builds):
-        run_id = b["run_id"]
-        user_id = b["user_id"]
-        branch = b["branch"]
-        
-        # Format time
+    for i, r in enumerate(current_builds):
+        run_id = r["id"]
+        branch = r.get("head_branch", "unknown")
+
         try:
-            dt = datetime.fromisoformat(b["timestamp"]).replace(tzinfo=timezone.utc)
-            dt_local = dt + timedelta(hours=7)
+            dt_obj = datetime.fromisoformat(r["created_at"].replace("Z", "+00:00"))
+            dt_local = dt_obj + timedelta(hours=7)
             time_str = dt_local.strftime("%H:%M %d/%m/%Y")
-        except:
+        except Exception:
             time_str = "Unknown"
-            
+
         repo_url = f"https://github.com/{config.GITHUB_OWNER}/{repo}"
-        html_url = f"{repo_url}/actions/runs/{run_id}"
-        
-        # Tạo trang Telegraph cho artifacts
-        telegraph: TelegraphAPI = context.application.bot_data.get("telegraph")
-        artifacts = await gh.list_artifacts_for_run(repo, run_id)
-        telegraph_url = None
-        if artifacts["status"] == 200:
-            arr = artifacts["json"].get("artifacts", [])
-            if arr and telegraph:
-                telegraph_url = await telegraph.create_artifacts_page(
-                    title=f"Build GKI #{run_id}",
-                    artifacts=arr, repo=repo,
-                    run_id=run_id, owner=config.GITHUB_OWNER
-                )
-        
-        if telegraph_url:
-            artifact_str = f"<a href='{telegraph_url}'>📦 Xem & Tải file</a>"
-        else:
-            artifact_str = "Không có file"
-        
-        if user_id == 0:
-            mention = "Hệ thống cũ"
-        else:
-            user_name = b.get("user_name", "")
+        html_url = r.get("html_url", f"{repo_url}/actions/runs/{run_id}")
+
+        # Dùng nightly.link theo run_id để mở trang tải artifacts trực tiếp.
+        # Cách này tránh gọi artifacts API cho từng item nên list load nhanh hơn.
+        nightly_url = f"https://nightly.link/{config.GITHUB_OWNER}/{repo}/actions/runs/{run_id}"
+        artifact_str = f"<a href='{nightly_url}'>📦 Mở trang tải file</a>"
+
+        job = run_to_job.get(run_id)
+        if job:
+            user_id = job.get("user_id")
+            user_name = job.get("user_name", "")
             if not user_name:
                 user_name = str(user_id)
-            mention = f'<a href="tg://user?id={user_id}">{user_name}</a>'
-            
-        text += f"**{start_idx + i + 1}. Build #{run_id}**\n"
+            if user_id == 0:
+                mention = "Hệ thống cũ"
+            else:
+                mention = f'<a href="tg://user?id={user_id}">{user_name}</a>'
+        else:
+            actor = r.get("actor", {}).get("login", "Unknown")
+            mention = f"GitHub / {actor}"
+
+        text += f"<b>{start_idx + i + 1}. Run #{run_id}</b>\n"
         text += f"👤 Từ: {mention} | 🌿 Nhánh: <code>{branch}</code>\n"
         text += f"🕒 {time_str} | 🔗 <a href='{html_url}'>GitHub</a>\n"
         text += f"📦 Tải về: {artifact_str}\n\n"
-        
-    # Pagination buttons + Close
+
     kb = []
     if total_pages > 1:
         kb.append([
@@ -776,7 +795,6 @@ async def show_list_page(update: Update, context: ContextTypes.DEFAULT_TYPE, pag
     kb.append([InlineKeyboardButton("❌ Đóng", callback_data=f"closemsg:{cmd_msg_id}")])
     reply_markup = InlineKeyboardMarkup(kb)
     await message_to_edit.edit_text(text, parse_mode=constants.ParseMode.HTML, reply_markup=reply_markup, disable_web_page_preview=True)
-
 
 async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -829,21 +847,70 @@ async def cb_run_control_action(update: Update, context: ContextTypes.DEFAULT_TY
     gh: GitHubAPI = context.application.bot_data["gh"]
     q = update.callback_query
     await q.answer()
-    _, action, repo_tag, run_id_str = q.data.split(":", 3)
-    run_id = int(run_id_str)
+    
+    parts = q.data.split(":")
+    action = parts[1]
+    repo_tag = parts[2]
+    run_id = int(parts[3])
+    cmd_msg_id = None
+    if len(parts) > 4 and parts[4].isdigit():
+        cmd_msg_id = int(parts[4])
+
     repo = config.GKI_REPO
     if action == "cancel":
+        # 1. Hiển thị trạng thái đang hủy
+        await q.edit_message_text(f"⏳ Đang gửi lệnh hủy run #{run_id}...")
+        
+        # 2. Gửi lệnh hủy
         res = await gh.cancel_run(repo, run_id)
-        if res["status"] in (202, 204):
-            # Đợi 1 chút rồi xóa luôn run dở
-            import asyncio
+        if res["status"] not in (202, 204):
+            await q.edit_message_text(f"❌ Gửi lệnh hủy thất bại: HTTP {res['status']}")
+            return
+        
+        # 3. Cập nhật trạng thái đang chờ
+        await q.edit_message_text(f"⏳ Đã gửi lệnh hủy run #{run_id}.\nĐang chờ xác nhận từ GitHub...")
+        
+        # 4. Poll cho đến khi run thực sự cancelled (tối đa 60s)
+        import asyncio
+        for i in range(20):  # 20 x 3s = 60s
             await asyncio.sleep(3)
-            await gh.delete_run(repo, run_id)
-            m = await q.edit_message_text(f"✅ Đã hủy và xóa run #{run_id}.")
-        else:
-            m = await q.edit_message_text(f"❌ Hủy thất bại: {res['status']}")
-        if context.job_queue and m:
-            context.job_queue.run_once(_del_msg_job, when=60, chat_id=m.chat_id, data=m.message_id)
+            check = await gh.get_run(repo, run_id)
+            if check.get("status") == 200:
+                run_data = check.get("json", {})
+                run_status = run_data.get("status", "")
+                conclusion = run_data.get("conclusion", "")
+                if run_status == "completed":
+                    if conclusion == "cancelled":
+                        await q.edit_message_text(
+                            f"✅ <b>Đã hủy thành công!</b>\n\n"
+                            f"Run #{run_id} đã được hủy.",
+                            parse_mode="HTML"
+                        )
+                    else:
+                        await q.edit_message_text(
+                            f"ℹ️ Run #{run_id} đã hoàn tất với kết quả: <b>{conclusion}</b>",
+                            parse_mode="HTML"
+                        )
+                    # Xóa tin nhắn lệnh gốc
+                    if cmd_msg_id:
+                        try:
+                            await context.bot.delete_message(chat_id=q.message.chat_id, message_id=cmd_msg_id)
+                        except Exception:
+                            pass
+                    # Tự xóa sau 60s
+                    if context.job_queue:
+                        context.job_queue.run_once(_del_msg_job, when=60, chat_id=q.message.chat_id, data=q.message.message_id)
+                    return
+        
+        # Timeout - vẫn chưa cancelled sau 60s
+        await q.edit_message_text(
+            f"⚠️ Đã gửi lệnh hủy run #{run_id} nhưng chưa xác nhận được.\n"
+            f"Vui lòng kiểm tra trên GitHub.",
+            parse_mode="HTML"
+        )
+        if context.job_queue:
+            context.job_queue.run_once(_del_msg_job, when=60, chat_id=q.message.chat_id, data=q.message.message_id)
+            
     elif action == "close":
         # Xóa cả tin nhắn bot và lệnh gọi
         chat_id = q.message.chat_id
@@ -851,11 +918,12 @@ async def cb_run_control_action(update: Update, context: ContextTypes.DEFAULT_TY
             await q.delete_message()
         except Exception:
             pass
-        # run_id_str ở đây thực chất là cmd_msg_id (nếu có)
-        try:
-            await context.bot.delete_message(chat_id=chat_id, message_id=run_id)
-        except Exception:
-            pass
+        # cmd_msg_id có thể đc truyền từ callback
+        if cmd_msg_id:
+            try:
+                await context.bot.delete_message(chat_id=chat_id, message_id=cmd_msg_id)
+            except Exception:
+                pass
 
 async def check_user_job_limit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     user = update.effective_user
@@ -918,7 +986,7 @@ def main():
     app.add_handler(CallbackQueryHandler(cb_list_page, pattern=r"^listpage:\d+$"))
     app.add_handler(CallbackQueryHandler(cb_close_msg, pattern=r"^closemsg"))
     app.add_handler(CallbackQueryHandler(cb_run_controls, pattern=r"^run:gki:\d+$"))
-    app.add_handler(CallbackQueryHandler(cb_run_control_action, pattern=r"^runctl:(cancel|close):gki:\d+$"))
+    app.add_handler(CallbackQueryHandler(cb_run_control_action, pattern=r"^runctl:(cancel|close):gki:\d+(?::\d+)?$"))
 
     # GKI conversation
     gki_conv = build_gki_conversation(gh, storage, config)
@@ -947,3 +1015,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+

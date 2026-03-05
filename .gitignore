@@ -3,6 +3,7 @@
 
 # Runtime data
 data.json
+log.txt
 
 # Python
 __pycache__/
@@ -24,3 +25,8 @@ build/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Local temp/workflow patch artifacts
+temp_repo/
+workflows_patch/
+
