@@ -2,3 +2,4 @@ python-telegram-bot[ext]==21.*
 aiohttp
 aiodns
 python-dotenv
+telethon

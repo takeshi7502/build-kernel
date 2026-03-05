@@ -14,7 +14,8 @@ Telegram bot để tự động build GKI Kernel thông qua GitHub Actions.
 ## 📁 Cấu trúc
 
 ```
-├── main.py            # Bot chính, storage, poller, commands
+├── main.py            # Bot mode (Bot Token)
+├── userbot.py         # User account mode (Telethon)
 ├── gki.py             # GKI build conversation flow
 ├── config.py          # Load & validate config từ .env
 ├── permissions.py     # is_owner() / is_admin() helpers
@@ -208,6 +209,46 @@ screen -r gki-bot
 ```
 
 ---
+
+## 👤 Chạy Bằng Tài Khoản Telegram User (Telethon)
+
+Ngoài bot token mode (`main.py`), repo đã có thêm user account mode (`userbot.py`).
+Mode này chạy bằng chính tài khoản Telegram cá nhân của bạn.
+
+### Cấu hình thêm trong `.env`
+
+```env
+TELEGRAM_API_ID=123456
+TELEGRAM_API_HASH=your_api_hash
+TELEGRAM_SESSION=gki_user
+USERBOT_ALLOWED_CHAT_IDS=
+```
+
+- Lấy `TELEGRAM_API_ID` và `TELEGRAM_API_HASH` tại [my.telegram.org](https://my.telegram.org).
+- `USERBOT_ALLOWED_CHAT_IDS` là tùy chọn (phân cách bằng dấu phẩy), để giới hạn chat được phép chạy lệnh.
+
+### Chạy user mode
+
+```bash
+python userbot.py
+```
+
+Lần đầu chạy, Telethon sẽ yêu cầu nhập số điện thoại, mã OTP và (nếu có) mật khẩu 2FA để tạo session.
+
+### Lệnh trong user mode
+
+- `/help`
+- `/ping`
+- `/status`
+- `/list` hoặc `/list 2`
+- `/cancel <run_id>`
+- `/gki [key=value ...]`
+
+Ví dụ:
+
+```text
+/gki target=a13 variant=ReSukiSU version=HzzMonet release=actions subs=74,78
+```
 
 ## 📄 License
 
