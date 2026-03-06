@@ -8,10 +8,10 @@ from permissions import is_admin
 
 # States
 (
-    GKI_VARIANT,
-    GKI_BRANCH,
+    GKI_KSU_VARIANT,
+    GKI_KSU_BRANCH,
     GKI_VERSION,
-    GKI_BUILD_TIME,
+    GKI_CUSTOM_NAME,
     GKI_TOGGLE_ZRAM,
     GKI_TOGGLE_BBG,
     GKI_TOGGLE_KPM,
@@ -195,6 +195,7 @@ class GKIFlow:
             "kernelsu_variant": "SukiSU",
             "kernelsu_branch": "Stable(标准)",
             "version": "",
+            "custom_name": "",
             "build_time": "",
             "use_zram": True,
             "use_bbg": True,
@@ -213,11 +214,11 @@ class GKIFlow:
         msg = await context.bot.send_message(
             chat_id=chat_id,
             text=header + "Chọn KernelSU variant:",
-            reply_markup=_kb_from_list("gkivar", VARIANTS),
+            reply_markup=_kb_from_list("gkiksuvar", VARIANTS),
             parse_mode="HTML"
         )
         context.user_data["gki_bot_msg_id"] = msg.message_id
-        return GKI_VARIANT
+        return GKI_KSU_VARIANT
 
     async def cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if update.callback_query and not await _ensure_owner(update, context):
@@ -286,26 +287,26 @@ class GKIFlow:
         _, target = q.data.split(":", 1)
         header = _task_header(context)
 
-        if target == "variant":
+        if target == "ksu_variant":
             await q.edit_message_text(
                 header + "Chọn KernelSU variant:",
-                reply_markup=_kb_from_list("gkivar", VARIANTS),
+                reply_markup=_kb_from_list("gkiksuvar", VARIANTS),
                 parse_mode="HTML"
             )
-            return GKI_VARIANT
+            return GKI_KSU_VARIANT
 
-        if target == "branch":
+        if target == "ksu_branch":
             await q.edit_message_text(
                 header + "Chọn nhánh KernelSU:",
-                reply_markup=_kb_from_list("gkibr", BRANCHES, back_cb="gkiback:variant"),
+                reply_markup=_kb_from_list("gkiksubr", BRANCHES, back_cb="gkiback:ksu_variant"),
                 parse_mode="HTML"
             )
-            return GKI_BRANCH
+            return GKI_KSU_BRANCH
 
         if target == "version":
             kb = InlineKeyboardMarkup([
                 [InlineKeyboardButton("⏭️ Dùng mặc định", callback_data="gkiver:none")],
-                [InlineKeyboardButton("⬅️", callback_data="gkiback:branch"), InlineKeyboardButton("❌", callback_data="gki:cancel")]
+                [InlineKeyboardButton("⬅️", callback_data="gkiback:ksu_branch"), InlineKeyboardButton("❌", callback_data="gki:cancel")]
             ])
             await q.edit_message_text(
                 header + "⏭️ Nhập <code>tên version</code>.\nVD: JinYan thì sẽ có dạng: 5.10.209-JinYan\nHoặc bấm nút để bỏ qua.",
@@ -313,21 +314,21 @@ class GKIFlow:
             )
             return GKI_VERSION
 
-        if target == "build_time":
+        if target == "custom_name":
             kb = InlineKeyboardMarkup([
-                [InlineKeyboardButton("⏭️ Dùng mặc định", callback_data="gkibtime:none")],
+                [InlineKeyboardButton("⏭️ Dùng mặc định", callback_data="gkicname:none")],
                 [InlineKeyboardButton("⬅️", callback_data="gkiback:version"), InlineKeyboardButton("❌", callback_data="gki:cancel")]
             ])
             await q.edit_message_text(
-                header + "⏭️ Nhập <code>build_time</code>.\nHoặc bấm nút để dùng mặc định.",
+                header + "⏭️ Nhập <code>custom_name</code> (hậu tố cho tên file ZIP).\nHoặc bấm nút để dùng mặc định.",
                 reply_markup=kb, parse_mode="HTML"
             )
-            return GKI_BUILD_TIME
+            return GKI_CUSTOM_NAME
 
         if target == "zram":
             await q.edit_message_text(
                 header + "Bật ZRAM? (mặc định: bật)",
-                reply_markup=_yes_no("gkizr", back_cb="gkiback:build_time"),
+                reply_markup=_yes_no("gkizr", back_cb="gkiback:custom_name"),
                 parse_mode="HTML"
             )
             return GKI_TOGGLE_ZRAM
@@ -405,23 +406,23 @@ class GKIFlow:
         return ConversationHandler.END
     # === VARIANT ===
     async def set_variant(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not await _ensure_owner(update, context): return GKI_VARIANT
+        if not await _ensure_owner(update, context): return GKI_KSU_VARIANT
         q = update.callback_query; await q.answer()
         _, val = q.data.split(":", 1)
         context.user_data["gki"]["inputs"]["kernelsu_variant"] = val
         header = _task_header(context)
-        await q.edit_message_text(header + "Chọn nhánh KernelSU:", reply_markup=_kb_from_list("gkibr", BRANCHES, back_cb="gkiback:variant"), parse_mode="HTML")
-        return GKI_BRANCH
+        await q.edit_message_text(header + "Chọn nhánh KernelSU:", reply_markup=_kb_from_list("gkiksubr", BRANCHES, back_cb="gkiback:ksu_variant"), parse_mode="HTML")
+        return GKI_KSU_BRANCH
 
     # === BRANCH ===
     async def set_branch(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not await _ensure_owner(update, context): return GKI_BRANCH
+        if not await _ensure_owner(update, context): return GKI_KSU_BRANCH
         q = update.callback_query; await q.answer()
         _, val = q.data.split(":", 1)
         context.user_data["gki"]["inputs"]["kernelsu_branch"] = val
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("⏭️ Dùng mặc định", callback_data="gkiver:none")],
-            [InlineKeyboardButton("⬅️", callback_data="gkiback:branch"), InlineKeyboardButton("❌", callback_data="gki:cancel")]
+            [InlineKeyboardButton("⬅️", callback_data="gkiback:ksu_branch"), InlineKeyboardButton("❌", callback_data="gki:cancel")]
         ])
         header = _task_header(context)
         await q.edit_message_text(
@@ -452,24 +453,26 @@ class GKIFlow:
         ])
         header = _task_header(context)
         await _update_bot_msg(context, chat_id,
-            header + "⏭️ Nhập <code>build_time</code>.\nHoặc bấm nút để dùng mặc định.",
+            header + "⏭️ Nhập <code>custom_name</code> (hậu tố cho tên file ZIP).\nHoặc bấm nút để dùng mặc định.",
             reply_markup=kb, parse_mode="HTML")
-        return GKI_BUILD_TIME
+        return GKI_CUSTOM_NAME
 
-    # === BUILD TIME (text input or button) ===
-    async def set_build_time(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # === CUSTOM NAME ===
+    async def set_custom_name(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await _ensure_owner(update, context): return GKI_CUSTOM_NAME
         chat_id = update.effective_chat.id
         if update.callback_query:
-            if not await _ensure_owner(update, context): return GKI_BUILD_TIME
             q = update.callback_query; await q.answer()
-            context.user_data["gki"]["inputs"]["build_time"] = ""
+            context.user_data["gki"]["inputs"]["custom_name"] = ""
         else:
             txt = (update.message.text or "").strip()
-            context.user_data["gki"]["inputs"]["build_time"] = "" if txt.lower() == "none" else txt
+            context.user_data["gki"]["inputs"]["custom_name"] = "" if txt.lower() == "none" else txt
             await _safe_delete(context, chat_id, update.message.message_id)
-            
+
+        # Skip build time override for everyone and auto-set to None
+        context.user_data["gki"]["inputs"]["build_time"] = ""
         header = _task_header(context)
-        await _update_bot_msg(context, chat_id, header + "Bật ZRAM? (mặc định: bật)", reply_markup=_yes_no("gkizr", back_cb="gkiback:build_time"), parse_mode="HTML")
+        await _update_bot_msg(context, chat_id, header + "Bật ZRAM? (mặc định: bật)", reply_markup=_yes_no("gkizr", back_cb="gkiback:custom_name"), parse_mode="HTML")
         return GKI_TOGGLE_ZRAM
 
     # === TOGGLES ===
@@ -803,17 +806,17 @@ def build_gki_conversation(gh, storage, config):
     return ConversationHandler(
         entry_points=[CommandHandler("gki", flow.start)],
         states={
-            GKI_VARIANT: [CallbackQueryHandler(flow.set_variant, pattern=r"^gkivar:.+"), back_handler, cancel_handler],
-            GKI_BRANCH: [CallbackQueryHandler(flow.set_branch, pattern=r"^gkibr:.+"), back_handler, cancel_handler],
+            GKI_KSU_VARIANT: [CallbackQueryHandler(flow.set_variant, pattern=r"^gkiksuvar:.+"), back_handler, cancel_handler],
+            GKI_KSU_BRANCH: [CallbackQueryHandler(flow.set_branch, pattern=r"^gkiksubr:.+"), back_handler, cancel_handler],
             GKI_VERSION: [
                 CallbackQueryHandler(flow.set_version, pattern=r"^gkiver:none$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, flow.set_version),
                 back_handler,
                 cancel_handler
             ],
-            GKI_BUILD_TIME: [
-                CallbackQueryHandler(flow.set_build_time, pattern=r"^gkibtime:none$"),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, flow.set_build_time),
+            GKI_CUSTOM_NAME: [
+                CallbackQueryHandler(flow.set_custom_name, pattern=r"^gkicname:none$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, flow.set_custom_name),
                 back_handler,
                 cancel_handler
             ],

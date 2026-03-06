@@ -1180,7 +1180,7 @@ async def cmd_cancel_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     storage: StorageBase = context.application.bot_data["storage"]
     if not await is_admin(user.id, storage):
-        return await update.message.reply_text("⛔ Bạn không có quyền hủy job.")
+        return
     
     text = update.message.text.strip()
     try:
@@ -1209,7 +1209,7 @@ async def cmd_delete_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     storage: StorageBase = context.application.bot_data["storage"]
     if not await is_admin(user.id, storage):
-        return await update.message.reply_text("⛔ Bạn không có quyền xoá job.")
+        return
     
     text = update.message.text.strip()
     try:
