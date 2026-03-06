@@ -737,10 +737,13 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             mention = "GitHub / Manual"
 
-        lines.append(f"{idx}. Task by {mention} ( #{run_id}) đang chạy")
-        lines.append(f"┠ Đã chạy {elapsed_min}p - Ước tính còn {rem_m}p")
-        lines.append(f"┠ Tình trạng: {status} ({name[:20]})")
-        lines.append(f"┖ Huỷ job → /cancel_{run_id}")
+        if idx > 1:
+            lines.append("") # thêm dòng trống giữa các job
+            
+        lines.append(f"<b>{idx}. Task by {mention} ( #{run_id}) đang chạy</b>")
+        lines.append(f"┠ <b>Đã chạy</b> {elapsed_min}p - <b>Ước tính còn</b> {rem_m}p")
+        lines.append(f"┠ <b>Tình trạng:</b> {status} ({name[:20]})")
+        lines.append(f"┖ <b>Huỷ job</b> → /cancel_{run_id}")
 
     msg_text = "\n".join(lines)
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Đóng", callback_data=f"closemsg:{update.message.message_id}")]])
