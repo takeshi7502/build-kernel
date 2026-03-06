@@ -17,7 +17,7 @@ from telegram import (
     Update, InlineKeyboardButton, InlineKeyboardMarkup, constants
 )
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, CallbackQueryHandler,
+    ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler,
     ContextTypes, ConversationHandler, filters
 )
 from telegram.request import HTTPXRequest
@@ -664,6 +664,19 @@ async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.job_queue.run_once(_del_msg_job, when=60, chat_id=update.message.chat_id, data=update.message.message_id)
 
 
+async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = (
+        "👋 Xin chào! Mình là Bot Build Kernel GKI.\n\n"
+        "🤖 Mình giúp tự động hóa quá trình cấu hình và biên dịch (build) Kernel Android (GKI) qua GitHub Actions.\n\n"
+        "📌 <b>Các lệnh cơ bản:</b>\n"
+        "• /gki - Bắt đầu quá trình chọn và build Kernel\n"
+        "• /ping - Kiểm tra tình trạng hoạt động của Bot\n\n"
+        "<i>Ghi chú: Bạn cần có cấu hình hợp lệ hoặc được Admin cấp quyền để sử dụng tính năng build.</i>"
+    )
+    if update.message:
+        await update.message.reply_text(msg, parse_mode=constants.ParseMode.HTML)
+
+
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     storage: StorageBase = context.application.bot_data["storage"]
@@ -1147,6 +1160,7 @@ def main():
     app.bot_data["telegraph"] = telegraph
 
     # Owner-only commands
+    app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("key", cmd_key, filters=filters.User(user_id=config.OWNER_ID)))
     app.add_handler(CommandHandler("keys", cmd_keys, filters=filters.User(user_id=config.OWNER_ID)))
 
