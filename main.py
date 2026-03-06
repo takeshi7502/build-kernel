@@ -1201,9 +1201,9 @@ async def cmd_cancel_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.edit_text(f"❌ Lỗi hủy: {res['status']} {res.get('json', '')}")
         
     if context.job_queue:
-        context.job_queue.run_once(_del_msg_job, when=60, chat_id=msg.chat_id, data=msg.message_id)
+        context.job_queue.run_once(_del_msg_job, when=10, chat_id=msg.chat_id, data=msg.message_id)
         if update.message:
-            context.job_queue.run_once(_del_msg_job, when=60, chat_id=update.message.chat_id, data=update.message.message_id)
+            context.job_queue.run_once(_del_msg_job, when=10, chat_id=update.message.chat_id, data=update.message.message_id)
 
 async def cmd_delete_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -1234,11 +1234,11 @@ async def cmd_delete_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await msg.edit_text(f"❌ Lỗi xoá: {res['status']} {res.get('json', '')}")
             
-    # Xoá tin nhắn sau 60s
+    # Xoá tin nhắn sau 10s
     if context.job_queue:
-        context.job_queue.run_once(_del_msg_job, when=60, chat_id=msg.chat_id, data=msg.message_id)
+        context.job_queue.run_once(_del_msg_job, when=10, chat_id=msg.chat_id, data=msg.message_id)
         if update.message:
-            context.job_queue.run_once(_del_msg_job, when=60, chat_id=update.message.chat_id, data=update.message.message_id)
+            context.job_queue.run_once(_del_msg_job, when=10, chat_id=update.message.chat_id, data=update.message.message_id)
 
 def main():
     storage = JSONStorage(DATA_JSON)
