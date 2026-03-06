@@ -11,6 +11,7 @@ from permissions import is_admin
     GKI_KSU_VARIANT,
     GKI_KSU_BRANCH,
     GKI_VERSION,
+    GKI_CUSTOM_NAME,
     GKI_TOGGLE_ZRAM,
     GKI_TOGGLE_BBG,
     GKI_TOGGLE_KPM,
@@ -19,7 +20,7 @@ from permissions import is_admin
     GKI_SUB_VERSION,
     GKI_RELEASE_TYPE,
     GKI_CONFIRM
-) = range(11)
+) = range(12)
 
 VARIANTS = ["SukiSU", "ReSukiSU", "Official", "Next", "MKSU"]
 BRANCHES = ["Stable(标准)", "Dev(开发)"]
@@ -313,10 +314,21 @@ class GKIFlow:
             )
             return GKI_VERSION
 
+        if target == "custom_name":
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("⏭️ Dùng mặc định", callback_data="gkicname:none")],
+                [InlineKeyboardButton("⬅️", callback_data="gkiback:version"), InlineKeyboardButton("❌", callback_data="gki:cancel")]
+            ])
+            await q.edit_message_text(
+                header + "⏭️ Nhập <code>custom_name</code> (hậu tố cho tên file ZIP).\nHoặc bấm nút để dùng mặc định.",
+                reply_markup=kb, parse_mode="HTML"
+            )
+            return GKI_CUSTOM_NAME
+
         if target == "zram":
             await q.edit_message_text(
                 header + "Bật ZRAM? (mặc định: bật)",
-                reply_markup=_yes_no("gkizr", back_cb="gkiback:version"),
+                reply_markup=_yes_no("gkizr", back_cb="gkiback:custom_name"),
                 parse_mode="HTML"
             )
             return GKI_TOGGLE_ZRAM
@@ -435,10 +447,32 @@ class GKIFlow:
             context.user_data["gki"]["inputs"]["version"] = val
             await _safe_delete(context, chat_id, update.message.message_id)
         
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("⏭️ Dùng mặc định", callback_data="gkicname:none")],
+            [InlineKeyboardButton("⬅️", callback_data="gkiback:version"), InlineKeyboardButton("❌", callback_data="gki:cancel")]
+        ])
+        header = _task_header(context)
+        await _update_bot_msg(context, chat_id,
+            header + "⏭️ Nhập <code>custom_name</code> (hậu tố cho tên file ZIP).\nHoặc bấm nút để dùng mặc định.",
+            reply_markup=kb, parse_mode="HTML")
+        return GKI_CUSTOM_NAME
+
+    # === CUSTOM NAME ===
+    async def set_custom_name(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await _ensure_owner(update, context): return GKI_CUSTOM_NAME
+        chat_id = update.effective_chat.id
+        if update.callback_query:
+            q = update.callback_query; await q.answer()
+            context.user_data["gki"]["inputs"]["custom_name"] = ""
+        else:
+            txt = (update.message.text or "").strip()
+            context.user_data["gki"]["inputs"]["custom_name"] = "" if txt.lower() == "none" else txt
+            await _safe_delete(context, chat_id, update.message.message_id)
+
         # Skip build time override for everyone and auto-set to None
         context.user_data["gki"]["inputs"]["build_time"] = ""
         header = _task_header(context)
-        await _update_bot_msg(context, chat_id, header + "Bật ZRAM? (mặc định: bật)", reply_markup=_yes_no("gkizr", back_cb="gkiback:version"), parse_mode="HTML")
+        await _update_bot_msg(context, chat_id, header + "Bật ZRAM? (mặc định: bật)", reply_markup=_yes_no("gkizr", back_cb="gkiback:custom_name"), parse_mode="HTML")
         return GKI_TOGGLE_ZRAM
 
     # === TOGGLES ===
@@ -777,6 +811,12 @@ def build_gki_conversation(gh, storage, config):
             GKI_VERSION: [
                 CallbackQueryHandler(flow.set_version, pattern=r"^gkiver:none$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, flow.set_version),
+                back_handler,
+                cancel_handler
+            ],
+            GKI_CUSTOM_NAME: [
+                CallbackQueryHandler(flow.set_custom_name, pattern=r"^gkicname:none$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, flow.set_custom_name),
                 back_handler,
                 cancel_handler
             ],
