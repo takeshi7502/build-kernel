@@ -665,23 +665,25 @@ class GKIFlow:
 
         # Kiểm tra concurrency (chống đè build dẫn tới bị hủy)
         await q.edit_message_text("⏳ Đang kiểm tra trạng thái server...")
-        is_busy = False
+        active_runs_count = 0
         busy_run = None
         for status in ["in_progress", "queued"]:
-            url = f"{self.gh.base}/repos/{self.config.GITHUB_OWNER}/{self.config.GKI_REPO}/actions/runs?status={status}&per_page=10"
+            url = f"{self.gh.base}/repos/{self.config.GITHUB_OWNER}/{self.config.GKI_REPO}/actions/runs?status={status}&per_page=20"
             check_res = await self.gh._request("GET", url)
             if check_res.get("status") == 200:
                 runs = check_res["json"].get("workflow_runs", [])
                 for r in runs:
                     if r.get("head_branch") == self.config.GKI_DEFAULT_BRANCH and wf in r.get("path", ""):
-                        is_busy = True
-                        busy_run = r
-                        break
-            if is_busy:
-                break
+                        active_runs_count += 1
+                        if not busy_run:
+                            busy_run = r
+
+        # Nếu là admin, cho phép tối đa 10 job chạy cùng lúc. Nếu user thường, chỉ cho phép 0-1 (trống hoàn toàn).
+        max_concurrent_jobs = 10 if user_is_admin else 0
+        is_busy = active_runs_count > max_concurrent_jobs
                 
         if is_busy:
-            # Tính thời gian ước tính còn lại (giả sử tổng ~45 phút)
+            # Tính thời gian ước tính còn lại (giả sử tổng ~45 phút) cho run cũ nhất
             eta_line = ""
             if busy_run and busy_run.get("created_at"):
                 try:
@@ -690,18 +692,17 @@ class GKIFlow:
                     remaining = max(0, 2700 - elapsed)  # 2700s = 45 phút
                     rem_m = int(remaining // 60)
                     if rem_m > 0:
-                        eta_line = f"• Ước tính hoàn tất sau: ~{rem_m} phút.\n"
+                        eta_line = f"• Ước tính hoàn tất tiến trình cũ nhất sau: ~{rem_m} phút.\n"
                     else:
                         eta_line = "• Ước tính sắp hoàn tất.\n"
                 except Exception:
                     pass
             msg = (
-                "❌ <b>Có tiến trình đang chạy!</b>\n\n"
-                "• Hiện tại chưa thể thực hiện yêu cầu của bạn bây giờ.\n"
-                "• Bot sẽ thông báo ngay cho bạn khi tiến trình này hoàn tất!\n"
+                "❌ <b>Máy chủ đang quá tải!</b>\n\n"
+                f"• Hiện tại đang có {active_runs_count} tiến trình đang chạy.\n"
+                "• Vui lòng chờ các tiến trình trước hoàn tất rồi thử lại.\n"
                 f"{eta_line}\n"
-                "<i>Hãy nhớ rằng thông báo sẽ gửi cho tất cả những người có yêu cầu "
-                "nên hãy gửi lại lệnh ngay để bot xử lý nhé!</i>"
+                "<i>Bot sẽ thông báo ngay cho bạn khi có slot trống!</i>"
             )
             await self.storage.add_waiter(user.id, q.message.chat_id, user.full_name)
             await q.edit_message_text(msg, parse_mode="HTML")
