@@ -710,7 +710,8 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     jobs = await storage.get_jobs()
     run_to_job = {j.get("run_id"): j for j in jobs if j.get("run_id")}
 
-    for run in active_runs:
+    lines = []
+    for idx, run in enumerate(active_runs, 1):
         run_id = run["id"]
         status = run["status"]
         name = run.get("name") or run.get("display_title") or "workflow"
@@ -736,23 +737,14 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             mention = "GitHub / Manual"
 
-        text = (
-            f"🔄 <b>Run #{run_id} đang chạy</b>\n"
-            f"👤 Yêu cầu bởi: {mention}\n"
-            f"⏱️ Đã chạy: {elapsed_min} phút\n"
-            f"⏳ Ước tính còn: ~{rem_m} phút\n"
-            f"🔗 Tình trạng: <b>{status}</b> ({name[:20]})\n"
-            f"🛑 Bấm để hủy: /cancel_{run_id}"
-        )
-        
-        url = f"https://github.com/{config.GITHUB_OWNER}/{config.GKI_REPO}/actions/runs/{run_id}"
-        buttons = [
-            [InlineKeyboardButton("Xem trên GitHub 🌐", url=url)],
-            [InlineKeyboardButton("Hủy Build ❌", callback_data=f"runctl:cancel:gki:{run_id}:{update.message.message_id}")]
-        ]
-        buttons.append([InlineKeyboardButton("❌ Đóng", callback_data=f"closemsg:{update.message.message_id}")])
-        kb = InlineKeyboardMarkup(buttons)
-        await update.message.reply_text(text, parse_mode=constants.ParseMode.HTML, reply_markup=kb)
+        lines.append(f"{idx}. Task by {mention} ( #{run_id}) đang chạy")
+        lines.append(f"┠ Đã chạy {elapsed_min}p - Ước tính còn {rem_m}p")
+        lines.append(f"┠ Tình trạng: {status} ({name[:20]})")
+        lines.append(f"┖ Huỷ job → /cancel_{run_id}")
+
+    msg_text = "\n".join(lines)
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Đóng", callback_data=f"closemsg:{update.message.message_id}")]])
+    await update.message.reply_text(msg_text, parse_mode=constants.ParseMode.HTML, reply_markup=kb)
 
 def _run_button_text(repo_label: str, run: dict) -> str:
     n = run.get("run_number")
@@ -1133,7 +1125,9 @@ async def cmd_cancel_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     text = update.message.text.strip()
     try:
-        run_id = int(text.split("_")[1])
+        raw_cmd = text.split()[0]
+        run_id_str = raw_cmd.split("_")[1].split("@")[0]
+        run_id = int(run_id_str)
     except:
         return await update.message.reply_text("❌ ID không hợp lệ.")
         
@@ -1173,7 +1167,7 @@ def main():
     app.add_handler(CallbackQueryHandler(cb_run_controls, pattern=r"^run:gki:\d+$"))
     app.add_handler(CallbackQueryHandler(cb_run_control_action, pattern=r"^runctl:(cancel|close):gki:\d+(?::\d+)?$"))
     app.add_handler(CallbackQueryHandler(cb_save_run, pattern=r"^saverun:\d+$"))
-    app.add_handler(MessageHandler(filters.Regex(r"^/cancel_\d+$"), cmd_cancel_run))
+    app.add_handler(MessageHandler(filters.Regex(r"^/cancel_\d+(?:@[\w_]+)?$"), cmd_cancel_run))
 
     # GKI conversation
     gki_conv = build_gki_conversation(gh, storage, config)

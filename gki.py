@@ -556,9 +556,12 @@ class GKIFlow:
 
         # Sub-version buttons (4 per row)
         row = []
+        target_label = next((label for label, k in BUILD_TARGETS if k == target_key), target_key)
+        major = target_label.split(" - ")[-1] if " - " in target_label else ""
         for sv in available:
-            icon = "✅" if sv in selected else "⬜" if user_is_admin else "🔍"
-            row.append(InlineKeyboardButton(f"{icon} .{sv}", callback_data=f"gkisub:{sv}"))
+            icon = "✅ " if sv in selected else "⬜ " if user_is_admin else ""
+            btn_text = f"{icon}{major}.{sv}"
+            row.append(InlineKeyboardButton(btn_text, callback_data=f"gkisub:{sv}"))
             if len(row) == 4:
                 rows.append(row)
                 row = []
@@ -647,9 +650,12 @@ class GKIFlow:
     async def confirm(self, q, context):
         inputs = context.user_data["gki"]["inputs"]
         pretty = "\n".join([f"• {k}: {v}" for k, v in inputs.items()])
+        user_is_admin = await is_admin(q.from_user.id, self.storage)
+        back_data = "gkiback:release" if user_is_admin else "gkiback:target"
+        
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("✅ Xác nhận", callback_data="gkiconfirm")],
-            [InlineKeyboardButton("⬅️", callback_data="gkiback:release"), InlineKeyboardButton("❌", callback_data="gki:cancel")]
+            [InlineKeyboardButton("⬅️", callback_data=back_data), InlineKeyboardButton("❌", callback_data="gki:cancel")]
         ])
         header = _task_header(context)
         await q.edit_message_text(
