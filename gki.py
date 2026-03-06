@@ -149,6 +149,7 @@ def _cleanup(context: ContextTypes.DEFAULT_TYPE):
     context.user_data.pop("build_key", None)
     context.user_data.pop("gki_bot_msg_id", None)
     context.chat_data.pop("gki_owner", None)
+    context.chat_data.pop("gki_owner_name", None)
 
 async def _del_msg_job(context: ContextTypes.DEFAULT_TYPE):
     job = context.job
@@ -236,6 +237,41 @@ class GKIFlow:
         _cleanup(context)
         return ConversationHandler.END
 
+    async def timeout(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        notice = "⚠️ Phiên hết hạn rồi. Gửi /gki để bắt đầu lại."
+        timeout_chat_id = None
+        timeout_message_id = None
+        q = update.callback_query
+        if q:
+            try:
+                await q.answer()
+            except Exception:
+                pass
+            if q.message:
+                timeout_chat_id = q.message.chat_id
+                timeout_message_id = q.message.message_id
+            try:
+                await q.edit_message_text(notice)
+            except Exception:
+                pass
+        elif update.effective_message:
+            try:
+                m = await update.effective_message.reply_text(notice)
+                timeout_chat_id = m.chat_id
+                timeout_message_id = m.message_id
+            except Exception:
+                pass
+
+        if context.job_queue and timeout_chat_id and timeout_message_id:
+            context.job_queue.run_once(
+                _del_msg_job,
+                when=60,
+                chat_id=timeout_chat_id,
+                data=timeout_message_id
+            )
+
+        _cleanup(context)
+        return ConversationHandler.END
     async def back(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await _ensure_owner(update, context):
             return ConversationHandler.END
@@ -750,6 +786,10 @@ def build_gki_conversation(gh, storage, config):
             GKI_SUB_VERSION: [CallbackQueryHandler(flow.toggle_sub_version, pattern=r"^gkisub:.+"), back_handler, cancel_handler],
             GKI_RELEASE_TYPE: [CallbackQueryHandler(flow.set_release_type, pattern=r"^gkirel:.+"), back_handler, cancel_handler],
             GKI_CONFIRM: [CallbackQueryHandler(flow.do_dispatch, pattern=r"^gkiconfirm$"), back_handler, cancel_handler],
+            ConversationHandler.TIMEOUT: [
+                CallbackQueryHandler(flow.timeout),
+                MessageHandler(filters.ALL, flow.timeout),
+            ],
         },
         fallbacks=[cancel_handler],
         allow_reentry=True,

@@ -549,8 +549,15 @@ async def poller(app):
                                 )
 
                         if telegraph_url:
-                            buttons.append([InlineKeyboardButton("📦 Xem & Tải file", url=telegraph_url)])
-                        buttons.append([InlineKeyboardButton("🌐 Xem trên GitHub", url=html_url)])
+                            buttons.append([
+                                InlineKeyboardButton("🌐 Xem GitHub", url=html_url),
+                                InlineKeyboardButton("📦 Tải file", url=telegraph_url)
+                            ])
+                        else:
+                            buttons.append([InlineKeyboardButton("🌐 Xem trên GitHub", url=html_url)])
+                        buttons.append([
+                            InlineKeyboardButton("💾 Lưu tin nhắn", callback_data=f"saverun:{run_id}")
+                        ])
                         kb = InlineKeyboardMarkup(buttons)
 
                         chat_id = job["chat_id"]
@@ -1008,6 +1015,68 @@ async def cb_close_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
+async def cb_save_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    try:
+        _, run_id_str = q.data.split(":")
+        run_id = int(run_id_str)
+    except:
+        return await q.answer("Lỗi ID", show_alert=True)
+        
+    storage: StorageBase = context.application.bot_data["storage"]
+    job = await storage.get_job_by_run_id(run_id)
+    if not job:
+        return await q.answer("Không tìm thấy dữ liệu build này trong hệ thống.", show_alert=True)
+        
+    inputs = job.get("inputs", {})
+    if not inputs:
+        return await q.answer("Không có thông tin cấu hình cho build này.", show_alert=True)
+        
+    lines = [f"💾 <b>LƯU TRỮ CẤU HÌNH GKI BUILD #{run_id}</b>\n"]
+    lines.append(f"• <b>KernelSU Variant</b>: <code>{inputs.get('kernelsu_variant', 'None')}</code>")
+    lines.append(f"• <b>KernelSU Branch</b>: <code>{inputs.get('kernelsu_branch', 'None')}</code>")
+    if inputs.get('version'):
+        lines.append(f"• <b>Version Custom</b>: <code>{inputs.get('version')}</code>")
+    if inputs.get('build_time'):
+        lines.append(f"• <b>Build Time Override</b>: <code>{inputs.get('build_time')}</code>")
+    
+    lines.append(f"• <b>Dùng ZRAM</b>: {'✅ Có' if inputs.get('use_zram') else '❌ Không'}")
+    lines.append(f"• <b>Bật SUSFS</b>: {'✅ Có' if inputs.get('enable_susfs') else '❌ Không'}")
+    
+    target_flags = []
+    if inputs.get('build_a12_5_10'): target_flags.append('A12 (5.10)')
+    if inputs.get('build_a13_5_15'): target_flags.append('A13 (5.15)')
+    if inputs.get('build_a14_6_1'): target_flags.append('A14 (6.1)')
+    if inputs.get('build_a15_6_6'): target_flags.append('A15 (6.6)')
+    
+    if inputs.get('build_all'):
+        lines.append(f"• <b>Phiên bản Android</b>: <code>Tất cả</code>")
+    elif target_flags:
+        lines.append(f"• <b>Phiên bản Android</b>: <code>{', '.join(target_flags)}</code>")
+        
+    sub_levels = inputs.get('sub_levels')
+    if sub_levels:
+        lines.append(f"• <b>Sub-versions (chỉ định)</b>: <code>{sub_levels.replace(',', ', ')}</code>")
+    else:
+        lines.append(f"• <b>Sub-versions</b>: <code>Tất cả các bản cập nhật phụ</code>")
+        
+    lines.append(f"\n📦 <b>Tải về:</b> <a href='https://nightly.link/{config.GITHUB_OWNER}/{config.GKI_REPO}/actions/runs/{run_id}'>Mở trang Nightly.link</a>")
+    lines.append(f"🌐 <b>Xem trên:</b> <a href='https://github.com/{config.GITHUB_OWNER}/{config.GKI_REPO}/actions/runs/{run_id}'>GitHub Actions</a>")
+    
+    try:
+        await context.bot.send_message(
+            chat_id=q.from_user.id,
+            text="\n".join(lines),
+            parse_mode=constants.ParseMode.HTML,
+            disable_web_page_preview=True
+        )
+        await q.answer("Đã gửi tin nhắn cấu hình vào chat riêng của bạn! 📩", show_alert=True)
+    except Exception as e:
+        logger.error("Failed to PM user: %s", e)
+        # Nút "Lưu" có thể được bấm trong nhóm. Nếu user chưa start bot, sẽ ném lỗi Forbidden
+        await q.answer("❌ Lỗi: Bạn cần nhắn tin cho Bot trước (nhấn START) để nhận tin nhắn riêng.", show_alert=True)
+
 def main():
     storage = JSONStorage(DATA_JSON)
     gh = GitHubAPI(config.GITHUB_TOKEN, config.GITHUB_OWNER)
@@ -1031,6 +1100,7 @@ def main():
     app.add_handler(CallbackQueryHandler(cb_close_msg, pattern=r"^closemsg"))
     app.add_handler(CallbackQueryHandler(cb_run_controls, pattern=r"^run:gki:\d+$"))
     app.add_handler(CallbackQueryHandler(cb_run_control_action, pattern=r"^runctl:(cancel|close):gki:\d+(?::\d+)?$"))
+    app.add_handler(CallbackQueryHandler(cb_save_run, pattern=r"^saverun:\d+$"))
 
     # GKI conversation
     gki_conv = build_gki_conversation(gh, storage, config)
