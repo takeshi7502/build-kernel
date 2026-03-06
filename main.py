@@ -823,7 +823,7 @@ async def show_list_page(update: Update, context: ContextTypes.DEFAULT_TYPE, pag
     else:
         message_to_edit = await update.message.reply_text("⏳ Đang tải thông tin trang...")
 
-    text = f"🗂 <b>Danh sách các bản build GKI thành công (Trang {page}/{total_pages})</b>\n\n"
+    text = f"🗂 <b>Danh sách các bản build GKI:</b>\n\n"
 
     # Render text for the 5 items
     for i, r in enumerate(current_builds):
@@ -892,17 +892,21 @@ def _format_build_lines(inputs: dict) -> list[str]:
     if not inputs:
         return lines
         
-    variant = inputs.get("variant", "Unknown")
-    branch = inputs.get("branch", "Unknown").split("(")[0]
+    variant = inputs.get("variant")
+    branch_raw = inputs.get("branch")
+    branch = branch_raw.split("(")[0] if branch_raw else None
     c_name = inputs.get("custom_name", "")
-    has_zram = "ZRAM" if inputs.get("enable_zram") in (True, "true") else ""
+    has_zram = "ZRAM" if inputs.get("use_zram") else ""
+    has_bbg = "BBG" if inputs.get("use_bbg") else ""
+    has_kpm = "KPM" if inputs.get("use_kpm") else ""
+    has_susfs = "SUSFS" if not inputs.get("cancel_susfs") else ""
     ksu = inputs.get("ksu_type", "")
     
-    parts = [variant, branch]
-    if c_name: parts.append(c_name)
-    if has_zram: parts.append(has_zram)
-    if ksu: parts.append(ksu)
-    
+    parts = []
+    for x in [variant, branch, c_name, has_zram, has_bbg, has_kpm, has_susfs, ksu]:
+        if x:
+            parts.append(str(x).strip())
+            
     prefix = "|".join(parts)
     
     subs = inputs.get("sub_levels", "")
@@ -1003,9 +1007,12 @@ async def cb_run_control_action(update: Update, context: ContextTypes.DEFAULT_TY
                 conclusion = run_data.get("conclusion", "")
                 if run_status == "completed":
                     if conclusion == "cancelled":
+                        # Tự động xoá job sau khi cancel
+                        await gh.delete_run(repo, run_id)
+                        await storage.delete_job_by_run_id(run_id)
                         await q.edit_message_text(
-                            f"✅ <b>Đã hủy thành công!</b>\n\n"
-                            f"Run #{run_id} đã được hủy.",
+                            f"✅ <b>Đã hủy và xoá thành công!</b>\n\n"
+                            f"Run #{run_id} đã được hủy và dọn dẹp.",
                             parse_mode="HTML"
                         )
                     else:
@@ -1184,15 +1191,19 @@ async def cmd_cancel_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("❌ ID không hợp lệ.")
         
     gh: GitHubAPI = context.application.bot_data["gh"]
-    await update.message.reply_text(f"⏳ Đang gửi lệnh hủy Run #{run_id} lên GitHub...")
-    res = await gh.cancel_workflow_run(run_id)
+    msg = await update.message.reply_text(f"⏳ Đang gửi lệnh hủy Run #{run_id} lên GitHub...")
+    res = await gh.cancel_run(config.GKI_REPO, run_id)
     if res["status"] in (202, 204):
-        await update.message.reply_text(f"✅ Đã yêu cầu hủy thành công Run #{run_id}.")
-        job = await storage.get_job_by_run_id(run_id)
-        if job:
-            await storage.update_job(job["_id"], {"status": "cancelled", "conclusion": "cancelled"})
+        await gh.delete_run(config.GKI_REPO, run_id)
+        await storage.delete_job_by_run_id(run_id)
+        await msg.edit_text(f"✅ Đã hủy và dọn dẹp thành công Run #{run_id}.")
     else:
-        await update.message.reply_text(f"❌ Lỗi hủy: {res['status']} {res.get('json', '')}")
+        await msg.edit_text(f"❌ Lỗi hủy: {res['status']} {res.get('json', '')}")
+        
+    if context.job_queue:
+        context.job_queue.run_once(_del_msg_job, when=60, chat_id=msg.chat_id, data=msg.message_id)
+        if update.message:
+            context.job_queue.run_once(_del_msg_job, when=60, chat_id=update.message.chat_id, data=update.message.message_id)
 
 async def cmd_delete_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -1209,17 +1220,25 @@ async def cmd_delete_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("❌ ID không hợp lệ.")
         
     gh: GitHubAPI = context.application.bot_data["gh"]
-    await update.message.reply_text(f"⏳ Đang gửi lệnh xoá Run #{run_id} lên GitHub...")
+    
+    msg = await update.message.reply_text(f"⏳ Đang gửi lệnh xoá Run #{run_id} lên GitHub...")
     res = await gh.delete_run(config.GKI_REPO, run_id)
+    
     if res["status"] in (202, 204):
-        await update.message.reply_text(f"✅ Đã yêu cầu xoá thành công Run #{run_id}.")
+        await msg.edit_text(f"✅ Đã yêu cầu xoá thành công Run #{run_id}.")
         await storage.delete_job_by_run_id(run_id)
     else:
         if res["status"] in (404,):
             await storage.delete_job_by_run_id(run_id)
-            await update.message.reply_text(f"✅ Run #{run_id} không tồn tại trên GitHub. Đã xoá khỏi dữ liệu nội bộ.")
+            await msg.edit_text(f"✅ Run #{run_id} không tồn tại trên GitHub. Đã xoá khỏi dữ liệu nội bộ.")
         else:
-            await update.message.reply_text(f"❌ Lỗi xoá: {res['status']} {res.get('json', '')}")
+            await msg.edit_text(f"❌ Lỗi xoá: {res['status']} {res.get('json', '')}")
+            
+    # Xoá tin nhắn sau 60s
+    if context.job_queue:
+        context.job_queue.run_once(_del_msg_job, when=60, chat_id=msg.chat_id, data=msg.message_id)
+        if update.message:
+            context.job_queue.run_once(_del_msg_job, when=60, chat_id=update.message.chat_id, data=update.message.message_id)
 
 def main():
     storage = JSONStorage(DATA_JSON)

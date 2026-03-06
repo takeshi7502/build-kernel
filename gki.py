@@ -447,7 +447,7 @@ class GKIFlow:
             await _safe_delete(context, chat_id, update.message.message_id)
         
         kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("⏭️ Dùng mặc định", callback_data="gkibtime:none")],
+            [InlineKeyboardButton("⏭️ Dùng mặc định", callback_data="gkicname:none")],
             [InlineKeyboardButton("⬅️", callback_data="gkiback:version"), InlineKeyboardButton("❌", callback_data="gki:cancel")]
         ])
         header = _task_header(context)
