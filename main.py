@@ -727,16 +727,33 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         run_id = run["id"]
         status = run["status"]
         name = run.get("name") or run.get("display_title") or "workflow"
+        job = run_to_job.get(run_id, {})
+        inputs = job.get("inputs", {})
+        
+        target_count = sum(1 for k in ('build_a12_5_10', 'build_a13_5_15', 'build_a14_6_1', 'build_a15_6_6') if inputs.get(k))
+        if inputs.get("build_all"):
+            target_count = 4
+        target_count = max(1, target_count)
+        
+        expected_time_m = 18
+        if target_count == 2:
+            expected_time_m = 28
+        elif target_count == 3:
+            expected_time_m = 40
+        elif target_count == 4:
+            expected_time_m = 50
+            
+        expected_s = expected_time_m * 60
         
         created_at_str = run.get("created_at")
         elapsed_min = 0
-        rem_m = 45
+        rem_m = expected_time_m
         if created_at_str:
             try:
                 created_at = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
                 elapsed = datetime.now(timezone.utc) - created_at
                 elapsed_min = int(elapsed.total_seconds() // 60)
-                remaining_s = max(0, 2700 - elapsed.total_seconds())
+                remaining_s = max(0, expected_s - elapsed.total_seconds())
                 rem_m = int(remaining_s // 60)
             except:
                 pass
