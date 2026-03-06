@@ -21,7 +21,7 @@ from permissions import is_admin
     GKI_SUB_VERSION,
     GKI_RELEASE_TYPE,
     GKI_CONFIRM
-) = range(10)
+) = range(11)
 
 VARIANTS = ["SukiSU", "ReSukiSU", "Official", "Next", "MKSU"]
 BRANCHES = ["Stable(标准)", "Dev(开发)"]
