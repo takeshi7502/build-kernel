@@ -444,6 +444,10 @@ class GitHubAPI:
         url = f"{self.base}/repos/{config.GITHUB_OWNER}/{repo}/actions/runs/{run_id}"
         return await self._request("GET", url)
 
+    async def cancel_workflow_run(self, run_id: int):
+        url = f"{self.base}/repos/{config.GITHUB_OWNER}/{config.GKI_REPO}/actions/runs/{run_id}/cancel"
+        return await self._request("POST", url, {})
+
     async def list_artifacts_for_run(self, repo: str, run_id: int):
         url = f"{self.base}/repos/{config.GITHUB_OWNER}/{repo}/actions/runs/{run_id}/artifacts"
         return await self._request("GET", url)
@@ -724,7 +728,8 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"👤 Yêu cầu bởi: {mention}\n"
             f"⏱️ Đã chạy: {elapsed_min} phút\n"
             f"⏳ Ước tính còn: ~{rem_m} phút\n"
-            f"🔗 Tình trạng: <b>{status}</b> ({name[:20]})"
+            f"🔗 Tình trạng: <b>{status}</b> ({name[:20]})\n"
+            f"🛑 Bấm để hủy: /cancel_{run_id}"
         )
         
         url = f"https://github.com/{config.GITHUB_OWNER}/{config.GKI_REPO}/actions/runs/{run_id}"
@@ -1107,6 +1112,29 @@ async def cb_save_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Nút "Lưu" có thể được bấm trong nhóm. Nếu user chưa start bot, sẽ ném lỗi Forbidden
         await q.answer("❌ Lỗi: Bạn cần nhắn tin cho Bot trước (nhấn START) để nhận tin nhắn riêng.", show_alert=True)
 
+async def cmd_cancel_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    storage: StorageBase = context.application.bot_data["storage"]
+    if not await is_admin(user.id, storage):
+        return await update.message.reply_text("⛔ Bạn không có quyền hủy job.")
+    
+    text = update.message.text.strip()
+    try:
+        run_id = int(text.split("_")[1])
+    except:
+        return await update.message.reply_text("❌ ID không hợp lệ.")
+        
+    gh: GitHubAPI = context.application.bot_data["gh"]
+    await update.message.reply_text(f"⏳ Đang gửi lệnh hủy Run #{run_id} lên GitHub...")
+    res = await gh.cancel_workflow_run(run_id)
+    if res["status"] in (202, 204):
+        await update.message.reply_text(f"✅ Đã yêu cầu hủy thành công Run #{run_id}.")
+        job = await storage.get_job_by_run_id(run_id)
+        if job:
+            await storage.update_job(job["_id"], {"status": "cancelled", "conclusion": "cancelled"})
+    else:
+        await update.message.reply_text(f"❌ Lỗi hủy: {res['status']} {res.get('json', '')}")
+
 def main():
     storage = JSONStorage(DATA_JSON)
     gh = GitHubAPI(config.GITHUB_TOKEN, config.GITHUB_OWNER)
@@ -1131,6 +1159,7 @@ def main():
     app.add_handler(CallbackQueryHandler(cb_run_controls, pattern=r"^run:gki:\d+$"))
     app.add_handler(CallbackQueryHandler(cb_run_control_action, pattern=r"^runctl:(cancel|close):gki:\d+(?::\d+)?$"))
     app.add_handler(CallbackQueryHandler(cb_save_run, pattern=r"^saverun:\d+$"))
+    app.add_handler(MessageHandler(filters.Regex(r"^/cancel_\d+$"), cmd_cancel_run))
 
     # GKI conversation
     gki_conv = build_gki_conversation(gh, storage, config)

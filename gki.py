@@ -384,7 +384,8 @@ class GKIFlow:
             target_label = next((label for label, k in BUILD_TARGETS if k == target_key), target_key)
             count = len(selected)
             total = len(available)
-            kb = self._sub_version_keyboard(context)
+            user_is_admin = await is_admin(update.effective_user.id, self.storage)
+            kb = self._sub_version_keyboard(context, user_is_admin)
             await q.edit_message_text(
                 header + f"Chọn sub-version cho <b>{target_label}</b>:\n"
                          f"<i>(Đã chọn: {count}/{total})</i>",
@@ -526,18 +527,22 @@ class GKIFlow:
         available = SUB_LEVELS.get(key, [])
         context.user_data["gki"]["selected_subs"] = set()  # mặc định không chọn gì
 
+        user_is_admin = await is_admin(update.effective_user.id, self.storage)
+
         # Hiển thị chọn sub-version
         header = _task_header(context)
         target_label = next((label for label, k in BUILD_TARGETS if k == key), key)
-        kb = self._sub_version_keyboard(context)
+        kb = self._sub_version_keyboard(context, user_is_admin)
+        
+        info_text = "<i>(Bấm để chọn, sẽ tự động chuyển tiếp)</i>" if not user_is_admin else "<i>(Bấm để bật/tắt, ✅ = sẽ build)</i>"
+        
         await q.edit_message_text(
-            header + f"Chọn sub-version cho <b>{target_label}</b>:\n"
-                     f"<i>(Bấm để bật/tắt, ✅ = sẽ build)</i>",
+            header + f"Chọn sub-version cho <b>{target_label}</b>:\n{info_text}",
             reply_markup=kb, parse_mode="HTML")
         return GKI_SUB_VERSION
 
     # === SUB-VERSION KEYBOARD BUILDER ===
-    def _sub_version_keyboard(self, context):
+    def _sub_version_keyboard(self, context, user_is_admin: bool):
         target_key = context.user_data["gki"]["selected_target"]
         available = SUB_LEVELS.get(target_key, [])
         selected = context.user_data["gki"]["selected_subs"]
@@ -545,13 +550,14 @@ class GKIFlow:
 
         rows = []
         # Build All toggle
-        all_icon = "✅" if all_selected else "⬜"
-        rows.append([InlineKeyboardButton(f"{all_icon} Build All", callback_data="gkisub:all")])
+        if user_is_admin:
+            all_icon = "✅" if all_selected else "⬜"
+            rows.append([InlineKeyboardButton(f"{all_icon} Build All", callback_data="gkisub:all")])
 
         # Sub-version buttons (4 per row)
         row = []
         for sv in available:
-            icon = "✅" if sv in selected else "⬜"
+            icon = "✅" if sv in selected else "⬜" if user_is_admin else "🔍"
             row.append(InlineKeyboardButton(f"{icon} .{sv}", callback_data=f"gkisub:{sv}"))
             if len(row) == 4:
                 rows.append(row)
@@ -560,7 +566,9 @@ class GKIFlow:
             rows.append(row)
 
         # Confirm + Back/Cancel
-        rows.append([InlineKeyboardButton("➡️ Tiếp tục", callback_data="gkisub:done")])
+        if user_is_admin:
+            rows.append([InlineKeyboardButton("➡️ Tiếp tục", callback_data="gkisub:done")])
+            
         rows.append([
             InlineKeyboardButton("⬅️", callback_data="gkiback:target"),
             InlineKeyboardButton("❌", callback_data="gki:cancel")
@@ -572,10 +580,19 @@ class GKIFlow:
         if not await _ensure_owner(update, context): return GKI_SUB_VERSION
         q = update.callback_query; await q.answer()
         _, val = q.data.split(":", 1)
+        
+        user_is_admin = await is_admin(update.effective_user.id, self.storage)
 
         target_key = context.user_data["gki"]["selected_target"]
         available = SUB_LEVELS.get(target_key, [])
         selected = context.user_data["gki"]["selected_subs"]
+
+        if not user_is_admin and val not in ("done", "all"):
+            # Đối với user thường, chỉ bấm 1 phát vào sub-version là đi thẳng tới Confirm và set Action
+            context.user_data["gki"]["selected_subs"] = {val}
+            context.user_data["gki"]["inputs"]["sub_levels"] = str(val)
+            context.user_data["gki"]["inputs"]["release_type"] = "Actions"
+            return await self.confirm(q, context)
 
         if val == "done":
             # Validate at least 1 selected
@@ -611,7 +628,7 @@ class GKIFlow:
         target_label = next((label for label, k in BUILD_TARGETS if k == target_key), target_key)
         count = len(selected)
         total = len(available)
-        kb = self._sub_version_keyboard(context)
+        kb = self._sub_version_keyboard(context, user_is_admin)
         await q.edit_message_text(
             header + f"Chọn sub-version cho <b>{target_label}</b>:\n"
                      f"<i>(Đã chọn: {count}/{total})</i>",
@@ -678,9 +695,9 @@ class GKIFlow:
                         if not busy_run:
                             busy_run = r
 
-        # Nếu là admin, cho phép tối đa 10 job chạy cùng lúc. Nếu user thường, chỉ cho phép 0-1 (trống hoàn toàn).
-        max_concurrent_jobs = 10 if user_is_admin else 0
-        is_busy = active_runs_count > max_concurrent_jobs
+        # Giới hạn toàn bộ server tối đa 10 job chạy cùng lúc
+        max_concurrent_jobs = 10
+        is_busy = active_runs_count >= max_concurrent_jobs
                 
         if is_busy:
             # Tính thời gian ước tính còn lại (giả sử tổng ~45 phút) cho run cũ nhất
