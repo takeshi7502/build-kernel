@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from typing import Dict, Any, Optional, List
 
 from telegram import (
@@ -1033,16 +1034,31 @@ async def cb_save_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not inputs:
         return await q.answer("Không có thông tin cấu hình cho build này.", show_alert=True)
         
-    lines = [f"💾 <b>LƯU TRỮ CẤU HÌNH GKI BUILD #{run_id}</b>\n"]
+    lines = [f"💾 <b>LƯU TRỮ CẤU HÌNH GKI BUILD #{run_id}</b>"]
+    # Get build date from job if available, else current time
+    job_created_at = job.get("created_at")
+    if job_created_at:
+        try:
+            dt = datetime.fromisoformat(job_created_at).replace(tzinfo=timezone.utc).astimezone(ZoneInfo("Asia/Ho_Chi_Minh"))
+            lines.append(f"🕒 <b>Ngày build</b>: <code>{dt.strftime('%H:%M %d/%m/%Y')}</code>\n")
+        except:
+            pass
+    else:
+        lines.append(f"🕒 <b>Ngày build</b>: <code>Chưa rõ</code>\n")
+
     lines.append(f"• <b>KernelSU Variant</b>: <code>{inputs.get('kernelsu_variant', 'None')}</code>")
     lines.append(f"• <b>KernelSU Branch</b>: <code>{inputs.get('kernelsu_branch', 'None')}</code>")
+    
     if inputs.get('version'):
         lines.append(f"• <b>Version Custom</b>: <code>{inputs.get('version')}</code>")
     if inputs.get('build_time'):
         lines.append(f"• <b>Build Time Override</b>: <code>{inputs.get('build_time')}</code>")
     
+    lines.append(f"• <b>Compile BBG</b>: {'✅ Có' if inputs.get('use_bbg') else '❌ Không'}")
+    lines.append(f"• <b>Compile KPM</b>: {'✅ Có' if inputs.get('use_kpm') else '❌ Không'}")
     lines.append(f"• <b>Dùng ZRAM</b>: {'✅ Có' if inputs.get('use_zram') else '❌ Không'}")
-    lines.append(f"• <b>Bật SUSFS</b>: {'✅ Có' if inputs.get('enable_susfs') else '❌ Không'}")
+    # Cancel SUSFS logic is inverted from 'Bật SUSFS', check 'cancel_susfs'
+    lines.append(f"• <b>Bật SUSFS</b>: {'❌ Không' if inputs.get('cancel_susfs') else '✅ Có'}")
     
     target_flags = []
     if inputs.get('build_a12_5_10'): target_flags.append('A12 (5.10)')
@@ -1051,7 +1067,7 @@ async def cb_save_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if inputs.get('build_a15_6_6'): target_flags.append('A15 (6.6)')
     
     if inputs.get('build_all'):
-        lines.append(f"• <b>Phiên bản Android</b>: <code>Tất cả</code>")
+        lines.append(f"• <b>Phiên bản Android</b>: <code>Tất cả (A12-A15)</code>")
     elif target_flags:
         lines.append(f"• <b>Phiên bản Android</b>: <code>{', '.join(target_flags)}</code>")
         
@@ -1061,14 +1077,20 @@ async def cb_save_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         lines.append(f"• <b>Sub-versions</b>: <code>Tất cả các bản cập nhật phụ</code>")
         
-    lines.append(f"\n📦 <b>Tải về:</b> <a href='https://nightly.link/{config.GITHUB_OWNER}/{config.GKI_REPO}/actions/runs/{run_id}'>Mở trang Nightly.link</a>")
-    lines.append(f"🌐 <b>Xem trên:</b> <a href='https://github.com/{config.GITHUB_OWNER}/{config.GKI_REPO}/actions/runs/{run_id}'>GitHub Actions</a>")
+    # Tạo Inline Keyboard cho tin nhắn lưu cấu hình
+    save_kb = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🌐 Xem trên GitHub", url=f"https://github.com/{config.GITHUB_OWNER}/{config.GKI_REPO}/actions/runs/{run_id}"),
+            InlineKeyboardButton("📦 Tải file", url=f"https://nightly.link/{config.GITHUB_OWNER}/{config.GKI_REPO}/actions/runs/{run_id}")
+        ]
+    ])
     
     try:
         await context.bot.send_message(
             chat_id=q.from_user.id,
             text="\n".join(lines),
             parse_mode=constants.ParseMode.HTML,
+            reply_markup=save_kb,
             disable_web_page_preview=True
         )
         await q.answer("Đã gửi tin nhắn cấu hình vào chat riêng của bạn! 📩", show_alert=True)
