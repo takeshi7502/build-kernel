@@ -303,7 +303,46 @@ class TelegraphAPI:
                 self._token = data["result"]["access_token"]
                 self.storage.set_telegraph_token(self._token)
 
-    async def create_artifacts_page(self, title: str, artifacts: list, repo: str, run_id, owner: str) -> Optional[str]:
+    @staticmethod
+    def _format_build_config(config_inputs: Dict[str, Any]) -> str:
+        if not isinstance(config_inputs, dict) or not config_inputs:
+            return "Khong co du lieu cau hinh."
+
+        # Keep the same order users see in confirmation, then append unknown keys.
+        preferred_order = [
+            "kernelsu_variant",
+            "kernelsu_branch",
+            "version",
+            "build_time",
+            "use_zram",
+            "use_bbg",
+            "use_kpm",
+            "cancel_susfs",
+            "build_a12_5_10",
+            "build_a13_5_15",
+            "build_a14_6_1",
+            "build_a15_6_6",
+            "build_all",
+            "release_type",
+            "sub_levels",
+        ]
+
+        ordered_keys = [k for k in preferred_order if k in config_inputs]
+        ordered_keys.extend(k for k in config_inputs.keys() if k not in ordered_keys)
+
+        lines = []
+        for key in ordered_keys:
+            value = config_inputs.get(key, "")
+            if isinstance(value, bool):
+                value_text = "True" if value else "False"
+            elif value is None:
+                value_text = ""
+            else:
+                value_text = str(value)
+            lines.append(f"- {key}: {value_text}")
+        return "\n".join(lines)
+
+    async def create_artifacts_page(self, title: str, artifacts: list, repo: str, run_id, owner: str, config_inputs: Optional[Dict[str, Any]] = None) -> Optional[str]:
         """Tạo trang Telegraph với danh sách artifacts. Trả về URL."""
         await self._ensure_token()
         if not self._token:
@@ -311,6 +350,9 @@ class TelegraphAPI:
 
         # Xây dựng nội dung trang
         content = [
+            {"tag": "h4", "children": ["Cau hinh build"]},
+            {"tag": "pre", "children": [self._format_build_config(config_inputs or {})]},
+            {"tag": "hr"},
             {"tag": "h4", "children": [f"📦 Danh sách file tải về"]},
             {"tag": "p", "children": [f"Build: {title}"]},
             {"tag": "hr"},
@@ -501,7 +543,9 @@ async def poller(app):
                                 telegraph_url = await telegraph.create_artifacts_page(
                                     title=f"Build GKI #{run_id}",
                                     artifacts=arr, repo=repo,
-                                    run_id=run_id, owner=config.GITHUB_OWNER
+                                    run_id=run_id,
+                                    owner=config.GITHUB_OWNER,
+                                    config_inputs=job.get("inputs", {})
                                 )
 
                         if telegraph_url:
