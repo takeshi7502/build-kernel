@@ -556,9 +556,6 @@ async def poller(app):
                             ])
                         else:
                             buttons.append([InlineKeyboardButton("🌐 Xem trên GitHub", url=html_url)])
-                        buttons.append([
-                            InlineKeyboardButton("💾 Lưu tin nhắn", callback_data=f"saverun:{run_id}")
-                        ])
                         kb = InlineKeyboardMarkup(buttons)
 
                         chat_id = job["chat_id"]
@@ -590,6 +587,11 @@ async def poller(app):
                             })
                             if conclusion == "success":
                                 await storage.add_successful_build(run_id, user_id, job.get("ref", "unknown"), user_name)
+                                # Tự động gửi tin nhắn lưu cấu hình
+                                try:
+                                    await send_saved_config(app, run_id, job, user_id)
+                                except Exception as e:
+                                    logger.error("Auto PM save config failed: %s", e)
                         except Exception as e:
                             logger.error("Send notification failed: %s", e)
                             await storage.update_job(job["_id"], {"notified": True})
@@ -1016,23 +1018,10 @@ async def cb_close_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
-async def cb_save_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-    try:
-        _, run_id_str = q.data.split(":")
-        run_id = int(run_id_str)
-    except:
-        return await q.answer("Lỗi ID", show_alert=True)
-        
-    storage: StorageBase = context.application.bot_data["storage"]
-    job = await storage.get_job_by_run_id(run_id)
-    if not job:
-        return await q.answer("Không tìm thấy dữ liệu build này trong hệ thống.", show_alert=True)
-        
+async def send_saved_config(app, run_id, job, chat_id):
     inputs = job.get("inputs", {})
     if not inputs:
-        return await q.answer("Không có thông tin cấu hình cho build này.", show_alert=True)
+        return False
         
     lines = [f"💾 <b>LƯU TRỮ CẤU HÌNH GKI BUILD #{run_id}</b>"]
     # Get build date from job if available, else current time
@@ -1085,15 +1074,34 @@ async def cb_save_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
     ])
     
+    await app.bot.send_message(
+        chat_id=chat_id,
+        text="\n".join(lines),
+        parse_mode=constants.ParseMode.HTML,
+        reply_markup=save_kb,
+        disable_web_page_preview=True
+    )
+    return True
+
+async def cb_save_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
     try:
-        await context.bot.send_message(
-            chat_id=q.from_user.id,
-            text="\n".join(lines),
-            parse_mode=constants.ParseMode.HTML,
-            reply_markup=save_kb,
-            disable_web_page_preview=True
-        )
-        await q.answer("Đã gửi tin nhắn cấu hình vào chat riêng của bạn! 📩", show_alert=True)
+        _, run_id_str = q.data.split(":")
+        run_id = int(run_id_str)
+    except:
+        return await q.answer("Lỗi ID", show_alert=True)
+        
+    storage: StorageBase = context.application.bot_data["storage"]
+    job = await storage.get_job_by_run_id(run_id)
+    if not job:
+        return await q.answer("Không tìm thấy dữ liệu build này trong hệ thống.", show_alert=True)
+        
+    try:
+        if await send_saved_config(context.application, run_id, job, q.from_user.id):
+            await q.answer("Đã gửi tin nhắn cấu hình vào chat riêng của bạn! 📩", show_alert=True)
+        else:
+            await q.answer("Không có thông tin cấu hình cho build này.", show_alert=True)
     except Exception as e:
         logger.error("Failed to PM user: %s", e)
         # Nút "Lưu" có thể được bấm trong nhóm. Nếu user chưa start bot, sẽ ném lỗi Forbidden
