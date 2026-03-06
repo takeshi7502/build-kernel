@@ -23,7 +23,7 @@ from telegram.ext import (
 from telegram.request import HTTPXRequest
 
 import config
-from gki import build_gki_conversation, _del_msg_job
+from gki import build_gki_conversation, _del_msg_job, SUB_LEVELS
 from permissions import is_owner, is_admin
 
 logging.basicConfig(
@@ -50,6 +50,7 @@ class StorageBase:
     async def get_admin_ids(self) -> List[int]: ...
     async def add_admin(self, user_id: int): ...
     async def remove_admin(self, user_id: int) -> bool: ...
+    async def delete_job_by_run_id(self, run_id: int) -> bool: ...
 
 
 class JSONStorage(StorageBase):
@@ -185,6 +186,17 @@ class JSONStorage(StorageBase):
             data["jobs"] = new_jobs
             self._save(data)
             return deleted
+
+    async def delete_job_by_run_id(self, run_id: int) -> bool:
+        async with self._lock:
+            data = self._load()
+            jobs = data.get("jobs", [])
+            new_jobs = [j for j in jobs if j.get("run_id") != run_id]
+            if len(new_jobs) != len(jobs):
+                data["jobs"] = new_jobs
+                self._save(data)
+                return True
+            return False
 
     async def get_job_by_run_id(self, run_id: int) -> Optional[Dict[str, Any]]:
         async with self._lock:
@@ -831,7 +843,7 @@ async def show_list_page(update: Update, context: ContextTypes.DEFAULT_TYPE, pag
         # Dùng nightly.link theo run_id để mở trang tải artifacts trực tiếp.
         # Cách này tránh gọi artifacts API cho từng item nên list load nhanh hơn.
         nightly_url = f"https://nightly.link/{config.GITHUB_OWNER}/{repo}/actions/runs/{run_id}"
-        artifact_str = f"<a href='{nightly_url}'>📦 Mở trang tải file</a>"
+        artifact_str = f"📦 <a href='{nightly_url}'>Tải về</a>"
 
         job = run_to_job.get(run_id)
         if job:
@@ -842,15 +854,19 @@ async def show_list_page(update: Update, context: ContextTypes.DEFAULT_TYPE, pag
             if user_id == 0:
                 mention = "Hệ thống cũ"
             else:
-                mention = f'<a href="tg://user?id={user_id}">{user_name}</a>'
+                mention = f'{user_name}'
+            inputs = job.get("inputs", {})
+            build_lines = _format_build_lines(inputs)
         else:
             actor = r.get("actor", {}).get("login", "Unknown")
             mention = f"GitHub / {actor}"
+            build_lines = []
 
-        text += f"<b>{start_idx + i + 1}. Run #{run_id}</b>\n"
-        text += f"👤 Từ: {mention} | 🌿 Nhánh: <code>{branch}</code>\n"
-        text += f"🕒 {time_str} | 🔗 <a href='{html_url}'>GitHub</a>\n"
-        text += f"📦 Tải về: {artifact_str}\n\n"
+        text += f"<b>{start_idx + i + 1}. Run #{run_id} by {mention}</b>\n"
+        for bl in build_lines:
+            text += f"{bl}\n"
+        text += f"🕒 Time: {time_str} | 🔗 <a href='{html_url}'>GitHub</a> | {artifact_str}\n"
+        text += f"📦 Xoá → /delete_{run_id}\n\n"
 
     kb = []
     if total_pages > 1:
@@ -871,8 +887,41 @@ async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     await show_list_page(update, context, page=1, cmd_msg_id=update.message.message_id)
 
+def _format_build_lines(inputs: dict) -> list[str]:
+    lines = []
+    if not inputs:
+        return lines
+        
+    variant = inputs.get("variant", "Unknown")
+    branch = inputs.get("branch", "Unknown").split("(")[0]
+    c_name = inputs.get("custom_name", "")
+    has_zram = "ZRAM" if inputs.get("enable_zram") in (True, "true") else ""
+    ksu = inputs.get("ksu_type", "")
+    
+    parts = [variant, branch]
+    if c_name: parts.append(c_name)
+    if has_zram: parts.append(has_zram)
+    if ksu: parts.append(ksu)
+    
+    prefix = "|".join(parts)
+    
+    subs = inputs.get("sub_levels", "")
+    sub_list = subs.split(",") if subs else []
+    
+    for tk, prefix_tk in [("build_a12_5_10", "A12-5.10"), ("build_a13_5_15", "A13-5.15"), 
+                          ("build_a14_6_1", "A14-6.1"), ("build_a15_6_6", "A15-6.6")]:
+        if inputs.get(tk):
+            sl = sub_list if subs else SUB_LEVELS.get(tk, [])
+            for s in sl:
+                lines.append(f"🌿 Build: {prefix}|{prefix_tk}.{s.strip()}")
+                
+    return lines
+
 async def cb_list_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
+    storage: StorageBase = context.application.bot_data["storage"]
+    if not await is_admin(update.effective_user.id, storage):
+        return await q.answer()
     await q.answer()
     try:
         _, page_str = q.data.split(":")
@@ -893,8 +942,11 @@ async def cb_list_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cb_run_controls(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    gh: GitHubAPI = context.application.bot_data["gh"]
     q = update.callback_query
+    storage: StorageBase = context.application.bot_data["storage"]
+    if not await is_admin(update.effective_user.id, storage):
+        return await q.answer()
+    gh: GitHubAPI = context.application.bot_data["gh"]
     await q.answer()
     _, repo_tag, run_id_str = q.data.split(":", 2)
     run_id = int(run_id_str)
@@ -911,8 +963,11 @@ async def cb_run_controls(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cb_run_control_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    gh: GitHubAPI = context.application.bot_data["gh"]
     q = update.callback_query
+    storage: StorageBase = context.application.bot_data["storage"]
+    if not await is_admin(update.effective_user.id, storage):
+        return await q.answer()
+    gh: GitHubAPI = context.application.bot_data["gh"]
     await q.answer()
     
     parts = q.data.split(":")
@@ -1010,26 +1065,18 @@ async def check_user_job_limit(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def cb_close_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
+    storage: StorageBase = context.application.bot_data["storage"]
+    if not await is_admin(update.effective_user.id, storage):
+        return await q.answer()
     await q.answer()
-    chat_id = q.message.chat_id
-    # Parse cmd_msg_id từ callback data
-    cmd_msg_id = 0
-    if ":" in q.data:
-        try:
-            cmd_msg_id = int(q.data.split(":")[1])
-        except:
-            pass
-    # Xóa tin nhắn bot
     try:
-        await q.delete_message()
-    except Exception:
-        pass
-    # Xóa lệnh gọi
-    if cmd_msg_id:
-        try:
-            await context.bot.delete_message(chat_id=chat_id, message_id=cmd_msg_id)
-        except Exception:
-            pass
+        _, msg_id_str = q.data.split(":")
+        msg_id = int(msg_id_str)
+        if msg_id:
+            await safe_delete_message(context, q.message.chat_id, msg_id)
+        await q.message.delete()
+    except Exception as e:
+        logger.error("Close msg failed: %s", e)
 
 async def send_saved_config(app, run_id, job, chat_id):
     inputs = job.get("inputs", {})
@@ -1098,6 +1145,9 @@ async def send_saved_config(app, run_id, job, chat_id):
 
 async def cb_save_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
+    storage: StorageBase = context.application.bot_data["storage"]
+    if not await is_admin(update.effective_user.id, storage):
+        return await q.answer()
     await q.answer()
     try:
         _, run_id_str = q.data.split(":")
@@ -1105,7 +1155,6 @@ async def cb_save_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except:
         return await q.answer("Lỗi ID", show_alert=True)
         
-    storage: StorageBase = context.application.bot_data["storage"]
     job = await storage.get_job_by_run_id(run_id)
     if not job:
         return await q.answer("Không tìm thấy dữ liệu build này trong hệ thống.", show_alert=True)
@@ -1145,6 +1194,33 @@ async def cmd_cancel_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text(f"❌ Lỗi hủy: {res['status']} {res.get('json', '')}")
 
+async def cmd_delete_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    storage: StorageBase = context.application.bot_data["storage"]
+    if not await is_admin(user.id, storage):
+        return await update.message.reply_text("⛔ Bạn không có quyền xoá job.")
+    
+    text = update.message.text.strip()
+    try:
+        raw_cmd = text.split()[0]
+        run_id_str = raw_cmd.split("_")[1].split("@")[0]
+        run_id = int(run_id_str)
+    except:
+        return await update.message.reply_text("❌ ID không hợp lệ.")
+        
+    gh: GitHubAPI = context.application.bot_data["gh"]
+    await update.message.reply_text(f"⏳ Đang gửi lệnh xoá Run #{run_id} lên GitHub...")
+    res = await gh.delete_run(config.GKI_REPO, run_id)
+    if res["status"] in (202, 204):
+        await update.message.reply_text(f"✅ Đã yêu cầu xoá thành công Run #{run_id}.")
+        await storage.delete_job_by_run_id(run_id)
+    else:
+        if res["status"] in (404,):
+            await storage.delete_job_by_run_id(run_id)
+            await update.message.reply_text(f"✅ Run #{run_id} không tồn tại trên GitHub. Đã xoá khỏi dữ liệu nội bộ.")
+        else:
+            await update.message.reply_text(f"❌ Lỗi xoá: {res['status']} {res.get('json', '')}")
+
 def main():
     storage = JSONStorage(DATA_JSON)
     gh = GitHubAPI(config.GITHUB_TOKEN, config.GITHUB_OWNER)
@@ -1171,6 +1247,7 @@ def main():
     app.add_handler(CallbackQueryHandler(cb_run_control_action, pattern=r"^runctl:(cancel|close):gki:\d+(?::\d+)?$"))
     app.add_handler(CallbackQueryHandler(cb_save_run, pattern=r"^saverun:\d+$"))
     app.add_handler(MessageHandler(filters.Regex(r"^/cancel_\d+(?:@[\w_]+)?$"), cmd_cancel_run))
+    app.add_handler(MessageHandler(filters.Regex(r"^/delete_\d+(?:@[\w_]+)?$"), cmd_delete_run))
 
     # GKI conversation
     gki_conv = build_gki_conversation(gh, storage, config)
