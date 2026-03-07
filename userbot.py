@@ -442,7 +442,7 @@ def _clear_session(key: tuple):
     _sessions.pop(key, None)
 
 
-def _new_session(key: tuple, build_key: Optional[str] = None, admin: bool = True) -> Dict[str, Any]:
+def _new_session(key: tuple, build_key: Optional[str] = None, admin: bool = True, user_name: str = "Unknown", user_id: int = 0) -> Dict[str, Any]:
     session = {
         "step": "variant",
         "inputs": dict(DEFAULT_INPUTS),
@@ -451,6 +451,8 @@ def _new_session(key: tuple, build_key: Optional[str] = None, admin: bool = True
         "menu_msg_id": None,
         "build_key": build_key,
         "admin": admin,
+        "user_name": user_name,
+        "user_id": user_id,
     }
     _sessions[key] = session
     return session
