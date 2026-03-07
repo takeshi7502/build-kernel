@@ -594,33 +594,40 @@ async def _update_menu(event, session: Dict[str, Any], text: str):
     session["menu_msg_id"] = msg.id
 
 
+def _task_header(session: Dict[str, Any]) -> str:
+    uid = session.get("user_id", 0)
+    name = session.get("user_name", "Unknown")
+    return f'📋 <b>Task by <a href="tg://user?id={uid}">{name}</a></b>\n\n'
+
+
 # ─── Step handlers ───────────────────────────────────────────────────
 async def _show_step(event, session: Dict[str, Any]):
     """Display the current step's menu."""
     step = session["step"]
     admin = session.get("admin", True)
-
+    header = _task_header(session)
+    
     if step == "variant":
-        text = _build_menu("Chọn KernelSU variant:", VARIANTS, back=False)
+        text = header + _build_menu("<b>Chọn KernelSU variant:</b>", VARIANTS, back=False)
     elif step == "branch":
-        text = _build_menu("Chọn nhánh KernelSU:", ["Stable", "Dev"])
+        text = header + _build_menu("<b>Chọn nhánh KernelSU:</b>", ["Stable", "Dev"])
     elif step == "version":
-        text = ("Nhập tên version\n(VD nhập: JinYan → 5.10.209-JinYan)\n"
-                "Hoặc gửi 'skip' để bỏ qua.\n\n"
+        text = (header + "<b>Nhập tên version</b>\n<i>(VD nhập: JinYan → 5.10.209-JinYan)</i>\n"
+                "Hoặc gửi <code>skip</code> để bỏ qua.\n\n"
                 "  0 = Quay lại  |  x = Hủy")
     elif step == "zram":
-        text = _build_menu("Bật ZRAM? (mặc định: bật)", ["✅ Bật", "❌ Tắt"])
+        text = header + _build_menu("<b>Bật ZRAM?</b> <i>(mặc định: bật)</i>", ["✅ Bật", "❌ Tắt"])
     elif step == "bbg":
-        text = _build_menu("Bật BBG? (mặc định: bật)", ["✅ Bật", "❌ Tắt"])
+        text = header + _build_menu("<b>Bật BBG?</b> <i>(mặc định: bật)</i>", ["✅ Bật", "❌ Tắt"])
     elif step == "kpm":
-        text = _build_menu("Bật KPM? (mặc định: bật)", ["✅ Bật", "❌ Tắt"])
+        text = header + _build_menu("<b>Bật KPM?</b> <i>(mặc định: bật)</i>", ["✅ Bật", "❌ Tắt"])
     elif step == "susfs":
-        text = _build_menu("Tắt SUSFS? (mặc định: bật)", ["✅ Tắt SUSFS", "❌ Giữ SUSFS"])
+        text = header + _build_menu("<b>Tắt SUSFS?</b> <i>(mặc định: bật)</i>", ["✅ Tắt SUSFS", "❌ Giữ SUSFS"])
     elif step == "target":
         labels = [label for label, _ in BUILD_TARGETS]
-        text = _build_menu("Chọn phiên bản Android để build:", labels)
+        text = header + _build_menu("<b>Chọn phiên bản Android để build:</b>", labels)
     elif step == "sub":
-        text = _build_sub_menu(session)
+        text = header + _build_sub_menu(session)
     elif step == "release":
         # Regular users skip release step (default Actions)
         if not admin:
