@@ -1,5 +1,8 @@
 # Secrets
 .env
+*.session
+gen_session.py
+login.py
 
 # Runtime data
 data.json
