@@ -513,6 +513,8 @@ async def poller(app):
             jobs = await storage.list_unnotified_jobs()
             for job in jobs:
                 try:
+                    if job.get("notify_via") == "userbot":
+                        continue
                     repo = job["repo"]
                     run_id = job.get("run_id")
                     ref = job.get("ref", "main")

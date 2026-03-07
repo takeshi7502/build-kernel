@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import aiohttp
 from dotenv import load_dotenv
 from telethon import TelegramClient, events
+from telethon.sessions import StringSession
 
 load_dotenv()
 
@@ -25,6 +26,7 @@ logging.basicConfig(
 logger = logging.getLogger("gki-userbot")
 
 
+# ─── Config ───────────────────────────────────────────────────────────
 def _required(key: str) -> str:
     val = os.getenv(key, "").strip()
     if not val:
@@ -43,20 +45,6 @@ def _parse_int_list(raw: str) -> List[int]:
     return out
 
 
-def _parse_workflows(raw: str) -> Dict[str, str]:
-    out: Dict[str, str] = {}
-    for pair in raw.split(","):
-        pair = pair.strip()
-        if not pair or "=" not in pair:
-            continue
-        name, file_name = pair.split("=", 1)
-        name = name.strip()
-        file_name = file_name.strip()
-        if name and file_name:
-            out[name] = file_name
-    return out
-
-
 TELEGRAM_API_ID = int(_required("TELEGRAM_API_ID"))
 TELEGRAM_API_HASH = _required("TELEGRAM_API_HASH")
 TELEGRAM_SESSION = os.getenv("TELEGRAM_SESSION", "gki_user").strip() or "gki_user"
@@ -65,32 +53,50 @@ GITHUB_TOKEN = _required("GITHUB_TOKEN")
 GITHUB_OWNER = _required("GITHUB_OWNER")
 GKI_REPO = _required("GKI_REPO")
 GKI_DEFAULT_BRANCH = os.getenv("GKI_DEFAULT_BRANCH", "main").strip() or "main"
-GKI_WORKFLOWS = _parse_workflows(os.getenv("GKI_WORKFLOWS", "Build=main.yml"))
+
+_wf_raw = os.getenv("GKI_WORKFLOWS", "Build=main.yml").strip()
+GKI_WORKFLOWS: Dict[str, str] = {}
+for _pair in _wf_raw.split(","):
+    _pair = _pair.strip()
+    if "=" in _pair:
+        _n, _f = _pair.split("=", 1)
+        if _n.strip() and _f.strip():
+            GKI_WORKFLOWS[_n.strip()] = _f.strip()
 if not GKI_WORKFLOWS:
     GKI_WORKFLOWS = {"Build": "main.yml"}
 
 WORKFLOW_FILE = list(GKI_WORKFLOWS.values())[0]
 ALLOWED_CHAT_IDS = set(_parse_int_list(os.getenv("USERBOT_ALLOWED_CHAT_IDS", "")))
 DATA_JSON = os.getenv("USERBOT_DATA_FILE", "data.json").strip() or "data.json"
+OWNER_ID = int(os.getenv("OWNER_ID", "0").strip() or "0")
+ADMIN_IDS = set(_parse_int_list(os.getenv("ADMIN_IDS", "")))
+USERBOT_STANDALONE = os.getenv("USERBOT_STANDALONE", "0").strip().lower() in {"1", "true", "yes", "on"}
 
-TARGET_KEYS = ["build_a12_5_10", "build_a13_5_15", "build_a14_6_1", "build_a15_6_6"]
-TARGET_ALIASES = {
-    "a12": "build_a12_5_10",
-    "a13": "build_a13_5_15",
-    "a14": "build_a14_6_1",
-    "a15": "build_a15_6_6",
-    "12": "build_a12_5_10",
-    "13": "build_a13_5_15",
-    "14": "build_a14_6_1",
-    "15": "build_a15_6_6",
-    "5.10": "build_a12_5_10",
-    "5.15": "build_a13_5_15",
-    "6.1": "build_a14_6_1",
-    "6.6": "build_a15_6_6",
+# ─── Build data ───────────────────────────────────────────────────────
+VARIANTS = ["SukiSU", "ReSukiSU", "Official", "Next", "MKSU"]
+BRANCHES = ["Stable(标准)", "Dev(开发)"]
+RELEASE_TYPES = ["Actions", "Pre-Release", "Release"]
+BUILD_TARGETS = [
+    ("Android 12 - 5.10", "build_a12_5_10"),
+    ("Android 13 - 5.15", "build_a13_5_15"),
+    ("Android 14 - 6.1", "build_a14_6_1"),
+    ("Android 15 - 6.6", "build_a15_6_6"),
+]
+SUB_LEVELS = {
+    "build_a12_5_10": ["66","81","101","110","117","136","149","160","168","177","185","198","205","209","218","226","233","236","237","240","246"],
+    "build_a13_5_15": ["74","78","94","104","119","123","137","144","148","149","151","153","167","170","178","180","185","189","194"],
+    "build_a14_6_1": ["25","43","57","68","75","78","84","90","93","99","112","115","118","124","128","129","134","138","141","145","157"],
+    "build_a15_6_6": ["50","56","57","58","66","77","82","87","89","92","98","102","118"],
 }
-
-BOOL_TRUE = {"1", "true", "yes", "y", "on"}
-BOOL_FALSE = {"0", "false", "no", "n", "off"}
+TARGET_ALIASES = {
+    "a12": "build_a12_5_10", "a13": "build_a13_5_15",
+    "a14": "build_a14_6_1", "a15": "build_a15_6_6",
+    "12": "build_a12_5_10", "13": "build_a13_5_15",
+    "14": "build_a14_6_1", "15": "build_a15_6_6",
+    "5.10": "build_a12_5_10", "5.15": "build_a13_5_15",
+    "6.1": "build_a14_6_1", "6.6": "build_a15_6_6",
+}
+TARGET_KEYS = list(SUB_LEVELS.keys())
 
 DEFAULT_INPUTS: Dict[str, Any] = {
     "kernelsu_variant": "SukiSU",
@@ -111,6 +117,177 @@ DEFAULT_INPUTS: Dict[str, Any] = {
 }
 
 
+# ─── JSONStorage (shared with bot) ────────────────────────────────────
+class JSONStorage:
+    def __init__(self, path: str):
+        self.path = path
+        self._lock = asyncio.Lock()
+        if not os.path.exists(self.path):
+            self._save({"keys": {}, "jobs": [], "messages": {}})
+
+    def _load(self) -> Dict[str, Any]:
+        if not os.path.exists(self.path):
+            return {"keys": {}, "jobs": [], "messages": {}}
+        try:
+            with open(self.path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {"keys": {}, "jobs": [], "messages": {}}
+
+    def _save(self, data: Dict[str, Any]):
+        try:
+            with open(self.path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.error("Save JSON failed: %s", e)
+
+    async def get_uses(self, code: str) -> int:
+        async with self._lock:
+            data = self._load()
+            return int(data.get("keys", {}).get(code, {}).get("uses", 0))
+
+    async def get_all_keys(self) -> Dict[str, int]:
+        async with self._lock:
+            data = self._load()
+            keys = data.get("keys", {})
+            return {code: int(info.get("uses", 0)) for code, info in keys.items()}
+
+    async def consume(self, code: str) -> bool:
+        async with self._lock:
+            data = self._load()
+            if code not in data.get("keys", {}):
+                return False
+            uses = int(data["keys"][code].get("uses", 0))
+            if uses <= 0:
+                return False
+            data["keys"][code]["uses"] = uses - 1
+            self._save(data)
+            return True
+
+    async def set_key(self, code: str, uses: int):
+        async with self._lock:
+            data = self._load()
+            data.setdefault("keys", {})[code] = {"uses": uses}
+            self._save(data)
+
+    async def add_job(self, job: Dict[str, Any]) -> Any:
+        async with self._lock:
+            data = self._load()
+            jobs = data.setdefault("jobs", [])
+            job_id = max((j.get("_id", 0) for j in jobs), default=0) + 1
+            job["_id"] = job_id
+            job["created_at"] = datetime.now(timezone.utc).isoformat()
+            jobs.append(job)
+            self._save(data)
+            return job_id
+
+    async def update_job(self, job_id, fields: Dict[str, Any]):
+        async with self._lock:
+            data = self._load()
+            for j in data.get("jobs", []):
+                if j.get("_id") == job_id:
+                    j.update(fields)
+                    break
+            self._save(data)
+
+    async def get_jobs(self) -> List[Dict[str, Any]]:
+        async with self._lock:
+            data = self._load()
+            return data.get("jobs", [])
+
+    async def list_unnotified_jobs(self) -> List[Dict[str, Any]]:
+        async with self._lock:
+            data = self._load()
+            return [j for j in data.get("jobs", []) if not j.get("notified")]
+
+    async def get_job_by_run_id(self, run_id: int) -> Optional[Dict[str, Any]]:
+        async with self._lock:
+            data = self._load()
+            for j in data.get("jobs", []):
+                if j.get("run_id") == run_id:
+                    return j
+            return None
+
+    async def delete_job_by_run_id(self, run_id: int) -> bool:
+        async with self._lock:
+            data = self._load()
+            jobs = data.get("jobs", [])
+            new_jobs = [j for j in jobs if j.get("run_id") != run_id]
+            if len(new_jobs) != len(jobs):
+                data["jobs"] = new_jobs
+                self._save(data)
+                return True
+            return False
+
+    async def add_successful_build(self, run_id: int, user_id: int, branch: str, user_name: str = ""):
+        async with self._lock:
+            data = self._load()
+            builds = data.setdefault("successful_builds", [])
+            build = {"run_id": run_id, "user_id": user_id, "user_name": user_name, "branch": branch, "timestamp": datetime.now(timezone.utc).isoformat()}
+            builds.insert(0, build)
+            data["successful_builds"] = builds[:50]
+            self._save(data)
+
+    async def delete_old_messages(self, older_than_hours: int = 24):
+        async with self._lock:
+            data = self._load()
+            cutoff = datetime.now(timezone.utc) - timedelta(hours=older_than_hours)
+            messages = data.get("messages", {})
+            deleted = 0
+            for msg_id, info in list(messages.items()):
+                try:
+                    ts = datetime.fromisoformat(info["timestamp"])
+                    if ts < cutoff:
+                        del messages[msg_id]
+                        deleted += 1
+                except Exception:
+                    del messages[msg_id]
+                    deleted += 1
+            data["messages"] = messages
+            self._save(data)
+            return deleted
+
+    async def delete_old_jobs(self, older_than_days: int = 7):
+        async with self._lock:
+            data = self._load()
+            cutoff = datetime.now(timezone.utc) - timedelta(days=older_than_days)
+            jobs = data.get("jobs", [])
+            new_jobs = []
+            deleted = 0
+            for j in jobs:
+                try:
+                    ts = datetime.fromisoformat(j.get("created_at", ""))
+                    if ts >= cutoff:
+                        new_jobs.append(j)
+                    else:
+                        deleted += 1
+                except Exception:
+                    deleted += 1
+            data["jobs"] = new_jobs
+            self._save(data)
+            return deleted
+
+    async def add_waiter(self, user_id: int, chat_id: int, user_name: str = ""):
+        async with self._lock:
+            data = self._load()
+            waiters = data.setdefault("waiters", [])
+            if not any(w.get("user_id") == user_id for w in waiters):
+                waiters.append({"user_id": user_id, "chat_id": chat_id, "user_name": user_name})
+                self._save(data)
+
+    async def clear_waiters(self):
+        async with self._lock:
+            data = self._load()
+            data["waiters"] = []
+            self._save(data)
+
+    async def get_waiters(self) -> List[dict]:
+        async with self._lock:
+            data = self._load()
+            return data.get("waiters", [])
+
+
+# ─── GitHub API ───────────────────────────────────────────────────────
 class GitHubAPI:
     def __init__(self, token: str, owner: str):
         self.token = token
@@ -166,7 +343,6 @@ class GitHubAPI:
                 if text in ("", "none"):
                     continue
                 cleaned[key] = text
-
         url = f"{self.base}/repos/{self.owner}/{repo}/actions/workflows/{workflow_file}/dispatches"
         payload = {"ref": ref, "inputs": cleaned}
         return await self._request("POST", url, json_payload=payload)
@@ -185,121 +361,21 @@ class GitHubAPI:
         url = f"{self.base}/repos/{self.owner}/{repo}/actions/runs/{run_id}/cancel"
         return await self._request("POST", url)
 
+    async def delete_run(self, repo: str, run_id: int):
+        url = f"{self.base}/repos/{self.owner}/{repo}/actions/runs/{run_id}"
+        return await self._request("DELETE", url)
 
-def _parse_bool(raw: str) -> bool:
-    low = raw.strip().lower()
-    if low in BOOL_TRUE:
-        return True
-    if low in BOOL_FALSE:
-        return False
-    raise ValueError(f"Invalid boolean value: {raw}")
+    async def list_runs_for_repo(self, repo: str, ref: str, created_iso: str):
+        ts = datetime.fromisoformat(created_iso) - timedelta(seconds=10)
+        url = f"{self.base}/repos/{self.owner}/{repo}/actions/runs?branch={ref}&per_page=10&created=%3E{ts.isoformat()}"
+        return await self._request("GET", url)
 
-
-def _normalize_branch(raw: str) -> str:
-    low = raw.strip().lower()
-    if low in {"stable", "std", "s"}:
-        return "Stable(标准)"
-    if low in {"dev", "d"}:
-        return "Dev(开发)"
-    return raw
+    async def list_artifacts_for_run(self, repo: str, run_id: int):
+        url = f"{self.base}/repos/{self.owner}/{repo}/actions/runs/{run_id}/artifacts"
+        return await self._request("GET", url)
 
 
-def _normalize_release(raw: str) -> str:
-    low = raw.strip().lower()
-    if low in {"actions", "action"}:
-        return "Actions"
-    if low in {"pre-release", "prerelease", "pre"}:
-        return "Pre-Release"
-    if low in {"release", "rel"}:
-        return "Release"
-    raise ValueError(f"Invalid release type: {raw}")
-
-
-def _normalize_target(raw: str) -> str:
-    low = raw.strip().lower()
-    if low in TARGET_KEYS:
-        return low
-    mapped = TARGET_ALIASES.get(low)
-    if mapped:
-        return mapped
-    raise ValueError(f"Invalid target: {raw}")
-
-
-def _build_inputs(arg_string: str) -> Tuple[Dict[str, Any], List[str]]:
-    inputs = dict(DEFAULT_INPUTS)
-    notes: List[str] = []
-
-    if not arg_string or not arg_string.strip():
-        return inputs, ["Dang dung cau hinh mac dinh (target: Android 14 - 6.1)."]
-
-    pairs: Dict[str, str] = {}
-    for token in shlex.split(arg_string):
-        if "=" not in token:
-            raise ValueError(f"Invalid argument '{token}'. Use key=value format.")
-        key, value = token.split("=", 1)
-        key = key.strip().lower()
-        if not key:
-            raise ValueError("Empty argument key.")
-        pairs[key] = value.strip()
-
-    if "variant" in pairs:
-        inputs["kernelsu_variant"] = pairs["variant"]
-    if "branch" in pairs:
-        inputs["kernelsu_branch"] = _normalize_branch(pairs["branch"])
-    if "version" in pairs:
-        version = pairs["version"]
-        if version and not version.startswith("-"):
-            version = f"-{version}"
-        inputs["version"] = version
-    if "build_time" in pairs:
-        inputs["build_time"] = pairs["build_time"]
-
-    if "zram" in pairs:
-        inputs["use_zram"] = _parse_bool(pairs["zram"])
-    if "bbg" in pairs:
-        inputs["use_bbg"] = _parse_bool(pairs["bbg"])
-    if "kpm" in pairs:
-        inputs["use_kpm"] = _parse_bool(pairs["kpm"])
-    if "susfs" in pairs:
-        inputs["cancel_susfs"] = _parse_bool(pairs["susfs"])
-
-    if "target" in pairs:
-        selected = _normalize_target(pairs["target"])
-        for k in TARGET_KEYS:
-            inputs[k] = (k == selected)
-
-    if "subs" in pairs:
-        raw_subs = pairs["subs"].strip()
-        if raw_subs.lower() in {"", "all", "*"}:
-            inputs["sub_levels"] = ""
-        else:
-            cleaned = [x.strip() for x in raw_subs.split(",") if x.strip()]
-            if not cleaned:
-                raise ValueError("subs cannot be empty when provided.")
-            inputs["sub_levels"] = ",".join(cleaned)
-
-    if "release" in pairs:
-        inputs["release_type"] = _normalize_release(pairs["release"])
-
-    unknown = sorted(set(pairs.keys()) - {
-        "variant", "branch", "version", "build_time",
-        "zram", "bbg", "kpm", "susfs", "target", "subs", "release",
-    })
-    if unknown:
-        notes.append(f"Ignored unknown keys: {', '.join(unknown)}")
-
-    return inputs, notes
-
-
-def _matches_target_run(run: dict) -> bool:
-    if run.get("head_branch") != GKI_DEFAULT_BRANCH:
-        return False
-    path = run.get("path", "")
-    if WORKFLOW_FILE and WORKFLOW_FILE not in path:
-        return False
-    return True
-
-
+# ─── Helpers ──────────────────────────────────────────────────────────
 def _format_time_utc7(iso_time: str) -> str:
     try:
         dt_obj = datetime.fromisoformat(iso_time.replace("Z", "+00:00"))
@@ -313,178 +389,802 @@ def _is_allowed_chat(chat_id: Optional[int]) -> bool:
         return True
     return chat_id in ALLOWED_CHAT_IDS
 
-def _load_shared_data() -> Dict[str, Any]:
-    if not os.path.exists(DATA_JSON):
-        return {"keys": {}, "jobs": [], "messages": {}}
+
+def _matches_target_run(run: dict) -> bool:
+    if run.get("head_branch") != GKI_DEFAULT_BRANCH:
+        return False
+    path = run.get("path", "")
+    if WORKFLOW_FILE and WORKFLOW_FILE not in path:
+        return False
+    return True
+
+
+# ─── GKI Flow State Machine ──────────────────────────────────────────
+# Steps: variant -> branch -> version -> zram -> bbg -> kpm -> susfs -> target -> sub -> release -> confirm
+STEPS = ["variant", "branch", "version", "zram", "bbg", "kpm", "susfs", "target", "sub", "release", "confirm"]
+
+# Per-user session storage: key = (chat_id, sender_id)
+_sessions: Dict[tuple, Dict[str, Any]] = {}
+
+
+def _session_key(event) -> tuple:
+    return (event.chat_id, event.sender_id)
+
+
+def _get_session(key: tuple) -> Optional[Dict[str, Any]]:
+    return _sessions.get(key)
+
+
+def _clear_session(key: tuple):
+    _sessions.pop(key, None)
+
+
+def _new_session(key: tuple, build_key: Optional[str] = None, admin: bool = True) -> Dict[str, Any]:
+    session = {
+        "step": "variant",
+        "inputs": dict(DEFAULT_INPUTS),
+        "selected_target": None,
+        "selected_subs": set(),
+        "menu_msg_id": None,
+        "build_key": build_key,
+        "admin": admin,
+    }
+    _sessions[key] = session
+    return session
+
+
+def _build_menu(title: str, options: List[str], back: bool = True, extra_footer: str = "") -> str:
+    lines = [title, ""]
+    for i, opt in enumerate(options, 1):
+        lines.append(f"  {i}. {opt}")
+    lines.append("")
+    footer_parts = []
+    if back:
+        footer_parts.append("0 = Quay lại")
+    footer_parts.append("x = Hủy")
+    lines.append("  " + "  |  ".join(footer_parts))
+    if extra_footer:
+        lines.append(extra_footer)
+    return "\n".join(lines)
+
+
+def _build_sub_menu(session: Dict[str, Any]) -> str:
+    target_key = session["selected_target"]
+    available = SUB_LEVELS.get(target_key, [])
+    selected = session["selected_subs"]
+    target_label = next((label for label, k in BUILD_TARGETS if k == target_key), target_key)
+    major = target_label.split(" - ")[-1] if " - " in target_label else ""
+
+    lines = [f"Chọn sub-version cho {target_label}:", f"(Đã chọn: {len(selected)}/{len(available)})", ""]
+    for i, sv in enumerate(available, 1):
+        icon = "✅" if sv in selected else "⬜"
+        lines.append(f"  {i}. {icon} {major}.{sv}")
+    lines.append("")
+    lines.append("  a = Chọn/bỏ tất cả")
+    lines.append("  ok = Tiếp tục (xác nhận sub đã chọn)")
+    lines.append("  0 = Quay lại  |  x = Hủy")
+    return "\n".join(lines)
+
+
+def _build_confirm_text(inputs: Dict[str, Any]) -> str:
+    lines = ["Xác nhận build GKI:", ""]
+    for k, v in inputs.items():
+        lines.append(f"  • {k}: {v}")
+    lines.append("")
+    lines.append("  1 = ✅ Xác nhận build")
+    lines.append("  0 = Quay lại  |  x = Hủy")
+    return "\n".join(lines)
+
+
+# ─── Init ─────────────────────────────────────────────────────────────
+gh = GitHubAPI(GITHUB_TOKEN, GITHUB_OWNER)
+storage = JSONStorage(DATA_JSON)
+
+# Use StringSession if available, else file-based session
+_string_session = os.getenv("TELEGRAM_STRING_SESSION", "").strip()
+if _string_session:
+    client = TelegramClient(StringSession(_string_session), TELEGRAM_API_ID, TELEGRAM_API_HASH)
+    logger.info("Using StringSession (no file lock)")
+else:
+    client = TelegramClient(TELEGRAM_SESSION, TELEGRAM_API_ID, TELEGRAM_API_HASH)
+    logger.info("Using file session: %s", TELEGRAM_SESSION)
+
+
+# Own user ID (set at startup)
+_my_id: int = 0
+
+# Rate limit: track last build time per user
+_user_last_build: Dict[int, float] = {}
+RATE_LIMIT_SECONDS = 1800  # 30 minutes
+
+
+def _is_admin(event) -> bool:
+    """Check if sender is admin (self, owner, or in ADMIN_IDS)."""
+    sid = event.sender_id
+    if sid == _my_id:
+        return True
+    if OWNER_ID and sid == OWNER_ID:
+        return True
+    if sid in ADMIN_IDS:
+        return True
+    return False
+
+
+def _is_authorized(event) -> bool:
+    """Check if sender is any known user (admin or regular)."""
+    # Everyone is authorized for public commands
+    return True
+
+# Track chats currently being processed (prevents re-entrant loop)
+_processing_chats: set = set()
+
+
+async def _safe_delete(event):
+    """Silently delete a message."""
     try:
-        with open(DATA_JSON, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            if isinstance(data, dict):
-                return data
+        await event.delete()
     except Exception:
         pass
-    return {"keys": {}, "jobs": [], "messages": {}}
 
+
+async def _delete_later(msg, seconds: int = 10):
+    """Schedule a message for deletion after N seconds."""
+    async def _do():
+        await asyncio.sleep(seconds)
+        try:
+            await msg.delete()
+        except Exception:
+            pass
+    asyncio.ensure_future(_do())
+
+
+async def _reply(event, text: str, html: bool = False):
+    chat_id = event.chat_id
+    _processing_chats.add(chat_id)
+    try:
+        msg = await event.reply(text, link_preview=False,
+                                parse_mode="html" if html else None)
+        return msg
+    finally:
+        _processing_chats.discard(chat_id)
+
+
+async def _reply_temp(event, text: str, seconds: int = 10, html: bool = False):
+    """Reply and auto-delete after N seconds."""
+    msg = await _reply(event, text, html=html)
+    await _delete_later(msg, seconds)
+    return msg
+
+
+async def _update_menu(event, session: Dict[str, Any], text: str):
+    """Edit menu message or send new one, tracking the message id."""
+    chat_id = event.chat_id
+    if session.get("menu_msg_id"):
+        try:
+            await client.edit_message(chat_id, session["menu_msg_id"], text)
+            return
+        except Exception:
+            pass
+    msg = await _reply(event, text)
+    session["menu_msg_id"] = msg.id
+
+
+# ─── Step handlers ───────────────────────────────────────────────────
+async def _show_step(event, session: Dict[str, Any]):
+    """Display the current step's menu."""
+    step = session["step"]
+    admin = session.get("admin", True)
+
+    if step == "variant":
+        text = _build_menu("Chọn KernelSU variant:", VARIANTS, back=False)
+    elif step == "branch":
+        text = _build_menu("Chọn nhánh KernelSU:", ["Stable", "Dev"])
+    elif step == "version":
+        text = ("Nhập tên version\n(VD nhập: JinYan → 5.10.209-JinYan)\n"
+                "Hoặc gửi 'skip' để bỏ qua.\n\n"
+                "  0 = Quay lại  |  x = Hủy")
+    elif step == "zram":
+        text = _build_menu("Bật ZRAM? (mặc định: bật)", ["✅ Bật", "❌ Tắt"])
+    elif step == "bbg":
+        text = _build_menu("Bật BBG? (mặc định: bật)", ["✅ Bật", "❌ Tắt"])
+    elif step == "kpm":
+        text = _build_menu("Bật KPM? (mặc định: bật)", ["✅ Bật", "❌ Tắt"])
+    elif step == "susfs":
+        text = _build_menu("Tắt SUSFS? (mặc định: bật)", ["✅ Tắt SUSFS", "❌ Giữ SUSFS"])
+    elif step == "target":
+        labels = [label for label, _ in BUILD_TARGETS]
+        text = _build_menu("Chọn phiên bản Android để build:", labels)
+    elif step == "sub":
+        text = _build_sub_menu(session)
+    elif step == "release":
+        # Regular users skip release step (default Actions)
+        if not admin:
+            session["inputs"]["release_type"] = "Actions"
+            session["step"] = "confirm"
+            await _show_step(event, session)
+            return
+        text = _build_menu("Chọn loại release:", RELEASE_TYPES)
+    elif step == "confirm":
+        text = _build_confirm_text(session["inputs"])
+    else:
+        text = "Lỗi: step không xác định."
+
+    await _update_menu(event, session, text)
+
+
+def _prev_step(step: str) -> Optional[str]:
+    idx = STEPS.index(step)
+    return STEPS[idx - 1] if idx > 0 else None
+
+
+async def _handle_input(event, session: Dict[str, Any], raw: str) -> bool:
+    """Process user input for current step. Returns True if session ended."""
+    step = session["step"]
+    val = raw.strip()
+    sk = _session_key(event)
+
+    # Cancel
+    if val.lower() == "x":
+        menu_msg_id = session.get("menu_msg_id")
+        _clear_session(sk)
+        # Delete menu message
+        if menu_msg_id:
+            try:
+                await client.delete_messages(event.chat_id, menu_msg_id)
+            except Exception:
+                pass
+        msg = await _reply(event, "❌ Đã hủy phiên.")
+        await _delete_later(msg, 10)
+        return True
+
+    # Back
+    if val == "0":
+        prev = _prev_step(step)
+        if prev:
+            session["step"] = prev
+            await _show_step(event, session)
+        else:
+            menu_msg_id = session.get("menu_msg_id")
+            _clear_session(sk)
+            if menu_msg_id:
+                try:
+                    await client.delete_messages(event.chat_id, menu_msg_id)
+                except Exception:
+                    pass
+            msg = await _reply(event, "❌ Đã hủy phiên.")
+            await _delete_later(msg, 10)
+            return True
+        return False
+
+    inputs = session["inputs"]
+
+    if step == "variant":
+        try:
+            idx = int(val) - 1
+            if 0 <= idx < len(VARIANTS):
+                inputs["kernelsu_variant"] = VARIANTS[idx]
+                session["step"] = "branch"
+                await _show_step(event, session)
+                return False
+        except ValueError:
+            pass
+        await _reply_temp(event, f"Chọn từ 1-{len(VARIANTS)}.", 10)
+        return False
+
+    if step == "branch":
+        try:
+            idx = int(val) - 1
+            if idx == 0:
+                inputs["kernelsu_branch"] = "Stable(标准)"
+            elif idx == 1:
+                inputs["kernelsu_branch"] = "Dev(开发)"
+            else:
+                await _reply_temp(event, "Chọn 1 hoặc 2.", 10)
+                return False
+            session["step"] = "version"
+            await _show_step(event, session)
+            return False
+        except ValueError:
+            pass
+        await _reply(event, "Chọn 1 hoặc 2.")
+        return False
+
+    if step == "version":
+        if val.lower() in ("skip", "s", "none"):
+            inputs["version"] = ""
+        else:
+            inputs["version"] = val if val.startswith("-") else f"-{val}"
+        inputs["custom_name"] = ""
+        inputs["build_time"] = ""
+        session["step"] = "zram"
+        await _show_step(event, session)
+        return False
+
+    if step in ("zram", "bbg", "kpm", "susfs"):
+        try:
+            idx = int(val)
+            if idx not in (1, 2):
+                await _reply_temp(event, "Chọn 1 hoặc 2.", 10)
+                return False
+            toggle_val = (idx == 1)
+            if step == "zram":
+                inputs["use_zram"] = toggle_val
+            elif step == "bbg":
+                inputs["use_bbg"] = toggle_val
+            elif step == "kpm":
+                inputs["use_kpm"] = toggle_val
+            elif step == "susfs":
+                inputs["cancel_susfs"] = toggle_val
+            next_idx = STEPS.index(step) + 1
+            session["step"] = STEPS[next_idx]
+            await _show_step(event, session)
+            return False
+        except ValueError:
+            pass
+        await _reply_temp(event, "Chọn 1 hoặc 2.", 10)
+        return False
+
+    if step == "target":
+        try:
+            idx = int(val) - 1
+            if 0 <= idx < len(BUILD_TARGETS):
+                _, key = BUILD_TARGETS[idx]
+                for _, k in BUILD_TARGETS:
+                    inputs[k] = (k == key)
+                session["selected_target"] = key
+                available = SUB_LEVELS.get(key, [])
+                session["selected_subs"] = set()
+                session["step"] = "sub"
+                await _show_step(event, session)
+                return False
+        except ValueError:
+            pass
+        await _reply_temp(event, f"Chọn từ 1-{len(BUILD_TARGETS)}.", 10)
+        return False
+
+    if step == "sub":
+        target_key = session["selected_target"]
+        available = SUB_LEVELS.get(target_key, [])
+        selected = session["selected_subs"]
+
+        if val.lower() == "a":
+            if len(selected) == len(available):
+                selected.clear()
+            else:
+                selected.update(available)
+            await _show_step(event, session)
+            return False
+
+        if val.lower() == "ok":
+            if not selected:
+                await _reply_temp(event, "⚠️ Chọn ít nhất 1 sub-version!", 10)
+                return False
+            if len(selected) == len(available):
+                inputs["sub_levels"] = ""
+            else:
+                inputs["sub_levels"] = ",".join(sorted(selected, key=lambda x: int(x)))
+            session["step"] = "release"
+            await _show_step(event, session)
+            return False
+
+        try:
+            idx = int(val) - 1
+            if 0 <= idx < len(available):
+                sv = available[idx]
+                if sv in selected:
+                    selected.discard(sv)
+                else:
+                    selected.add(sv)
+                await _show_step(event, session)
+                return False
+        except ValueError:
+            pass
+        await _reply_temp(event, f"Chọn từ 1-{len(available)}, 'a' (tất cả), hoặc 'ok' (tiếp tục).", 10)
+        return False
+
+    if step == "release":
+        try:
+            idx = int(val) - 1
+            if 0 <= idx < len(RELEASE_TYPES):
+                inputs["release_type"] = RELEASE_TYPES[idx]
+                session["step"] = "confirm"
+                await _show_step(event, session)
+                return False
+        except ValueError:
+            pass
+        await _reply_temp(event, f"Chọn từ 1-{len(RELEASE_TYPES)}.", 10)
+        return False
+
+    if step == "confirm":
+        if val == "1":
+            return await _do_dispatch(event, session)
+        await _reply_temp(event, "Gửi 1 để xác nhận, 0 quay lại, x hủy.", 10)
+        return False
+
+    return False
+
+
+async def _do_dispatch(event, session: Dict[str, Any]) -> bool:
+    """Dispatch workflow and cleanup session. Uses single-message flow (edit menu msg)."""
+    sk = _session_key(event)
+    chat_id = event.chat_id
+    sender_id = event.sender_id
+    inputs = session["inputs"].copy()
+    is_admin = _is_admin(event)
+    menu_msg_id = session.get("menu_msg_id")
+
+    # Rate limit for regular users
+    if not is_admin:
+        import time as _time
+        last = _user_last_build.get(sender_id, 0)
+        elapsed = _time.time() - last
+        if elapsed < RATE_LIMIT_SECONDS:
+            remaining = int((RATE_LIMIT_SECONDS - elapsed) // 60)
+            if menu_msg_id:
+                try:
+                    await client.delete_messages(chat_id, menu_msg_id)
+                except Exception:
+                    pass
+            _clear_session(sk)
+            await _reply_temp(event, f"⚠️ Giới hạn 1 build/30 phút. Vui lòng chờ ~{remaining} phút.", 10)
+            return True
+
+    # Edit menu message to show progress
+    if menu_msg_id:
+        try:
+            await client.edit_message(chat_id, menu_msg_id, "⏳ Đang kiểm tra trạng thái server...")
+        except Exception:
+            pass
+
+    # Check concurrency
+    active_runs_count = 0
+    busy_run = None
+    for st in ("in_progress", "queued"):
+        res = await gh.list_runs(GKI_REPO, per_page=20, status=st)
+        if res.get("status") == 200:
+            runs = res.get("json", {}).get("workflow_runs", [])
+            for r in runs:
+                if _matches_target_run(r):
+                    active_runs_count += 1
+                    if not busy_run:
+                        busy_run = r
+
+    max_concurrent = 10
+    if active_runs_count >= max_concurrent:
+        eta_line = ""
+        if busy_run and busy_run.get("created_at"):
+            try:
+                created_dt = datetime.fromisoformat(busy_run["created_at"].replace("Z", "+00:00"))
+                elapsed = (datetime.now(timezone.utc) - created_dt).total_seconds()
+                rem_m = max(0, int((2700 - elapsed) // 60))
+                eta_line = f"\n• Ước tính hoàn tất tiến trình cũ nhất: ~{rem_m} phút." if rem_m > 0 else "\n• Ước tính sắp hoàn tất."
+            except Exception:
+                pass
+        msg = (f"❌ Máy chủ đang quá tải!\n\n"
+               f"• Hiện tại đang có {active_runs_count} tiến trình.\n"
+               f"• Vui lòng chờ rồi thử lại.{eta_line}")
+        await storage.add_waiter(sender_id, chat_id, "")
+        if menu_msg_id:
+            try:
+                await client.edit_message(chat_id, menu_msg_id, msg)
+            except Exception:
+                await _reply(event, msg)
+        else:
+            await _reply(event, msg)
+        _clear_session(sk)
+        return True
+
+    res = await gh.dispatch_workflow(
+        repo=GKI_REPO,
+        workflow_file=WORKFLOW_FILE,
+        ref=GKI_DEFAULT_BRANCH,
+        inputs=inputs,
+    )
+    if res.get("status") not in (201, 202, 204):
+        err = f"⚠️ Dispatch failed: HTTP {res.get('status')} | {res.get('json')}"
+        if menu_msg_id:
+            try:
+                await client.edit_message(chat_id, menu_msg_id, err)
+            except Exception:
+                await _reply(event, err)
+        else:
+            await _reply(event, err)
+        _clear_session(sk)
+        return True
+
+    # Consume key for regular users
+    build_key = session.get("build_key")
+    if not is_admin and build_key:
+        await storage.consume(build_key)
+
+    # Track rate limit
+    if not is_admin:
+        import time as _time
+        _user_last_build[sender_id] = _time.time()
+
+    try:
+        sender = await client.get_entity(sender_id)
+        first = getattr(sender, 'first_name', '') or ''
+        last = getattr(sender, 'last_name', '') or ''
+        sender_name = f"{first} {last}".strip() or 'User'
+    except Exception:
+        sender_name = 'User'
+
+    job = {
+        "type": "gki",
+        "repo": GKI_REPO,
+        "workflow_file": WORKFLOW_FILE,
+        "ref": GKI_DEFAULT_BRANCH,
+        "inputs": inputs,
+        "user_id": sender_id,
+        "user_name": sender_name,
+        "chat_id": chat_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "run_id": None,
+        "status": "dispatched",
+        "conclusion": None,
+        "notified": False,
+        "notify_via": "userbot",
+    }
+    await storage.add_job(job)
+
+    view_url = f"https://github.com/{GITHUB_OWNER}/{GKI_REPO}/actions/workflows/{WORKFLOW_FILE}"
+    success_text = (
+        "✅ <b>Đã gửi build thành công!</b>\n"
+        f"⚙️ Workflow: <code>{WORKFLOW_FILE}</code>\n"
+        f"🔗 <a href='{view_url}'>Mở GitHub Actions</a>\n\n"
+        "<i>Tui sẽ thông báo khi build hoàn tất.</i>"
+    )
+    # Edit menu message to show success (single message)
+    if menu_msg_id:
+        try:
+            await client.edit_message(chat_id, menu_msg_id, success_text, parse_mode="html", link_preview=False)
+        except Exception:
+            await _reply(event, success_text, html=True)
+    else:
+        await _reply(event, success_text, html=True)
+    _clear_session(sk)
+    return True
+
+
+# ─── Quick Build (.build) ────────────────────────────────────────────
+def _parse_bool(raw: str) -> bool:
+    low = raw.strip().lower()
+    if low in {"1", "true", "yes", "y", "on"}:
+        return True
+    if low in {"0", "false", "no", "n", "off"}:
+        return False
+    raise ValueError(f"Invalid boolean: {raw}")
+
+
+def _normalize_branch(raw: str) -> str:
+    low = raw.strip().lower()
+    if low in {"stable", "std", "s"}: return "Stable(标准)"
+    if low in {"dev", "d"}: return "Dev(开发)"
+    return raw
+
+
+def _normalize_release(raw: str) -> str:
+    low = raw.strip().lower()
+    if low in {"actions", "action"}: return "Actions"
+    if low in {"pre-release", "prerelease", "pre"}: return "Pre-Release"
+    if low in {"release", "rel"}: return "Release"
+    raise ValueError(f"Invalid release type: {raw}")
+
+
+def _normalize_target(raw: str) -> str:
+    low = raw.strip().lower()
+    if low in TARGET_KEYS: return low
+    mapped = TARGET_ALIASES.get(low)
+    if mapped: return mapped
+    raise ValueError(f"Invalid target: {raw}")
+
+
+def _build_inputs(arg_string: str) -> Tuple[Dict[str, Any], List[str]]:
+    inputs = dict(DEFAULT_INPUTS)
+    notes: List[str] = []
+    if not arg_string or not arg_string.strip():
+        return inputs, ["Dung cau hinh mac dinh (target: Android 14 - 6.1)."]
+    pairs: Dict[str, str] = {}
+    for token in shlex.split(arg_string):
+        if "=" not in token:
+            raise ValueError(f"Invalid argument '{token}'. Use key=value.")
+        key, value = token.split("=", 1)
+        key = key.strip().lower()
+        if not key:
+            raise ValueError("Empty argument key.")
+        pairs[key] = value.strip()
+    if "variant" in pairs: inputs["kernelsu_variant"] = pairs["variant"]
+    if "branch" in pairs: inputs["kernelsu_branch"] = _normalize_branch(pairs["branch"])
+    if "version" in pairs:
+        version = pairs["version"]
+        if version and not version.startswith("-"): version = f"-{version}"
+        inputs["version"] = version
+    if "zram" in pairs: inputs["use_zram"] = _parse_bool(pairs["zram"])
+    if "bbg" in pairs: inputs["use_bbg"] = _parse_bool(pairs["bbg"])
+    if "kpm" in pairs: inputs["use_kpm"] = _parse_bool(pairs["kpm"])
+    if "susfs" in pairs: inputs["cancel_susfs"] = _parse_bool(pairs["susfs"])
+    if "target" in pairs:
+        selected = _normalize_target(pairs["target"])
+        for k in TARGET_KEYS: inputs[k] = (k == selected)
+    if "subs" in pairs:
+        raw_subs = pairs["subs"].strip()
+        if raw_subs.lower() in {"", "all", "*"}: inputs["sub_levels"] = ""
+        else:
+            cleaned = [x.strip() for x in raw_subs.split(",") if x.strip()]
+            if not cleaned: raise ValueError("subs cannot be empty when provided.")
+            inputs["sub_levels"] = ",".join(cleaned)
+    if "release" in pairs: inputs["release_type"] = _normalize_release(pairs["release"])
+    unknown = sorted(set(pairs.keys()) - {"variant", "branch", "version", "build_time", "zram", "bbg", "kpm", "susfs", "target", "subs", "release"})
+    if unknown: notes.append(f"Ignored unknown keys: {', '.join(unknown)}")
+    return inputs, notes
+
+
+# ─── HELP TEXT ────────────────────────────────────────────────────────
 HELP_TEXT = (
-    "GKI User Mode commands:\n"
-    "/pings\n"
-    "/sts\n/keyss\n"
-    "/lists [page]\n"
-    "/cancels <run_id>\n"
-    "/gkis [key=value ...]\n\n"
-    "Supported /gkis keys:\n"
-    "variant=..., branch=stable|dev, version=..., build_time=...\n"
+    "GKI Userbot commands:\n\n"
+    "📌 Ai cũng dùng được:\n"
+    ".ping - Kiểm tra hoạt động\n"
+    ".help - Hiện help\n"
+    ".st - Xem build đang chạy\n"
+    ".list [page] - Xem lịch sử build\n"
+    ".gki {key} - Build GKI (user cần key)\n\n"
+    "🔒 Chỉ Admin:\n"
+    ".gki - Build GKI (không cần key)\n"
+    ".build [key=value ...] - Quick build\n"
+    ".cancel [run_id] - Hủy build\n"
+    ".delete [run_id] - Xoá run\n"
+    ".key <code> <uses> - Tạo/sửa key\n"
+    ".keys - Xem danh sách key\n\n"
+    "⏱ User thường: giới hạn 1 build/giờ\n\n"
+    "Supported .build keys:\n"
+    "variant=..., branch=stable|dev, version=...\n"
     "zram=true|false, bbg=true|false, kpm=true|false, susfs=true|false\n"
-    "target=a12|a13|a14|a15 (hoac build_a12_5_10, ...)\n"
-    "subs=all|66,81,101\n"
-    "release=actions|pre-release|release\n\n"
-    "Example:\n"
-    "/gkis target=a13 variant=ReSukiSU version=HzzMonet release=actions subs=74,78"
+    "target=a12|a13|a14|a15, subs=all|66,81,101\n"
+    "release=actions|pre-release|release"
 )
 
 
-gh = GitHubAPI(GITHUB_TOKEN, GITHUB_OWNER)
-client = TelegramClient(TELEGRAM_SESSION, TELEGRAM_API_ID, TELEGRAM_API_HASH)
-
-
-async def _reply(event, text: str):
-    await event.reply(text, link_preview=False)
-
-
-
-@client.on(events.NewMessage(pattern=r"^/pings(?:@\w+)?$"))
+# ─── Commands ─────────────────────────────────────────────────────────
+@client.on(events.NewMessage(pattern=r"^\.ping$"))
 async def ping_cmd(event):
-    if not event.out or not _is_allowed_chat(event.chat_id):
+    if not _is_allowed_chat(event.chat_id):
         return
-    await _reply(event, "Pong. User mode is running.")
+    await _safe_delete(event)
+    await _reply_temp(event, "🏓 Pong! Userbot đang hoạt động.", 10)
 
 
-@client.on(events.NewMessage(pattern=r"^/sts(?:@\w+)?$"))
+
+@client.on(events.NewMessage(pattern=r"^\.st$"))
 async def status_cmd(event):
-    if not event.out or not _is_allowed_chat(event.chat_id):
+    if not _is_admin(event) or not _is_allowed_chat(event.chat_id):
         return
-
+    await _safe_delete(event)
     active_runs: List[dict] = []
     for st in ("in_progress", "queued"):
         res = await gh.list_runs(GKI_REPO, per_page=50, status=st)
         if res.get("status") == 200:
             runs = res.get("json", {}).get("workflow_runs", [])
             active_runs.extend([r for r in runs if _matches_target_run(r)])
-
     if not active_runs:
-        await _reply(event, "Khong co build nao dang chay.")
+        await _reply_temp(event, "ℹ️ Không có build nào đang chạy.", 10)
         return
 
-    lines = ["Build dang chay:"]
-    for run in active_runs[:10]:
+    jobs = await storage.get_jobs()
+    run_to_job = {j.get("run_id"): j for j in jobs if j.get("run_id")}
+
+    lines = ["<b>⚙️ Build đang chạy:</b>"]
+    for idx, run in enumerate(active_runs[:10], 1):
         run_id = run.get("id")
         run_name = run.get("name") or run.get("display_title") or "workflow"
-        created_at = run.get("created_at", "")
         elapsed_m = 0
+        created_at = run.get("created_at", "")
         if created_at:
             try:
                 created_dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
                 elapsed_m = int((datetime.now(timezone.utc) - created_dt).total_seconds() // 60)
             except Exception:
-                elapsed_m = 0
+                pass
+        job = run_to_job.get(run_id, {})
+        user_name = job.get("user_name", "GitHub")
         url = run.get("html_url", f"https://github.com/{GITHUB_OWNER}/{GKI_REPO}/actions/runs/{run_id}")
-        lines.append(
-            f"- Run #{run_id} | {run.get('status')} | {elapsed_m}m | {run_name}\n  {url}"
-        )
+        lines.append(f"")
+        lines.append(f"<b>{idx}. Run #{run_id}</b> | {run.get('status')} | {elapsed_m}p | by {user_name}")
+        lines.append(f"   🔗 <a href='{url}'>Xem trên GitHub</a>")
+        lines.append(f"   ❌ Hủy: <code>.cancel {run_id}</code>")
+    await _reply_temp(event, "\n".join(lines), 60, html=True)
 
-    await _reply(event, "\n".join(lines))
 
-
-
-@client.on(events.NewMessage(pattern=r"^/keyss(?:@\w+)?$"))
-async def keyss_cmd(event):
-    if not event.out or not _is_allowed_chat(event.chat_id):
+@client.on(events.NewMessage(pattern=r"^\.keys$"))
+async def keys_cmd(event):
+    if not _is_admin(event) or not _is_allowed_chat(event.chat_id):
         return
-
-    data = _load_shared_data()
-    keys_obj = data.get("keys", {}) if isinstance(data, dict) else {}
-    if not isinstance(keys_obj, dict) or not keys_obj:
-        await _reply(event, "Chua co key nao trong data dung chung.")
+    await _safe_delete(event)
+    keys = await storage.get_all_keys()
+    if not keys:
+        await _reply_temp(event, "Chưa có key nào.", 10)
         return
+    lines = ["🔑 <b>Danh sách Key:</b>"]
+    for i, (code, uses) in enumerate(keys.items(), 1):
+        status = f"✅ {uses} lượt" if uses > 0 else "❌ Hết lượt"
+        lines.append(f"  {i}. <code>{code}</code> — {status}")
+    await _reply_temp(event, "\n".join(lines), 60, html=True)
 
-    lines = ["Danh sach key (shared data):"]
-    for idx, (code, info) in enumerate(keys_obj.items(), start=1):
-        uses = 0
-        if isinstance(info, dict):
-            try:
-                uses = int(info.get("uses", 0))
-            except Exception:
-                uses = 0
-        status = "con luot" if uses > 0 else "het luot"
-        lines.append(f"{idx}. {code} -> {uses} ({status})")
 
-    await _reply(event, "\n".join(lines))
+@client.on(events.NewMessage(pattern=r"^\.key\s+(\S+)\s+(\d+)$"))
+async def key_cmd(event):
+    if not _is_admin(event) or not _is_allowed_chat(event.chat_id):
+        return
+    await _safe_delete(event)
+    code = event.pattern_match.group(1)
+    uses = int(event.pattern_match.group(2))
+    await storage.set_key(code, uses)
+    await _reply_temp(event, f"✅ Đã set key <code>{code}</code> với {uses} lượt.", 10, html=True)
 
-@client.on(events.NewMessage(pattern=r"^/lists(?:@\w+)?(?:\s+(\d+))?$"))
+
+# Track list message IDs for reply-based pagination
+_list_msg_ids: Dict[int, int] = {}  # msg_id -> page
+
+@client.on(events.NewMessage(pattern=r"^\.list(?:\s+(\d+))?$"))
 async def list_cmd(event):
-    if not event.out or not _is_allowed_chat(event.chat_id):
+    if not _is_admin(event) or not _is_allowed_chat(event.chat_id):
         return
-
+    await _safe_delete(event)
     page = 1
     if event.pattern_match and event.pattern_match.group(1):
         page = max(1, int(event.pattern_match.group(1)))
 
     res = await gh.list_runs(GKI_REPO, per_page=100, status="completed")
     if res.get("status") != 200:
-        await _reply(event, f"List failed: HTTP {res.get('status')}")
+        await _reply_temp(event, f"List failed: HTTP {res.get('status')}", 10)
         return
 
-    runs = res.get("json", {}).get("workflow_runs", [])
-    runs = [
-        r for r in runs
-        if _matches_target_run(r)
-        and r.get("status") == "completed"
-        and r.get("conclusion") == "success"
-    ]
-
+    runs = [r for r in res.get("json", {}).get("workflow_runs", [])
+            if _matches_target_run(r) and r.get("status") == "completed" and r.get("conclusion") == "success"]
     if not runs:
-        await _reply(event, "Khong co ban build thanh cong nao.")
+        await _reply_temp(event, "Không có bản build thành công nào.", 10)
         return
 
     per_page = 5
     total_pages = max(1, (len(runs) + per_page - 1) // per_page)
-    if page > total_pages:
-        page = total_pages
-
+    if page > total_pages: page = total_pages
     start = (page - 1) * per_page
     chunk = runs[start:start + per_page]
 
-    lines = [f"Danh sach build thanh cong (trang {page}/{total_pages}):", ""]
+    jobs = await storage.get_jobs()
+    run_to_job = {j.get("run_id"): j for j in jobs if j.get("run_id")}
+
+    lines = [f"🗂 <b>Danh sách build thành công</b> (trang {page}/{total_pages}):", ""]
     for idx, run in enumerate(chunk, start=start + 1):
         run_id = run["id"]
-        actor = (run.get("actor") or {}).get("login", "Unknown")
-        branch = run.get("head_branch", "unknown")
         time_str = _format_time_utc7(run.get("created_at", ""))
         gh_url = run.get("html_url", f"https://github.com/{GITHUB_OWNER}/{GKI_REPO}/actions/runs/{run_id}")
         nightly_url = f"https://nightly.link/{GITHUB_OWNER}/{GKI_REPO}/actions/runs/{run_id}"
-        lines.append(
-            f"{idx}. Run #{run_id}\n"
-            f"   Tu: {actor} | Nhanh: {branch}\n"
-            f"   {time_str}\n"
-            f"   GitHub: {gh_url}\n"
-            f"   Tai file: {nightly_url}"
-        )
+        job = run_to_job.get(run_id, {})
+        user_name = job.get("user_name", run.get("actor", {}).get("login", "Unknown"))
+        lines.append(f"<b>{idx}. Run #{run_id}</b> by {user_name}")
+        lines.append(f"   🕒 {time_str}")
+        lines.append(f"   🔗 <a href='{gh_url}'>GitHub</a> | 📦 <a href='{nightly_url}'>Tải file</a>")
+        lines.append(f"   🗑 Xoá: <code>.delete {run_id}</code>")
+        lines.append("")
+    msg = await _reply(event, "\n".join(lines), html=True)
+    if msg:
+        _list_msg_ids[msg.id] = page
 
-    await _reply(event, "\n\n".join(lines))
+
+# Pending action sessions (for numbered cancel/delete)
+_pending_actions: Dict[tuple, Dict[str, Any]] = {}
 
 
-@client.on(events.NewMessage(pattern=r"^/cancels(?:@\w+)?\s+(\d+)$"))
-async def cancel_cmd(event):
-    if not event.out or not _is_allowed_chat(event.chat_id):
-        return
-
-    run_id = int(event.pattern_match.group(1))
+async def _do_cancel_run(event, run_id: int):
+    """Execute cancel + delete for a run."""
+    msg = await _reply(event, f"⏳ Đang gửi lệnh hủy run #{run_id}...")
     res = await gh.cancel_run(GKI_REPO, run_id)
     if res.get("status") not in (202, 204):
-        await _reply(event, f"Cancel failed for #{run_id}: HTTP {res.get('status')}")
+        result = await _reply(event, f"❌ Cancel failed: HTTP {res.get('status')}")
+        await _delete_later(result, 10)
+        if msg: await _delete_later(msg, 10)
         return
-
-    await _reply(event, f"Da gui lenh huy run #{run_id}, dang cho xac nhan...")
     for _ in range(20):
         await asyncio.sleep(3)
         check = await gh.get_run(GKI_REPO, run_id)
@@ -492,26 +1192,154 @@ async def cancel_cmd(event):
             run_data = check.get("json", {})
             if run_data.get("status") == "completed":
                 conclusion = run_data.get("conclusion", "unknown")
-                await _reply(event, f"Run #{run_id} da ket thuc voi ket qua: {conclusion}")
+                if conclusion == "cancelled":
+                    await gh.delete_run(GKI_REPO, run_id)
+                    await storage.delete_job_by_run_id(run_id)
+                    result = await _reply(event, f"✅ Đã hủy và xoá thành công run #{run_id}.")
+                else:
+                    result = await _reply(event, f"Run #{run_id} đã kết thúc: {conclusion}")
+                await _delete_later(result, 10)
+                if msg: await _delete_later(msg, 10)
                 return
+    result = await _reply(event, f"⚠️ Chưa xác nhận được trạng thái run #{run_id}. Kiểm tra GitHub.")
+    await _delete_later(result, 10)
+    if msg: await _delete_later(msg, 10)
 
-    await _reply(event, f"Chua xac nhan duoc trang thai cua run #{run_id}. Kiem tra tren GitHub.")
+
+async def _do_delete_run(event, run_id: int):
+    """Execute delete for a run."""
+    res = await gh.delete_run(GKI_REPO, run_id)
+    if res.get("status") in (202, 204):
+        await storage.delete_job_by_run_id(run_id)
+        await _reply_temp(event, f"✅ Đã xoá run #{run_id}.", 10)
+    elif res.get("status") == 404:
+        await storage.delete_job_by_run_id(run_id)
+        await _reply_temp(event, f"✅ Run #{run_id} không tồn tại trên GitHub. Đã xoá khỏi data.", 10)
+    else:
+        await _reply_temp(event, f"❌ Lỗi xoá: HTTP {res.get('status')}", 10)
 
 
-@client.on(events.NewMessage(pattern=r"^/gkis(?:@\w+)?(?:\s+(.+))?$"))
-async def gki_cmd(event):
-    if not event.out or not _is_allowed_chat(event.chat_id):
+@client.on(events.NewMessage(pattern=r"^\.cancel(?:\s+(\d+))?$"))
+async def cancel_cmd(event):
+    if not _is_admin(event) or not _is_allowed_chat(event.chat_id):
+        return
+    await _safe_delete(event)
+
+    # Direct cancel with run_id
+    if event.pattern_match.group(1):
+        run_id = int(event.pattern_match.group(1))
+        await _do_cancel_run(event, run_id)
         return
 
+    # Show numbered list of active runs
+    active_runs: List[dict] = []
+    for st in ("in_progress", "queued"):
+        res = await gh.list_runs(GKI_REPO, per_page=50, status=st)
+        if res.get("status") == 200:
+            runs = res.get("json", {}).get("workflow_runs", [])
+            active_runs.extend([r for r in runs if _matches_target_run(r)])
+    if not active_runs:
+        await _reply_temp(event, "ℹ️ Không có build nào đang chạy.", 10)
+        return
+
+    lines = ["<b>❌ Chọn build để hủy:</b>", ""]
+    run_map = {}
+    for idx, run in enumerate(active_runs[:10], 1):
+        run_id = run.get("id")
+        run_map[idx] = run_id
+        elapsed_m = 0
+        created_at = run.get("created_at", "")
+        if created_at:
+            try:
+                created_dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                elapsed_m = int((datetime.now(timezone.utc) - created_dt).total_seconds() // 60)
+            except Exception:
+                pass
+        url = run.get("html_url", "")
+        lines.append(f"  <b>{idx}.</b> Run #{run_id} | {run.get('status')} | {elapsed_m}p")
+        lines.append(f"      🔗 <a href='{url}'>GitHub</a>")
+    lines.append("")
+    lines.append("  x = Hủy")
+    await _reply_temp(event, "\n".join(lines), 60, html=True)
+    _pending_actions[_session_key(event)] = {"type": "cancel", "map": run_map}
+
+
+@client.on(events.NewMessage(pattern=r"^\.delete(?:\s+(\d+))?$"))
+async def delete_cmd(event):
+    if not _is_admin(event) or not _is_allowed_chat(event.chat_id):
+        return
+    await _safe_delete(event)
+
+    # Direct delete with run_id
+    if event.pattern_match.group(1):
+        run_id = int(event.pattern_match.group(1))
+        await _do_delete_run(event, run_id)
+        return
+
+    # Show numbered list of completed runs
+    res = await gh.list_runs(GKI_REPO, per_page=50, status="completed")
+    if res.get("status") != 200:
+        await _reply_temp(event, f"List failed: HTTP {res.get('status')}", 10)
+        return
+    completed_runs = [r for r in res.get("json", {}).get("workflow_runs", [])
+                      if _matches_target_run(r) and r.get("status") == "completed"]
+    if not completed_runs:
+        await _reply_temp(event, "ℹ️ Không có build nào để xoá.", 10)
+        return
+
+    lines = ["<b>🗑 Chọn build để xoá:</b>", ""]
+    run_map = {}
+    for idx, run in enumerate(completed_runs[:10], 1):
+        run_id = run.get("id")
+        run_map[idx] = run_id
+        conclusion = run.get("conclusion", "unknown")
+        icon = "✅" if conclusion == "success" else "❌" if conclusion == "failure" else "⚠️"
+        time_str = _format_time_utc7(run.get("created_at", ""))
+        lines.append(f"  <b>{idx}.</b> {icon} Run #{run_id} | {conclusion} | {time_str}")
+    lines.append("")
+    lines.append("  x = Hủy")
+    await _reply_temp(event, "\n".join(lines), 60, html=True)
+    _pending_actions[_session_key(event)] = {"type": "delete", "map": run_map}
+
+
+# ─── .gki (interactive text-based flow) ──────────────────────────────
+@client.on(events.NewMessage(pattern=r"^\.gki(?:\s+(\S+))?$"))
+async def gki_cmd(event):
+    if not _is_allowed_chat(event.chat_id):
+        return
+    await _safe_delete(event)
+    sk = _session_key(event)
+    is_admin = _is_admin(event)
+
+    # Regular users need a key — silently ignore if no key
+    if not is_admin:
+        key = event.pattern_match.group(1) if event.pattern_match else None
+        if not key:
+            return  # Silent ignore
+        uses = await storage.get_uses(key)
+        if uses <= 0:
+            return  # Silent ignore invalid/expired key
+        session = _new_session(sk, build_key=key, admin=False)
+    else:
+        session = _new_session(sk, admin=True)
+    await _show_step(event, session)
+
+
+# ─── .build (quick build with key=value) ─────────────────────────────
+@client.on(events.NewMessage(pattern=r"^\.build(?:\s+(.+))?$"))
+async def build_cmd(event):
+    if not _is_admin(event) or not _is_allowed_chat(event.chat_id):
+        return
+    await _safe_delete(event)
     arg_string = event.pattern_match.group(1) if event.pattern_match else ""
     try:
         inputs, notes = _build_inputs(arg_string or "")
     except ValueError as exc:
-        await _reply(event, f"Input error: {exc}\n\n{HELP_TEXT}")
+        await _reply_temp(event, f"Input error: {exc}\n\n{HELP_TEXT}", 10)
         return
 
-    # Check concurrency to avoid action workflow overlap.
-    busy_run: Optional[dict] = None
+    # Check concurrency
+    busy_run = None
     for st in ("in_progress", "queued"):
         res = await gh.list_runs(GKI_REPO, per_page=50, status=st)
         if res.get("status") == 200:
@@ -526,40 +1354,285 @@ async def gki_cmd(event):
     if busy_run:
         run_id = busy_run.get("id")
         run_url = busy_run.get("html_url", f"https://github.com/{GITHUB_OWNER}/{GKI_REPO}/actions/runs/{run_id}")
-        await _reply(
-            event,
-            f"Dang co tien trinh khac chay (run #{run_id}).\n"
-            f"Vui long doi xong roi gui lai /gkis.\n{run_url}",
-        )
+        await _reply_temp(event, f"Đang có tiến trình khác chạy (run #{run_id}).\nVui lòng đợi.\n{run_url}", 10)
         return
 
-    res = await gh.dispatch_workflow(
-        repo=GKI_REPO,
-        workflow_file=WORKFLOW_FILE,
-        ref=GKI_DEFAULT_BRANCH,
-        inputs=inputs,
-    )
+    res = await gh.dispatch_workflow(repo=GKI_REPO, workflow_file=WORKFLOW_FILE, ref=GKI_DEFAULT_BRANCH, inputs=inputs)
     if res.get("status") not in (201, 202, 204):
-        await _reply(event, f"Dispatch failed: HTTP {res.get('status')} | {res.get('json')}")
+        await _reply_temp(event, f"Dispatch failed: HTTP {res.get('status')} | {res.get('json')}", 10)
         return
 
-    lines = [
-        "Da gui build thanh cong.",
-        f"Workflow: {WORKFLOW_FILE}",
-        f"Repo: https://github.com/{GITHUB_OWNER}/{GKI_REPO}/actions/workflows/{WORKFLOW_FILE}",
-    ]
+    try:
+        sender = await client.get_entity(event.sender_id)
+        first = getattr(sender, 'first_name', '') or ''
+        last = getattr(sender, 'last_name', '') or ''
+        sender_name = f"{first} {last}".strip() or 'User'
+    except Exception:
+        sender_name = 'User'
+    job = {
+        "type": "gki", "repo": GKI_REPO, "workflow_file": WORKFLOW_FILE,
+        "ref": GKI_DEFAULT_BRANCH, "inputs": inputs,
+        "user_id": event.sender_id, "user_name": sender_name,
+        "chat_id": event.chat_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "run_id": None, "status": "dispatched", "conclusion": None,
+        "notified": False,
+        "notify_via": "userbot",
+    }
+    await storage.add_job(job)
+    view_url = f"https://github.com/{GITHUB_OWNER}/{GKI_REPO}/actions/workflows/{WORKFLOW_FILE}"
+    lines = ["✅ <b>Đã gửi build thành công!</b>",
+             f"⚙️ Workflow: <code>{WORKFLOW_FILE}</code>",
+             f"🔗 <a href='{view_url}'>Mở GitHub Actions</a>"]
     if notes:
         lines.append("Note: " + " | ".join(notes))
-    await _reply(event, "\n".join(lines))
+    await _reply(event, "\n".join(lines), html=True)
 
 
+# Valid user input pattern: numbers (1-99), commands (x, a, ok, skip, s, none), or short version names
+import re
+_VALID_INPUT_RE = re.compile(r'^(\d{1,2}|[xXaA]|ok|skip|s|none|[a-zA-Z0-9_.-]{1,30})$')
+
+
+# ─── List reply pagination handler ───────────────────────────────────
+@client.on(events.NewMessage())
+async def list_reply_handler(event):
+    """Handle replies to list messages for pagination."""
+    if not _is_admin(event) or not _is_allowed_chat(event.chat_id):
+        return
+    if not event.reply_to_msg_id:
+        return
+    # Check if it's a reply to a list message
+    if event.reply_to_msg_id not in _list_msg_ids:
+        return
+    text = (event.raw_text or "").strip()
+    if not text:
+        return
+    try:
+        new_page = int(text)
+    except ValueError:
+        return
+    await _safe_delete(event)
+    # Fetch and display the new page
+    res = await gh.list_runs(GKI_REPO, per_page=100, status="completed")
+    if res.get("status") != 200:
+        return
+    all_runs = [r for r in res.get("json", {}).get("workflow_runs", [])
+                if _matches_target_run(r) and r.get("conclusion") == "success"]
+    if not all_runs:
+        return
+    per_page_count = 5
+    total_pages = max(1, (len(all_runs) + per_page_count - 1) // per_page_count)
+    new_page = max(1, min(new_page, total_pages))
+    start = (new_page - 1) * per_page_count
+    chunk = all_runs[start:start + per_page_count]
+    if not chunk:
+        return
+    jobs = await storage.get_jobs()
+    run_to_job = {j.get("run_id"): j for j in jobs if j.get("run_id")}
+    lines = [f"🗂 <b>Danh sách build thành công</b> (trang {new_page}/{total_pages}):", ""]
+    for idx, run in enumerate(chunk, start=start + 1):
+        run_id = run["id"]
+        time_str = _format_time_utc7(run.get("created_at", ""))
+        gh_url = run.get("html_url", f"https://github.com/{GITHUB_OWNER}/{GKI_REPO}/actions/runs/{run_id}")
+        nightly_url = f"https://nightly.link/{GITHUB_OWNER}/{GKI_REPO}/actions/runs/{run_id}"
+        job = run_to_job.get(run_id, {})
+        user_name = job.get("user_name", run.get("actor", {}).get("login", "Unknown"))
+        lines.append(f"<b>{idx}. Run #{run_id}</b> by {user_name}")
+        lines.append(f"   🕑 {time_str}")
+        lines.append(f"   🔗 <a href='{gh_url}'>GitHub</a> | 📦 <a href='{nightly_url}'>Tải file</a>")
+        lines.append(f"   🗑 Xoá: <code>.delete {run_id}</code>")
+        lines.append("")
+    # Edit original list message
+    try:
+        await client.edit_message(event.chat_id, event.reply_to_msg_id, "\n".join(lines), parse_mode="html", link_preview=False)
+        _list_msg_ids[event.reply_to_msg_id] = new_page
+    except Exception:
+        pass
+
+
+# ─── Session input handler (catch reply during .gki flow + pending actions) ───
+@client.on(events.NewMessage())
+async def session_input_handler(event):
+    if not _is_allowed_chat(event.chat_id):
+        return
+
+    text = (event.raw_text or "").strip()
+    if not text or text.startswith("."):
+        return
+
+    # For outgoing messages (from self): only process valid user input
+    # This prevents bot replies/menus from being re-processed (infinite loop)
+    if event.out:
+        if '\n' in text or not _VALID_INPUT_RE.match(text):
+            return
+    else:
+        # For incoming messages (from others): check authorization
+        if not _is_authorized(event):
+            return
+
+    sk = _session_key(event)
+
+    # Check pending cancel/delete action first
+    pending = _pending_actions.get(sk)
+    if pending:
+        await _safe_delete(event)
+        if text.lower() == "x":
+            _pending_actions.pop(sk, None)
+            await _reply_temp(event, "❌ Đã hủy.", 10)
+            return
+        try:
+            idx = int(text)
+            run_map = pending.get("map", {})
+            if idx in run_map:
+                run_id = run_map[idx]
+                _pending_actions.pop(sk, None)
+                if pending["type"] == "cancel":
+                    await _do_cancel_run(event, run_id)
+                elif pending["type"] == "delete":
+                    await _do_delete_run(event, run_id)
+                return
+            else:
+                await _reply_temp(event, f"Chọn từ 1-{len(run_map)}.", 10)
+                return
+        except ValueError:
+            await _reply_temp(event, f"Gửi số hoặc 'x' để hủy.", 10)
+            return
+
+    # GKI session
+    session = _get_session(sk)
+    if not session:
+        return
+    await _safe_delete(event)
+    await _handle_input(event, session, text)
+
+
+# ─── Poller (standalone mode) ────────────────────────────────────────
+async def poller_loop():
+    """Background task that polls GitHub for completed builds and notifies user."""
+    while True:
+        try:
+            jobs = await storage.list_unnotified_jobs()
+            for job in jobs:
+                try:
+                    if job.get("notify_via") != "userbot":
+                        continue
+                    repo = job.get("repo")
+                    run_id = job.get("run_id")
+                    ref = job.get("ref", "main")
+                    workflow_file = job.get("workflow_file")
+                    job_created_at_iso = job.get("created_at")
+
+                    if not run_id and ref and workflow_file and job_created_at_iso:
+                        runs_resp = await gh.list_runs_for_repo(repo, ref, job_created_at_iso)
+                        if runs_resp.get("status") == 200:
+                            possible = []
+                            job_created_dt = datetime.fromisoformat(job_created_at_iso)
+                            for run in runs_resp["json"].get("workflow_runs", []):
+                                if run.get("event") != "workflow_dispatch":
+                                    continue
+                                if workflow_file not in run.get("path", ""):
+                                    continue
+                                run_dt = datetime.fromisoformat(run["created_at"].replace("Z", "+00:00"))
+                                if run_dt >= (job_created_dt - timedelta(seconds=15)):
+                                    possible.append(run)
+                            if possible:
+                                best = sorted(possible, key=lambda x: x["created_at"])[0]
+                                run_id = best["id"]
+                                await storage.update_job(job["_id"], {"run_id": run_id})
+
+                    if not run_id:
+                        continue
+
+                    rn = await gh.get_run(repo, int(run_id))
+                    if rn.get("status") != 200:
+                        continue
+
+                    status = rn["json"].get("status")
+                    if status == "completed":
+                        conclusion = rn["json"].get("conclusion")
+                        html_url = rn["json"].get("html_url")
+                        nightly_url = f"https://nightly.link/{GITHUB_OWNER}/{repo}/actions/runs/{run_id}"
+
+                        chat_id = job.get("chat_id")
+                        user_id = job.get("user_id", 0)
+                        user_name = job.get("user_name", "Unknown")
+                        icon = "✅" if conclusion == "success" else "❌" if conclusion == "failure" else "⚠️"
+                        mention = f'<a href="tg://user?id={user_id}">{user_name}</a>'
+
+                        if conclusion == "success":
+                            text = (
+                                f"{icon} <b>Build GKI hoàn tất!</b>\n"
+                                f"👤 Người gửi: {mention}\n"
+                                f"📊 Trạng thái: <b>{conclusion.upper()}</b>\n"
+                                f"🔗 <a href='{html_url}'>Mở GitHub Actions</a>\n"
+                                f"📦 <a href='{nightly_url}'>Tải file</a>"
+                            )
+                        else:
+                            text = (
+                                f"{icon} <b>Build GKI thất bại!</b>\n"
+                                f"👤 Người gửi: {mention}\n"
+                                f"📊 Trạng thái: <b>{conclusion.upper()}</b>\n"
+                                f"🔗 <a href='{html_url}'>Xem lỗi trên GitHub</a>"
+                            )
+
+                        try:
+                            await client.send_message(chat_id, text, parse_mode="html", link_preview=False)
+                        except Exception as e:
+                            logger.error("Send notification failed: %s", e)
+
+                        await storage.update_job(job["_id"], {
+                            "status": "completed", "conclusion": conclusion, "notified": True
+                        })
+                        if conclusion == "success":
+                            await storage.add_successful_build(run_id, job.get("user_id", 0), ref, user_name)
+
+                        waiters = await storage.get_waiters()
+                        if waiters:
+                            for w in waiters:
+                                try:
+                                    await client.send_message(w["chat_id"],
+                                        f"🔔 Tiến trình đã hoàn tất! Bạn có thể dùng .gki lại.", link_preview=False)
+                                except Exception:
+                                    pass
+                            await storage.clear_waiters()
+
+                except Exception as e:
+                    logger.error("Poller job %s error: %s", job.get("_id"), e)
+        except Exception as e:
+            logger.error("Poller error: %s", e)
+        await asyncio.sleep(45)
+
+
+async def cleanup_loop():
+    """Periodically clean up old data."""
+    while True:
+        try:
+            await storage.delete_old_messages(24)
+            await storage.delete_old_jobs(7)
+        except Exception as e:
+            logger.error("Cleanup error: %s", e)
+        await asyncio.sleep(3600)
+
+
+# ─── Main ─────────────────────────────────────────────────────────────
 async def main():
+    global _my_id
     me = await client.get_me()
-    logger.info("User mode started as @%s (id=%s)", me.username, me.id)
-    logger.info("Repo target: %s/%s on branch %s", GITHUB_OWNER, GKI_REPO, GKI_DEFAULT_BRANCH)
-    logger.info("Workflow: %s", WORKFLOW_FILE)
+    _my_id = me.id
+    logger.info("Userbot started as @%s (id=%s)", me.username, me.id)
+    logger.info("Repo: %s/%s branch=%s workflow=%s", GITHUB_OWNER, GKI_REPO, GKI_DEFAULT_BRANCH, WORKFLOW_FILE)
+    logger.info("Standalone mode: %s", USERBOT_STANDALONE)
     if ALLOWED_CHAT_IDS:
-        logger.info("Allowed chat ids: %s", sorted(ALLOWED_CHAT_IDS))
+        logger.info("Allowed chats: %s", sorted(ALLOWED_CHAT_IDS))
+
+    # Start background tasks
+    asyncio.create_task(poller_loop())
+    if USERBOT_STANDALONE:
+        asyncio.create_task(cleanup_loop())
+        logger.info("Poller + cleanup started (standalone mode)")
+    else:
+        logger.info("Poller started (notifications via userbot)")
 
     try:
         await client.run_until_disconnected()
