@@ -480,7 +480,7 @@ def _build_sub_menu(session: Dict[str, Any]) -> str:
     target_label = next((label for label, k in BUILD_TARGETS if k == target_key), target_key)
     major = target_label.split(" - ")[-1] if " - " in target_label else ""
 
-    lines = [f"Chọn sub-version cho {target_label}:", f"(Đã chọn: {len(selected)}/{len(available)})", ""]
+    lines = [f"<b>Chọn sub-version cho {target_label}:</b>", f"<i>(Đã chọn: {len(selected)}/{len(available)})</i>", ""]
     for i, sv in enumerate(available, 1):
         icon = "✅" if sv in selected else "⬜"
         lines.append(f"  {i}. {icon} {major}.{sv}")
@@ -492,7 +492,7 @@ def _build_sub_menu(session: Dict[str, Any]) -> str:
 
 
 def _build_confirm_text(inputs: Dict[str, Any]) -> str:
-    lines = ["Xác nhận build GKI:", ""]
+    lines = ["<b>Xác nhận build GKI:</b>", ""]
     for k, v in inputs.items():
         lines.append(f"  • {k}: {v}")
     lines.append("")
@@ -590,7 +590,7 @@ async def _update_menu(event, session: Dict[str, Any], text: str):
             return
         except Exception:
             pass
-    msg = await _reply(event, text)
+    msg = await _reply(event, text, html=True)
     session["menu_msg_id"] = msg.id
 
 
@@ -635,9 +635,9 @@ async def _show_step(event, session: Dict[str, Any]):
             session["step"] = "confirm"
             await _show_step(event, session)
             return
-        text = _build_menu("Chọn loại release:", RELEASE_TYPES)
+        text = header + _build_menu("<b>Chọn loại release:</b>", RELEASE_TYPES)
     elif step == "confirm":
-        text = _build_confirm_text(session["inputs"])
+        text = header + _build_confirm_text(session["inputs"])
     else:
         text = "Lỗi: step không xác định."
 
