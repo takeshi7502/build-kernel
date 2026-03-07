@@ -66,7 +66,8 @@ if not GKI_WORKFLOWS:
     GKI_WORKFLOWS = {"Build": "main.yml"}
 
 WORKFLOW_FILE = list(GKI_WORKFLOWS.values())[0]
-ALLOWED_CHAT_IDS = set(_parse_int_list(os.getenv("USERBOT_ALLOWED_CHAT_IDS", "")))
+# ALLOWED_CHAT_IDS loaded dynamically from data.json via .auth command
+_auth_chats: set = set()  # Populated at startup
 DATA_JSON = os.getenv("USERBOT_DATA_FILE", "data.json").strip() or "data.json"
 OWNER_ID = int(os.getenv("OWNER_ID", "0").strip() or "0")
 ADMIN_IDS = set(_parse_int_list(os.getenv("ADMIN_IDS", "")))
@@ -267,6 +268,28 @@ class JSONStorage:
             self._save(data)
             return deleted
 
+    # ─── Auth chats ───────────────────────────────────────────────
+    async def get_auth_chats(self) -> set:
+        async with self._lock:
+            data = self._load()
+            return set(data.get("auth_chats", []))
+
+    async def add_auth_chat(self, chat_id: int):
+        async with self._lock:
+            data = self._load()
+            chats = set(data.get("auth_chats", []))
+            chats.add(chat_id)
+            data["auth_chats"] = list(chats)
+            self._save(data)
+
+    async def remove_auth_chat(self, chat_id: int):
+        async with self._lock:
+            data = self._load()
+            chats = set(data.get("auth_chats", []))
+            chats.discard(chat_id)
+            data["auth_chats"] = list(chats)
+            self._save(data)
+
     async def add_waiter(self, user_id: int, chat_id: int, user_name: str = ""):
         async with self._lock:
             data = self._load()
@@ -385,9 +408,9 @@ def _format_time_utc7(iso_time: str) -> str:
 
 
 def _is_allowed_chat(chat_id: Optional[int]) -> bool:
-    if not ALLOWED_CHAT_IDS:
-        return True
-    return chat_id in ALLOWED_CHAT_IDS
+    if not _auth_chats:
+        return False  # No groups authorized = block all
+    return chat_id in _auth_chats
 
 
 def _matches_target_run(run: dict) -> bool:
@@ -1045,6 +1068,39 @@ HELP_TEXT = (
 )
 
 
+# ─── Auth Commands ─────────────────────────────────────────────────────
+@client.on(events.NewMessage(pattern=r"^\.auth$"))
+async def auth_cmd(event):
+    """Authorize this chat to use the userbot. Admin only."""
+    if not _is_admin(event):
+        return
+    await _safe_delete(event)
+    chat_id = event.chat_id
+    if chat_id in _auth_chats:
+        await _reply_temp(event, "ℹ️ Nhóm này đã được auth rồi.", 10)
+        return
+    _auth_chats.add(chat_id)
+    await storage.add_auth_chat(chat_id)
+    await _reply_temp(event, f"✅ Đã auth nhóm này (ID: <code>{chat_id}</code>).", 10, html=True)
+    logger.info("Authorized chat: %s", chat_id)
+
+
+@client.on(events.NewMessage(pattern=r"^\.ua$"))
+async def unauth_cmd(event):
+    """Remove authorization for this chat. Admin only."""
+    if not _is_admin(event):
+        return
+    await _safe_delete(event)
+    chat_id = event.chat_id
+    if chat_id not in _auth_chats:
+        await _reply_temp(event, "ℹ️ Nhóm này chưa được auth.", 10)
+        return
+    _auth_chats.discard(chat_id)
+    await storage.remove_auth_chat(chat_id)
+    await _reply_temp(event, f"✅ Đã huỷ auth nhóm này (ID: <code>{chat_id}</code>).", 10, html=True)
+    logger.info("Deauthorized chat: %s", chat_id)
+
+
 # ─── Commands ─────────────────────────────────────────────────────────
 @client.on(events.NewMessage(pattern=r"^\.ping$"))
 async def ping_cmd(event):
@@ -1617,14 +1673,20 @@ async def cleanup_loop():
 
 # ─── Main ─────────────────────────────────────────────────────────────
 async def main():
-    global _my_id
+    global _my_id, _auth_chats
     me = await client.get_me()
     _my_id = me.id
+
+    # Load authorized chats from storage
+    _auth_chats = await storage.get_auth_chats()
+
     logger.info("Userbot started as @%s (id=%s)", me.username, me.id)
     logger.info("Repo: %s/%s branch=%s workflow=%s", GITHUB_OWNER, GKI_REPO, GKI_DEFAULT_BRANCH, WORKFLOW_FILE)
     logger.info("Standalone mode: %s", USERBOT_STANDALONE)
-    if ALLOWED_CHAT_IDS:
-        logger.info("Allowed chats: %s", sorted(ALLOWED_CHAT_IDS))
+    if _auth_chats:
+        logger.info("Authorized chats: %s", sorted(_auth_chats))
+    else:
+        logger.info("No authorized chats. Use .auth in a group to authorize.")
 
     # Start background tasks
     asyncio.create_task(poller_loop())
