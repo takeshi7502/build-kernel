@@ -584,7 +584,7 @@ async def _update_menu(event, session: Dict[str, Any], text: str):
     chat_id = event.chat_id
     if session.get("menu_msg_id"):
         try:
-            await client.edit_message(chat_id, session["menu_msg_id"], text)
+            await client.edit_message(chat_id, session["menu_msg_id"], text, parse_mode="html")
             return
         except Exception:
             pass
@@ -1367,6 +1367,11 @@ async def gki_cmd(event):
     sk = _session_key(event)
     is_admin = _is_admin(event)
 
+    user = await client.get_entity(event.sender_id)
+    first_name = user.first_name if hasattr(user, "first_name") and user.first_name else ""
+    last_name = user.last_name if hasattr(user, "last_name") and user.last_name else ""
+    user_name = f"{first_name} {last_name}".strip() or "Unknown"
+
     # Regular users need a key — silently ignore if no key
     if not is_admin:
         key = event.pattern_match.group(1) if event.pattern_match else None
@@ -1375,9 +1380,9 @@ async def gki_cmd(event):
         uses = await storage.get_uses(key)
         if uses <= 0:
             return  # Silent ignore invalid/expired key
-        session = _new_session(sk, build_key=key, admin=False)
+        session = _new_session(sk, build_key=key, admin=False, user_name=user_name, user_id=user.id)
     else:
-        session = _new_session(sk, admin=True)
+        session = _new_session(sk, admin=True, user_name=user_name, user_id=user.id)
     await _show_step(event, session)
 
 
@@ -1437,7 +1442,8 @@ async def build_cmd(event):
     }
     await storage.add_job(job)
     view_url = f"https://github.com/{GITHUB_OWNER}/{GKI_REPO}/actions/workflows/{WORKFLOW_FILE}"
-    lines = ["✅ <b>Đã gửi build thành công!</b>",
+    header = f'📋 <b>Task by <a href="tg://user?id={event.sender_id}">{sender_name}</a></b>\n\n'
+    lines = [header + "✅ <b>Đã gửi build thành công!</b>",
              f"⚙️ Workflow: <code>{WORKFLOW_FILE}</code>",
              f"🔗 <a href='{view_url}'>Mở GitHub Actions</a>"]
     if notes:
