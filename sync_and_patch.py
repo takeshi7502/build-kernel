@@ -1,18 +1,6 @@
-"""
-sync_and_patch.py
------------------
-Làm 2 việc trong 1 lần chạy:
-  1. Sync fork từ upstream (GitHub API: merge-upstream)
-  2. Re-apply tất cả workflow patches lên fork
-
-Dùng khi upstream cập nhật và bạn muốn lấy code mới
-mà không mất các patch của bot.
-
-Cách chạy:
-  python sync_and_patch.py
-"""
-
-import config, aiohttp, asyncio, base64, sys, os, re
+import config, aiohttp, asyncio, base64, sys, os
+from io import StringIO
+from ruamel.yaml import YAML
 
 sys.stdout.reconfigure(encoding="utf-8")
 
@@ -21,7 +9,6 @@ REPO = config.GKI_REPO
 TOKEN = config.GITHUB_TOKEN
 BRANCH = config.GKI_DEFAULT_BRANCH
 UPSTREAM_OWNER = config.UPSTREAM_OWNER
-PATCH_DIR = os.path.join(os.path.dirname(__file__), "workflows_patch")
 
 HEADERS = {
     "Authorization": f"token {TOKEN}",
@@ -31,10 +18,6 @@ HEADERS = {
 # ─────────────────────────── GitHub API helpers ──────────────────────────────
 
 async def sync_fork(session: aiohttp.ClientSession) -> bool:
-    """
-    Merge upstream/{BRANCH} vào fork/{BRANCH} qua GitHub API.
-    Trả về True nếu có thay đổi, False nếu đã up-to-date.
-    """
     url = f"https://api.github.com/repos/{OWNER}/{REPO}/merge-upstream"
     payload = {"branch": BRANCH}
     async with session.post(url, headers=HEADERS, json=payload) as r:
@@ -48,7 +31,6 @@ async def sync_fork(session: aiohttp.ClientSession) -> bool:
                 print(f"✅ Đã sync fork từ upstream — {msg}")
                 return True
         elif r.status == 409:
-            # Conflict: fork diverged – cần force update
             print("⚠️  Fork có commit diverge với upstream.")
             print("    Đang force-reset fork branch về upstream...")
             await force_reset_to_upstream(session)
@@ -56,15 +38,9 @@ async def sync_fork(session: aiohttp.ClientSession) -> bool:
         else:
             print(f"❌ Sync thất bại: {r.status} – {body.get('message', body)}")
             sys.exit(1)
-    return False  # fallthrough safety
-
+    return False
 
 async def force_reset_to_upstream(session: aiohttp.ClientSession):
-    """
-    Khi fork diverge, lấy SHA mới nhất của upstream rồi force-update
-    fork branch về đúng SHA đó.
-    """
-    # Lấy SHA đầu upstream
     url = f"https://api.github.com/repos/{UPSTREAM_OWNER}/{REPO}/git/refs/heads/{BRANCH}"
     async with session.get(url, headers=HEADERS) as r:
         data = await r.json()
@@ -74,7 +50,6 @@ async def force_reset_to_upstream(session: aiohttp.ClientSession):
         upstream_sha = data["object"]["sha"]
         print(f"   Upstream SHA: {upstream_sha}")
 
-    # Force-update fork branch
     url = f"https://api.github.com/repos/{OWNER}/{REPO}/git/refs/heads/{BRANCH}"
     payload = {"sha": upstream_sha, "force": True}
     async with session.patch(url, headers=HEADERS, json=payload) as r:
@@ -85,22 +60,17 @@ async def force_reset_to_upstream(session: aiohttp.ClientSession):
             print(f"❌ Force-reset thất bại: {r.status} – {data.get('message', data)}")
             sys.exit(1)
 
-
 async def get_file(session: aiohttp.ClientSession, path: str):
-    """Lấy nội dung và SHA của file từ fork."""
     url = f"https://api.github.com/repos/{OWNER}/{REPO}/contents/{path}?ref={BRANCH}"
     async with session.get(url, headers=HEADERS) as r:
         j = await r.json()
         if r.status != 200:
-            print(f"❌ Không lấy được {path}: {r.status} – {j.get('message', j)}")
-            sys.exit(1)
+            raise Exception(f"{r.status} - {j.get('message', j)}")
         content = base64.b64decode(j["content"]).decode("utf-8")
         sha = j["sha"]
         return content, sha
 
-
 async def put_file(session: aiohttp.ClientSession, path: str, content: str, sha: str, message: str):
-    """Ghi file đã patch lên fork."""
     url = f"https://api.github.com/repos/{OWNER}/{REPO}/contents/{path}"
     payload = {
         "message": message,
@@ -115,66 +85,152 @@ async def put_file(session: aiohttp.ClientSession, path: str, content: str, sha:
             j2 = await r.json()
             print(f"  ❌ {path}: {r.status} – {j2.get('message', '')}")
 
-
 # ─────────────────────────── Patch logic ─────────────────────────────────────
 
-async def get_sha_only(session: aiohttp.ClientSession, path: str):
-    """Chỉ lấy SHA của file trên GitHub để có thể ghi đè."""
-    url = f"https://api.github.com/repos/{OWNER}/{REPO}/contents/{path}?ref={BRANCH}"
-    async with session.get(url, headers=HEADERS) as r:
-        if r.status == 200:
-            j = await r.json()
-            return j.get("sha")
-        return None
+def patch_build_yml(content: str) -> str:
+    yaml = YAML()
+    yaml.preserve_quotes = True
+    yaml.width = 4096
+    data = yaml.load(content)
+    
+    inputs = data.get("on", {}).get("workflow_call", {}).get("inputs", {})
+    if "sub_levels" not in inputs:
+        inputs["sub_levels"] = {
+            "description": "Comma-separated sub_levels to build (empty=all)",
+            "required": False,
+            "type": "string",
+            "default": ""
+        }
+        
+    if "build-kernel" in data.get("jobs", {}):
+        steps = data["jobs"]["build-kernel"].get("steps", [])
+        if steps and steps[0].get("id") != "check_sub":
+            check_step = {
+                "name": "Check sub_level filter",
+                "id": "check_sub",
+                "run": 'SUB_LEVELS="${{ inputs.sub_levels }}"\nCURRENT="${{ inputs.sub_level }}"\nif [ -z "$SUB_LEVELS" ]; then\n  echo "Building sub_level $CURRENT (no filter applied)"\n  echo "skip=false" >> $GITHUB_OUTPUT\nelif echo ",$SUB_LEVELS," | grep -q ",$CURRENT,"; then\n  echo "Building sub_level $CURRENT (matched filter)"\n  echo "skip=false" >> $GITHUB_OUTPUT\nelse\n  echo "Skipping sub_level $CURRENT (not in: $SUB_LEVELS)"\n  echo "skip=true" >> $GITHUB_OUTPUT\nfi\n'
+            }
+            steps.insert(0, check_step)
+            for step in steps[1:]:
+                if "if" in step:
+                    old_if = step["if"]
+                    if old_if.replace(" ", "") == "steps.check_sub.outputs.skip!='true'":
+                        continue
+                    if old_if.startswith("${{") and old_if.endswith("}}"):
+                        old_if = old_if[3:-2].strip()
+                    step["if"] = f"${{{{ steps.check_sub.outputs.skip != 'true' && ({old_if}) }}}}"
+                else:
+                    step["if"] = "${{ steps.check_sub.outputs.skip != 'true' }}"
+                    
+    out = StringIO()
+    yaml.dump(data, out)
+    return out.getvalue()
+
+def patch_main_yml(content: str) -> str:
+    yaml = YAML()
+    yaml.preserve_quotes = True
+    yaml.width = 4096
+    data = yaml.load(content)
+    
+    inputs = data.get("on", {}).get("workflow_dispatch", {}).get("inputs", {})
+    if "sub_levels" not in inputs:
+        inputs["sub_levels"] = {
+            "description": "指定 sub_level 列表 (逗号分隔, 留空=全部)",
+            "type": "string",
+            "default": "",
+            "required": False
+        }
+
+    # Bỏ group giới hạn concurrency để chạy song song nhiều lệnh build
+    if "concurrency" in data:
+        del data["concurrency"]
+
+    jobs = data.get("jobs", {})
+    for job_name, job_data in jobs.items():
+        if isinstance(job_data, dict) and job_name.startswith("build-a") and "uses" in job_data:
+            w_block = job_data.get("with", {})
+            if "sub_levels" not in w_block:
+                w_block["sub_levels"] = "${{ inputs.sub_levels }}"
+                
+    out = StringIO()
+    yaml.dump(data, out)
+    return out.getvalue()
+
+def patch_kernel_yml(content: str) -> str:
+    yaml = YAML()
+    yaml.preserve_quotes = True
+    yaml.width = 4096
+    data = yaml.load(content)
+    
+    for trigger in ["workflow_dispatch", "workflow_call"]:
+        inputs = data.get("on", {}).get(trigger, {}).get("inputs", {})
+        if "sub_levels" not in inputs:
+            if trigger == "workflow_call":
+                inputs["sub_levels"] = {
+                    "description": "Comma-separated sub_levels to build (empty=all)",
+                    "required": False,
+                    "type": "string",
+                    "default": ""
+                }
+            else:
+                inputs["sub_levels"] = {
+                    "description": "指定 sub_level 列表 (逗号分隔, 留空=全部)",
+                    "type": "string",
+                    "default": "",
+                    "required": False
+                }
+                
+    jobs = data.get("jobs", {})
+    for job_name, job_data in jobs.items():
+        if isinstance(job_data, dict) and job_name.startswith("build-kernels"):
+            if "uses" in job_data and "build.yml" in job_data["uses"]:
+                w_block = job_data.get("with", {})
+                if "sub_levels" not in w_block:
+                    w_block["sub_levels"] = "${{ inputs.sub_levels }}"
+            
+    out = StringIO()
+    yaml.dump(data, out)
+    return out.getvalue()
 
 # ─────────────────────────── Main ────────────────────────────────────────────
 
 async def main():
-    if not os.path.exists(PATCH_DIR):
-        print(f"❌ Không tìm thấy thư mục patch: {PATCH_DIR}")
-        sys.exit(1)
-
     print(f"🔄 Đang sync fork {OWNER}/{REPO} từ upstream {UPSTREAM_OWNER}/{REPO} (branch: {BRANCH})...")
     print()
 
     async with aiohttp.ClientSession() as s:
-        # ── Bước 1: Sync fork ──
         await sync_fork(s)
         print()
 
-        # ── Bước 2: Re-apply patches từ thư mục workflows_patch ──
-        print("🔧 Re-applying workflow patches từ local workflows_patch/ ...")
+        print("🔧 Re-applying workflow patches bằng yaml parser (ruamel.yaml) ...")
 
-        files_to_patch = [
-            "build.yml",
-            "main.yml",
-            "kernel-a12-5-10.yml",
-            "kernel-a13-5-15.yml",
-            "kernel-a14-6-1.yml",
-            "kernel-a15-6-6.yml",
-        ]
+        files_to_patch = {
+            ".github/workflows/build.yml": patch_build_yml,
+            ".github/workflows/main.yml": patch_main_yml,
+            ".github/workflows/kernel-a12-5-10.yml": patch_kernel_yml,
+            ".github/workflows/kernel-a13-5-15.yml": patch_kernel_yml,
+            ".github/workflows/kernel-a14-6-1.yml": patch_kernel_yml,
+            ".github/workflows/kernel-a15-6-6.yml": patch_kernel_yml,
+            ".github/workflows/kernel-a16-6-12.yml": patch_kernel_yml,
+        }
 
-        for fname in files_to_patch:
-            local_path = os.path.join(PATCH_DIR, fname)
-            if not os.path.exists(local_path):
-                print(f"  ⚠️ Bỏ qua {fname}: không tìm thấy file local tại {local_path}")
+        for path, patch_func in files_to_patch.items():
+            print(f"  Đang vá {path}...")
+            try:
+                content, sha = await get_file(s, path)
+            except Exception as e:
+                print(f"  ⚠️ Lỗi tải {path}: {e}")
                 continue
                 
-            print(f"  Đẩy {fname} lên GitHub...")
-            with open(local_path, "r", encoding="utf-8") as f:
-                content = f.read()
-                
-            gh_path = f".github/workflows/{fname}"
-            sha = await get_sha_only(s, gh_path)
-            
-            await put_file(s, gh_path, content, sha,
-                           f"patch: overwrite {fname} with customized local version [auto]")
+            new_content = patch_func(content)
+            if new_content != content:
+                print(f"  Đẩy {path} lên GitHub...")
+                await put_file(s, path, new_content, sha, f"Đang auto-patch {path} với ruamel.yaml")
+            else:
+                print(f"  ℹ️ {path} đã có patch, bỏ qua.")
 
     print()
-    print("✅ Xong! Fork đã được sync và file workflow yêu thích của bạn đã ghi đè lên.")
-    print()
-    print("💡 Tip: Mỗi lần chạy script này bot sẽ luôn dùng file trong thư mục workflows_patch.")
-
+    print("✅ Xong! Fork đã được sync và tự động vá bằng ruamel.yaml.")
 
 if __name__ == "__main__":
     asyncio.run(main())

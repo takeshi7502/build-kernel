@@ -3,3 +3,4 @@ aiohttp
 aiodns
 python-dotenv
 telethon
+ruamel.yaml

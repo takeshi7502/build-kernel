@@ -9,6 +9,7 @@ data.json
 log.txt
 
 # Python
+venv/
 __pycache__/
 *.pyc
 *.pyo
