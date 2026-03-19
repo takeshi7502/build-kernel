@@ -20,6 +20,7 @@ TELEGRAM_BOT_TOKEN: str = _required("TELEGRAM_BOT_TOKEN")
 # === GitHub ===
 GITHUB_TOKEN: str = _required("GITHUB_TOKEN")
 GITHUB_OWNER: str = _required("GITHUB_OWNER")
+UPSTREAM_OWNER: str = os.getenv("UPSTREAM_OWNER", "").strip()
 
 # === GKI Repo ===
 GKI_REPO: str = _required("GKI_REPO")
