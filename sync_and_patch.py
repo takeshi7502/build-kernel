@@ -124,24 +124,25 @@ def fix_build_yml(content: str) -> str:
     Nếu patch đã được apply (idempotent), không thay đổi gì.
     """
     # 1. Thêm sub_levels input (sau supp_op)
-    old_supp = (
-        "      supp_op:\n"
-        "        required: false\n"
-        "        type: boolean\n"
-        "        default: false"
-    )
-    new_supp = (
-        "      supp_op:\n"
-        "        required: false\n"
-        "        type: boolean\n"
-        "        default: false\n"
-        "      sub_levels:\n"
-        '        description: "Comma-separated sub_levels to build (empty=all)"\n'
-        "        required: false\n"
-        "        type: string\n"
-        '        default: ""'
-    )
-    content = content.replace(old_supp, new_supp, 1)
+    if "sub_levels:" not in content.split("jobs:")[0]:
+        old_supp = (
+            "      supp_op:\n"
+            "        required: false\n"
+            "        type: boolean\n"
+            "        default: false"
+        )
+        new_supp = (
+            "      supp_op:\n"
+            "        required: false\n"
+            "        type: boolean\n"
+            "        default: false\n"
+            "      sub_levels:\n"
+            '        description: "Comma-separated sub_levels to build (empty=all)"\n'
+            "        required: false\n"
+            "        type: string\n"
+            '        default: ""'
+        )
+        content = content.replace(old_supp, new_supp, 1)
 
     # 2. Thêm check step là FIRST step trong steps:
     check_step = (
@@ -223,15 +224,14 @@ def fix_kernel_yml(content: str) -> str:
     )
 
     # 2. Thêm sub_levels vào workflow_dispatch inputs (nếu chưa có)
-    if "sub_levels:" not in content:
+    if "sub_levels:" not in content.split("workflow_call:")[0]:
         # Thêm vào workflow_dispatch (sau cancel_susfs)
         dispatch_block = re.compile(
             r"(      cancel_susfs:\n"
             r"        description:.*?\n"
             r"        required:.*?\n"
             r"        type:.*?\n"
-            r"        default:.*?\n)"
-            r"(?!      sub_levels:)",
+            r"        default:.*?\n)",
             re.DOTALL
         )
         new_dispatch = (
@@ -244,15 +244,14 @@ def fix_kernel_yml(content: str) -> str:
         )
         content = dispatch_block.sub(new_dispatch, content, count=1)
 
+    if "sub_levels:" not in content.split("workflow_call:")[1].split("jobs:")[0]:
         # Thêm vào workflow_call inputs (sau called_from_main block, trước `jobs:`)
         call_end = re.compile(
             r"(      called_from_main:\n"
             r"        description:.*?\n"
             r"        required:.*?\n"
             r"        type:.*?\n"
-            r"        default:.*?\n)"
-            r"\n"
-            r"jobs:",
+            r"        default:.*?\n)\njobs:",
             re.DOTALL
         )
         new_call = (
@@ -261,9 +260,7 @@ def fix_kernel_yml(content: str) -> str:
             '        description: "指定 sub_level 列表 (逗号分隔, 留空=全部)"\n'
             "        required: false\n"
             "        type: string\n"
-            '        default: ""\n'
-            "\n"
-            "jobs:"
+            '        default: ""\n\njobs:'
         )
         content = call_end.sub(new_call, content, count=1)
 
