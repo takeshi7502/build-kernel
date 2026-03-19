@@ -281,6 +281,53 @@ def fix_kernel_yml(content: str) -> str:
     return content
 
 
+def fix_main_yml(content: str) -> str:
+    """
+    Trong main.yml:
+    1. Thêm sub_levels vào workflow_dispatch inputs
+    2. Pass sub_levels qua with: khi gọi kernel-*.yml
+    """
+    # 1. Thêm sub_levels vào workflow_dispatch inputs
+    if "sub_levels:" not in content.split("jobs:")[0]:
+        dispatch_block = re.compile(
+            r"(      build_all:\n"
+            r"        description:.*?\n"
+            r"        type:.*?\n"
+            r"        default:.*?\n)"
+            r"(?!      sub_levels:)",
+            re.DOTALL
+        )
+        new_dispatch = (
+            r"\1"
+            "      sub_levels:\n"
+            '        description: "指定 sub_level 列表 (逗号分隔, 留空=全部)"\n'
+            "        type: string\n"
+            '        default: ""\n'
+            "        required: false\n"
+        )
+        content = dispatch_block.sub(new_dispatch, content, count=1)
+
+    # 2. Thêm sub_levels vào with: khi gọi kernel-*.yml
+    lines = content.split("\n")
+    new_lines = []
+    
+    for i, line in enumerate(lines):
+        new_lines.append(line)
+        
+        # Nếu dòng hiện tại là called_from_main: true, check dòng tiếp theo có sub_levels chưa
+        if line.strip() == "called_from_main: true":
+            has_sub = False
+            if i + 1 < len(lines):
+                if "sub_levels:" in lines[i+1]:
+                    has_sub = True
+                    
+            if not has_sub:
+                indent = len(line) - len(line.lstrip())
+                new_lines.append(" " * indent + "sub_levels: ${{ inputs.sub_levels }}")
+                
+    return "\n".join(new_lines)
+
+
 # ─────────────────────────── Main ────────────────────────────────────────────
 
 async def main():
@@ -305,6 +352,15 @@ async def main():
             f.write(fixed)
         await put_file(s, ".github/workflows/build.yml", fixed, sha,
                        "patch: re-apply sub_levels filter in build.yml [auto]")
+                       
+        # main.yml
+        print("  Patching main.yml...")
+        content, sha = await get_file(s, ".github/workflows/main.yml")
+        fixed = fix_main_yml(content)
+        with open(os.path.join(PATCH_DIR, "main.yml"), "w", encoding="utf-8") as f:
+            f.write(fixed)
+        await put_file(s, ".github/workflows/main.yml", fixed, sha,
+                       "patch: add sub_levels pass-through in main.yml [auto]")
 
         # kernel-*.yml
         for fname in [
