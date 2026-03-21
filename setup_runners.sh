@@ -1,61 +1,113 @@
 #!/bin/bash
-set -e # Tự động dừng script ngay lập tức nếu có bất kỳ lệnh nào bị lỗi
 # ==========================================
 # SCRIPT TỰ ĐỘNG TẠO NHIỀU RUNNER TRÊN 1 VPS
-# Cảnh báo: Chạy 10 job build kernel song song trên 1 VPS 8 Core có thể làm sập máy (OOM)!
+# Có tính năng tự động phát hiện mã Token chết và gợi ý an toàn chống Sập Nguồn (OOM)
 # ==========================================
 
-# Tải cấu hình từ .env
+# 1. Tải cấu hình từ .env
 if [ -f .env ]; then
     export $(grep -v '^#' .env | xargs)
 fi
 
 URL="https://github.com/${GITHUB_OWNER}/${GKI_REPO}"
-TOKEN="${GITHUB_RUNNER_TOKEN}"
+ENV_TOKEN="${GITHUB_RUNNER_TOKEN}"
 
-if [ -z "$TOKEN" ] || [ -z "$GITHUB_OWNER" ] || [ -z "$GKI_REPO" ]; then
-    echo "❌ LỖI: Bạn chưa khai báo GITHUB_RUNNER_TOKEN hoặc GITHUB_OWNER / GKI_REPO trong file .env!"
-    echo "Dừng script để bảo đảm an toàn."
+# Hàm nhập token
+get_token() {
+    while true; do
+        read -p "🔑 Nhập GITHUB_RUNNER_TOKEN mới (Nhấn Enter để xài token cũ trong .env): " INPUT_TOKEN
+        FINAL_TOKEN="${INPUT_TOKEN:-$ENV_TOKEN}"
+        
+        if [ -z "$FINAL_TOKEN" ]; then
+            echo "❌ LỖI: Token không được để trống! Cố gắng tìm lại trong Github nhé."
+        else
+            # Cập nhật ngược lại vào ENV_TOKEN để lần chạy sau lỡ lỗi thì gợi ý luôn
+            ENV_TOKEN="$FINAL_TOKEN"
+            break
+        fi
+    done
+}
+
+echo "========================================="
+echo "💻 KIỂM TRA THÔNG SỐ SERVER VPS..."
+echo "========================================="
+CORES=$(nproc)
+RAM_MB=$(free -m | awk '/Mem:/ { print $2 }')
+RAM_GB=$((RAM_MB / 1024))
+
+# Cứ mỗi Core gánh 1 Runner, nhưng nếu RAM ít hơn 4GB cho 1 Core thì RAM là điểm yếu
+# Build Kernel tốn cực kỳ nhiều RAM, khuyến nghị 1 Runner / 3GB RAM tối thiểu
+MAX_BY_RAM=$((RAM_GB / 3))
+if [ "$MAX_BY_RAM" -lt 1 ]; then MAX_BY_RAM=1; fi
+
+SUGGESTED_RUNNERS=$(( CORES < MAX_BY_RAM ? CORES : MAX_BY_RAM ))
+if [ "$SUGGESTED_RUNNERS" -lt 1 ]; then SUGGESTED_RUNNERS=1; fi
+
+echo "- CPU Cores: $CORES"
+echo "- RAM: $RAM_GB GB"
+echo "- 🛠️ Số lượng Runner Tối Đa Khuyến Nghị: $SUGGESTED_RUNNERS (Để hạn chế rủi ro sập nguồn OOM)"
+echo "-----------------------------------------"
+
+read -p "🔢 Bạn muốn tạo bao nhiêu Runner chạy song song? [Mặc định: $SUGGESTED_RUNNERS]: " INPUT_COUNT
+RUNNER_COUNT=${INPUT_COUNT:-$SUGGESTED_RUNNERS}
+
+if ! [[ "$RUNNER_COUNT" =~ ^[0-9]+$ ]]; then
+    echo "❌ LỖI: Vui lòng gõ một con số hợp lệ!"
     exit 1
 fi
 
-RUNNER_COUNT=10
+echo ""
+get_token
+
 RUNNER_VERSION="2.332.0"
 TAR_FILE="actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz"
 
-# 1. Tải bộ cài runner (nếu chưa có)
 if [ ! -f "$TAR_FILE" ]; then
     echo "📥 Đang tải Github Actions Runner v${RUNNER_VERSION}..."
     curl -o $TAR_FILE -L "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/${TAR_FILE}"
 fi
 
-# 2. Vòng lặp tạo 10 con runner
-for i in $(seq 1 $RUNNER_COUNT); do
+export RUNNER_ALLOW_RUNASROOT=1
+VPS_NAME=$(hostname)
+
+i=1
+while [ $i -le $RUNNER_COUNT ]; do
     DIR="runner-$i"
+    echo ""
     echo "========================================="
-    echo "🚀 Đang setup $DIR..."
+    echo "🚀 Đang setup ${VPS_NAME}-Runner-$i..."
     echo "========================================="
     
-    # Tạo thư mục và giải nén (nếu thư mục chưa rỗng thì xoá sạch tạo lại)
     rm -rf $DIR
-    mkdir $DIR
+    mkdir -p $DIR
     tar xzf ./$TAR_FILE -C $DIR
     
     cd $DIR
     
-    # Cấu hình tự động (dùng HOSTNAME của VPS làm tiền tố để không bị trùng lặp giữa nhiều máy)
-    export RUNNER_ALLOW_RUNASROOT=1 # Cho phép chạy dưới quyền root (VPS thường dùng thẳng root)
-    VPS_NAME=$(hostname)
-    ./config.sh --url $URL --token $TOKEN --name "${VPS_NAME}-Runner-$i" --unattended --replace
+    # Chạy config và hứng mã lỗi
+    if ! ./config.sh --url "$URL" --token "$FINAL_TOKEN" --name "${VPS_NAME}-Runner-$i" --unattended --replace; then
+        echo ""
+        echo "🚨 LỖI GITHUB TỪ CHỐI (Mã 404/401)!"
+        echo "Nguyên nhân 99% là do TOKEN bạn nhập đã cũ hoặc hết hạn 1 tiếng."
+        cd ..
+        rm -rf $DIR
+        
+        # Bắt nhập lại token mới
+        get_token
+        # Quay lại đầu vòng lặp để tạo lại đúng con runner thứ i này
+        continue
+    fi
     
-    # Cài đặt thành service chạy ngầm của Linux và Khởi động
     sudo ./svc.sh install
     sudo ./svc.sh start
     
     cd ..
-    echo "✅ $DIR đã chạy ngầm thành công!"
+    echo "✅ ${VPS_NAME}-Runner-$i đã cài cắm thành công và cày cuốc ngầm 24/7!"
+    
+    # Nhích lên runner tiếp theo
+    i=$((i + 1))
 done
 
 echo ""
-echo "🎉 XONG! Đã tạo và cắm 10 con runner chạy ngầm trên VPS."
-echo "Hãy kiểm tra trên Github, bạn sẽ thấy 10 con VPS-Runner-1 đến VPS-Runner-10 sáng đèn xanh."
+echo "🎉 XUẤT SẮC! Cả $RUNNER_COUNT con runner đã chạy xong!"
+echo "Hãy về lại giao diện Github -> Settings -> Actions -> Runners để ngắm dàn máy cày xanh lè!"
