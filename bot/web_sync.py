@@ -52,6 +52,9 @@ async def get_realtime_data(app):
                 "status": status,
                 "date": j.get("created_at"),
                 "commit": inputs.get("sub_levels", "N/A"),
+                "commit_msg": j.get("commit_msg", ""),
+                "artifacts_url": j.get("telegraph_url"),
+                "build_log": j.get("build_log", ""),
                 "user": j.get("user_name", "Unknown"),
                 "dl_link": None
             }

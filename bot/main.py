@@ -1277,8 +1277,7 @@ async def start_web_server(app_bot):
     app.router.add_get('/api/data', api_data)
     
     base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    app.router.add_static('/css', os.path.join(base_dir, 'web', 'css'))
-    app.router.add_static('/js', os.path.join(base_dir, 'web', 'js'))
+    app.router.add_static('/web', os.path.join(base_dir, 'web'))
     
     async def index(request):
         return aiohttp_web.FileResponse(os.path.join(base_dir, 'index.html'))
