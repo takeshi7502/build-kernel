@@ -68,11 +68,12 @@ function createBuildCard(build) {
 function updateStatusBadge(botStatus, lastPing) {
     const badge = document.querySelector('.stat-badge');
     
-    // Nếu quá 2 phút không ping, coi như offline
+    // Nếu quá 6.5 phút (400s) không ping, coi như offline
+    // (Lý do: Github Raw có bộ đệm Cache mặc định là 5 phút)
     let isOnline = false;
     if (botStatus === "online" && lastPing) {
         const now = Math.floor(Date.now() / 1000);
-        if (now - lastPing < 120) {
+        if (now - lastPing < 400) {
             isOnline = true;
         }
     }
