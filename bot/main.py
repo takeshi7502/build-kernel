@@ -1295,7 +1295,7 @@ async def start_web_server(app_bot):
     logger.info(f"✅ Real-time Web Dashboard started natively on 0.0.0.0:{port}")
 
 
-async def main():
+def main():
     if not config.TELEGRAM_BOT_TOKEN:
         logger.error("Missing TELEGRAM_BOT_TOKEN")
         return

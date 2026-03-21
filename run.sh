@@ -93,7 +93,7 @@ echo "================================================="
 WEB_PORT=$(grep "WEB_PORT" .env | cut -d '=' -f2)
 WEB_PORT=${WEB_PORT:-5000}
 if command -v curl &> /dev/null; then
-    VPS_IP=$(curl -s ifconfig.me)
+    VPS_IP=$(curl -4 -s ifconfig.me)
     echo "================================================="
     echo "🌐 BẢNG ĐIỀU KHIỂN WEB (REAL-TIME)"
     echo "Truy cập ngay vào: http://${VPS_IP}:${WEB_PORT}"
