@@ -5,8 +5,20 @@ set -e # Tự động dừng script ngay lập tức nếu có bất kỳ lệnh
 # Cảnh báo: Chạy 10 job build kernel song song trên 1 VPS 8 Core có thể làm sập máy (OOM)!
 # ==========================================
 
-URL="https://github.com/takeshi7502/GKI_KernelSU_SUSFS"
-TOKEN="AZRJC5OZMEPBOIDLZRNNOP3JXWMSK"
+# Tải cấu hình từ .env
+if [ -f .env ]; then
+    export $(grep -v '^#' .env | xargs)
+fi
+
+URL="https://github.com/${GITHUB_OWNER}/${GKI_REPO}"
+TOKEN="${GITHUB_RUNNER_TOKEN}"
+
+if [ -z "$TOKEN" ] || [ -z "$GITHUB_OWNER" ] || [ -z "$GKI_REPO" ]; then
+    echo "❌ LỖI: Bạn chưa khai báo GITHUB_RUNNER_TOKEN hoặc GITHUB_OWNER / GKI_REPO trong file .env!"
+    echo "Dừng script để bảo đảm an toàn."
+    exit 1
+fi
+
 RUNNER_COUNT=10
 RUNNER_VERSION="2.332.0"
 TAR_FILE="actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz"
