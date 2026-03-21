@@ -1311,7 +1311,6 @@ def main():
     app.bot_data["telegraph"] = telegraph
 
     # Background tasks
-    app.create_task(cleanup_task())
     app.create_task(start_web_server(app))
 
     # Owner-only commands
