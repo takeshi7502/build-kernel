@@ -1,5 +1,5 @@
 #!/bin/bash
-
+set -e # Tự động dừng script ngay lập tức nếu có bất kỳ lệnh nào bị lỗi
 # ==========================================
 # SCRIPT TỰ ĐỘNG TẠO NHIỀU RUNNER TRÊN 1 VPS
 # Cảnh báo: Chạy 10 job build kernel song song trên 1 VPS 8 Core có thể làm sập máy (OOM)!
@@ -31,8 +31,10 @@ for i in $(seq 1 $RUNNER_COUNT); do
     
     cd $DIR
     
-    # Cấu hình tự động (không hỏi yes/no)
-    ./config.sh --url $URL --token $TOKEN --name "VPS-Runner-$i" --unattended --replace
+    # Cấu hình tự động (dùng HOSTNAME của VPS làm tiền tố để không bị trùng lặp giữa nhiều máy)
+    export RUNNER_ALLOW_RUNASROOT=1 # Cho phép chạy dưới quyền root (VPS thường dùng thẳng root)
+    VPS_NAME=$(hostname)
+    ./config.sh --url $URL --token $TOKEN --name "${VPS_NAME}-Runner-$i" --unattended --replace
     
     # Cài đặt thành service chạy ngầm của Linux và Khởi động
     sudo ./svc.sh install
