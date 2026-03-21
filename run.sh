@@ -46,12 +46,12 @@ pm2 delete gki-bot gki-userbot > /dev/null 2>&1
 
 # 4. Chạy bot bằng pm2 dựa trên lựa chọn
 if [ "$choice" == "1" ]; then
-    pm2 start main.py --interpreter python3 --name "gki-bot"
+    pm2 start bot/main.py --interpreter python3 --name "gki-bot"
 elif [ "$choice" == "2" ]; then
-    pm2 start userbot.py --interpreter python3 --name "gki-userbot"
+    pm2 start bot/userbot.py --interpreter python3 --name "gki-userbot"
 elif [ "$choice" == "3" ]; then
-    pm2 start main.py --interpreter python3 --name "gki-bot"
-    pm2 start userbot.py --interpreter python3 --name "gki-userbot"
+    pm2 start bot/main.py --interpreter python3 --name "gki-bot"
+    pm2 start bot/userbot.py --interpreter python3 --name "gki-userbot"
 else
     echo "❌ Lựa chọn không hợp lệ. Đang thoát..."
     exit 1

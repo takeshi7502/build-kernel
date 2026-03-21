@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GKI Kernel Forge | Dashboard</title>
+    <meta name="description" content="Dashboard quản lý và tải xuống các bản build GKI Kernel Android mới nhất.">
+    <!-- Google Fonts: Inter & JetBrains Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Custom Styles -->
+    <link rel="stylesheet" href="web/css/style.css">
+</head>
+<body>
+    <div class="background-effects">
+        <div class="glow-orb orb-1"></div>
+        <div class="glow-orb orb-2"></div>
+    </div>
+
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-logo">
+                <div class="logo-icon"><i class="fa-solid fa-microchip"></i></div>
+                <div>
+                    <h1>GKI Kernel Forge</h1>
+                    <p class="subtitle">Hệ thống Build & Triển khai tự động</p>
+                </div>
+            </div>
+            <div class="header-stats">
+                <div class="stat-badge">
+                    <span class="pulse-dot"></span> Hệ thống đang Online
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main>
+            <div class="section-title">
+                <h2><i class="fa-solid fa-clock-rotate-left"></i> Lịch Sử Bản Build Tuyển Chọn</h2>
+                <div class="filter-group">
+                    <button class="filter-btn active" data-filter="all">Tất cả</button>
+                    <button class="filter-btn" data-filter="success">Thành công</button>
+                </div>
+            </div>
+
+            <!-- Dashboard Grid -->
+            <div class="builds-grid" id="builds-container">
+                <!-- Javascript will inject mock cards here -->
+            </div>
+        </main>
+
+        <!-- Footer -->
+        <footer>
+            <p>Phát triển bởi <strong>Takeshi</strong> | Tự động hoá với GitHub Actions</p>
+        </footer>
+    </div>
+
+    <!-- Custom JS -->
+    <script src="web/js/app.js"></script>
+</body>
+</html>

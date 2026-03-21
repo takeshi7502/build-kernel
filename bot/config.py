@@ -2,8 +2,9 @@ import os
 import sys
 from dotenv import load_dotenv
 
-load_dotenv()
-
+# Load .env từ thư mục gốc (lùi lại 1 cấp so với file config.py)
+env_path = os.path.join(os.path.dirname(__file__), '..', '.env')
+load_dotenv(dotenv_path=env_path)
 
 def _required(key: str) -> str:
     val = os.getenv(key, "").strip()

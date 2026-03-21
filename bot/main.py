@@ -25,6 +25,7 @@ from telegram.request import HTTPXRequest
 import config
 from gki import build_gki_conversation, _del_msg_job, SUB_LEVELS
 from permissions import is_owner, is_admin
+from web_sync import sync_web_data
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -636,6 +637,13 @@ async def poller(app):
                     logger.error("Job %s error: %s", job.get("_id"), e, exc_info=True)
         except Exception as e:
             logger.error("Poller error: %s", e, exc_info=True)
+        
+        # Đồng bộ dữ liệu lên Web API
+        try:
+            await sync_web_data(app)
+        except Exception as e:
+            logger.error("Web Sync error: %s", e)
+            
         await asyncio.sleep(45)
 
 
