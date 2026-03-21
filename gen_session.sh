@@ -6,8 +6,10 @@ echo "🚀 Đang khởi chạy Công Cụ tạo Telegram String Session..."
 echo "Đang kiểm tra thư viện..."
 pip3 install telethon python-dotenv -q >/dev/null 2>&1 || pip install telethon python-dotenv -q >/dev/null 2>&1
 
-# Chạy theo python3 hoặc python tuỳ hệ thống Linux
-if command -v python3 &>/dev/null; then
+# Ưu tiên dùng môi trường ảo venv của Bot (Tại đó đã cài sẵn dotenv và telethon)
+if [ -d "venv" ]; then
+    venv/bin/python generate_session.py
+elif command -v python3 &>/dev/null; then
     python3 generate_session.py
 else
     python generate_session.py
