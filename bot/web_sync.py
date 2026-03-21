@@ -6,10 +6,15 @@ import config
 
 logger = logging.getLogger("gww-web-sync")
 
+_GH_RUNS_CACHE = {}
+_LAST_GH_FETCH = 0
+
 async def get_realtime_data(app):
+    global _GH_RUNS_CACHE, _LAST_GH_FETCH
     """Trích xuất dữ liệu Real-time trực tiếp từ File và Github API qua RAM (0 delay)"""
     try:
         storage = app.bot_data.get("storage")
+        gh = app.bot_data.get("gh")
         if not storage:
             return {"status": "offline", "builds": []}
 
@@ -22,6 +27,37 @@ async def get_realtime_data(app):
         jobs = await storage.get_jobs()
         # Sắp xếp mới nhất lên đầu
         jobs = sorted(jobs, key=lambda x: x.get("_id", 0), reverse=True)
+        
+        # -------- BẮT ĐẦU ĐỒNG BỘ VỚI GITHUB --------
+        if gh:
+            now = int(datetime.now(timezone.utc).timestamp())
+            if now - _LAST_GH_FETCH > 30: # Phân giải cache 30 giây để tránh Rate Limit
+                url = f"{gh.base}/repos/{config.GITHUB_OWNER}/{config.GKI_REPO}/actions/runs?per_page=50"
+                res = await gh._request("GET", url)
+                if res.get("status") == 200:
+                    _GH_RUNS_CACHE = {str(r["id"]): r for r in res.get("json", {}).get("workflow_runs", [])}
+                    _LAST_GH_FETCH = now
+            
+            if _GH_RUNS_CACHE:
+                active_jobs = []
+                for j in jobs:
+                    run_id = str(j.get("run_id", ""))
+                    if not run_id or run_id == "None":
+                        active_jobs.append(j)
+                        continue
+                        
+                    if run_id not in _GH_RUNS_CACHE:
+                        # Job ko còn ở Github -> tức là user đã delete -> xoá local
+                        await storage.delete_job_by_run_id(int(run_id))
+                        continue
+                        
+                    gh_run = _GH_RUNS_CACHE[run_id]
+                    # Update status native
+                    j["status"] = "completed" if gh_run.get("status") == "completed" else "in_progress"
+                    j["conclusion"] = gh_run.get("conclusion")
+                    active_jobs.append(j)
+                jobs = active_jobs
+        # -------- KẾT THÚC ĐỒNG BỘ VỚI GITHUB --------
         
         for j in jobs[:50]: # Lấy 50 build gần nhất
             inputs = j.get("inputs", {})
