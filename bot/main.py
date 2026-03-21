@@ -25,7 +25,8 @@ from telegram.request import HTTPXRequest
 import config
 from gki import build_gki_conversation, _del_msg_job, SUB_LEVELS
 from permissions import is_owner, is_admin
-from web_sync import sync_web_data
+import aiohttp.web as aiohttp_web
+from web_sync import get_realtime_data
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -637,12 +638,6 @@ async def poller(app):
                     logger.error("Job %s error: %s", job.get("_id"), e, exc_info=True)
         except Exception as e:
             logger.error("Poller error: %s", e, exc_info=True)
-        
-        # Đồng bộ dữ liệu lên Web API
-        try:
-            await sync_web_data(app)
-        except Exception as e:
-            logger.error("Web Sync error: %s", e)
             
         await asyncio.sleep(45)
 
@@ -1267,16 +1262,57 @@ async def cmd_delete_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if update.message:
             context.job_queue.run_once(_del_msg_job, when=10, chat_id=update.message.chat_id, data=update.message.message_id)
 
-def main():
+async def start_web_server(app_bot):
+    """Khởi chạy API Web Server cục bộ phục vụ Dashboard Realtime"""
+    app = aiohttp_web.Application()
+    
+    async def api_data(request):
+        try:
+            data = await get_realtime_data(app_bot)
+            return aiohttp_web.json_response(data, headers={'Access-Control-Allow-Origin': '*'})
+        except Exception as e:
+            logger.error("Web API Error: %s", e)
+            return aiohttp_web.json_response({"error": str(e)}, status=500)
+            
+    app.router.add_get('/api/data', api_data)
+    
+    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    app.router.add_static('/css', os.path.join(base_dir, 'web', 'css'))
+    app.router.add_static('/js', os.path.join(base_dir, 'web', 'js'))
+    
+    async def index(request):
+        return aiohttp_web.FileResponse(os.path.join(base_dir, 'index.html'))
+        
+    app.router.add_get('/', index)
+    app.router.add_get('/index.html', index)
+    
+    runner = aiohttp_web.AppRunner(app)
+    await runner.setup()
+    
+    port = int(os.getenv("WEB_PORT", 5000))
+    site = aiohttp_web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    logger.info(f"✅ Real-time Web Dashboard started natively on 0.0.0.0:{port}")
+
+
+async def main():
+    if not config.TELEGRAM_BOT_TOKEN:
+        logger.error("Missing TELEGRAM_BOT_TOKEN")
+        return
+
     storage = JSONStorage(DATA_JSON)
     gh = GitHubAPI(config.GITHUB_TOKEN, config.GITHUB_OWNER)
     telegraph = TelegraphAPI(storage)
 
-    request = HTTPXRequest(http_version="1.1")
-    app = ApplicationBuilder().token(config.TELEGRAM_BOT_TOKEN).request(request).build()
+    app = ApplicationBuilder().token(config.TELEGRAM_BOT_TOKEN).build()
+    
     app.bot_data["storage"] = storage
     app.bot_data["gh"] = gh
     app.bot_data["telegraph"] = telegraph
+
+    # Background tasks
+    app.create_task(cleanup_task())
+    app.create_task(start_web_server(app))
 
     # Owner-only commands
     app.add_handler(CommandHandler("start", cmd_start))

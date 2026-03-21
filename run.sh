@@ -85,6 +85,17 @@ echo " - Khởi động lại bot:        pm2 restart gki-bot"
 echo " - Tắt hẳn và xoá bot:       pm2 delete gki-bot"
 echo " - Theo dõi tài nguyên:      pm2 monit"
 echo ""
+echo ""
 echo "🔹 (Mẹo: Nếu muốn VPS tự bật bot khi bị khởi động lại (Reboot),"
 echo "    hãy gõ lệnh: pm2 startup)"
 echo "================================================="
+
+WEB_PORT=$(grep "WEB_PORT" .env | cut -d '=' -f2)
+WEB_PORT=${WEB_PORT:-5000}
+if command -v curl &> /dev/null; then
+    VPS_IP=$(curl -s ifconfig.me)
+    echo "================================================="
+    echo "🌐 BẢNG ĐIỀU KHIỂN WEB (REAL-TIME)"
+    echo "Truy cập ngay vào: http://${VPS_IP}:${WEB_PORT}"
+    echo "================================================="
+fi

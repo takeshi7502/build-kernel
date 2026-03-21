@@ -6,13 +6,12 @@ import config
 
 logger = logging.getLogger("gww-web-sync")
 
-async def sync_web_data(app):
-    """Đổ dữ liệu từ Storage ra file JSON và push lên nhánh web-data trên Github"""
+async def get_realtime_data(app):
+    """Trích xuất dữ liệu Real-time trực tiếp từ File và Github API qua RAM (0 delay)"""
     try:
         storage = app.bot_data.get("storage")
-        gh = app.bot_data.get("gh")
-        if not storage or not gh:
-            return
+        if not storage:
+            return {"status": "offline", "builds": []}
 
         data = {
             "status": "online",
@@ -61,37 +60,7 @@ async def sync_web_data(app):
                 
             data["builds"].append(b)
             
-        content_str = json.dumps(data, indent=2)
-        
-        # 1. Kiểm tra nhánh web-data
-        branch_name = "web-data"
-        res_branch = await gh._request("GET", f"{gh.base}/repos/{config.GITHUB_OWNER}/{config.GKI_REPO}/branches/{branch_name}")
-        if res_branch["status"] != 200:
-            # Lấy sha của nhánh chính để tạo
-            res_main = await gh._request("GET", f"{gh.base}/repos/{config.GITHUB_OWNER}/{config.GKI_REPO}/git/refs/heads/{config.GKI_DEFAULT_BRANCH}")
-            if res_main["status"] == 200:
-                main_sha = res_main["json"]["object"]["sha"]
-                await gh._request("POST", f"{gh.base}/repos/{config.GITHUB_OWNER}/{config.GKI_REPO}/git/refs", json_payload={
-                    "ref": f"refs/heads/{branch_name}",
-                    "sha": main_sha
-                })
-        
-        # 2. Lấy SHA của file web_data.json hiện tại
-        file_path = "web_data.json"
-        res_file = await gh._request("GET", f"{gh.base}/repos/{config.GITHUB_OWNER}/{config.GKI_REPO}/contents/{file_path}?ref={branch_name}")
-        file_sha = res_file["json"].get("sha") if res_file["status"] == 200 else None
-        
-        # 3. Push file mới
-        payload = {
-            "message": "Update web dashboard data [skip ci]",
-            "content": base64.b64encode(content_str.encode("utf-8")).decode("utf-8"),
-            "branch": branch_name
-        }
-        if file_sha:
-            payload["sha"] = file_sha
-            
-        await gh._request("PUT", f"{gh.base}/repos/{config.GITHUB_OWNER}/{config.GKI_REPO}/contents/{file_path}", json_payload=payload)
-        logger.info("Successfully synced web_data.json to branch web-data")
-
+        return data
     except Exception as e:
-        logger.error("Error in sync_web_data: %s", e)
+        logger.error("Error in get_realtime_data: %s", e)
+        return {"status": "error", "message": str(e), "builds": []}

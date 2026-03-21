@@ -1,9 +1,5 @@
-// CẤU HÌNH KẾT NỐI (Hãy đổi theo đúng thông tin .env của bạn)
-const GITHUB_OWNER = "takeshi7502";           // Thay bằng tên Github của bạn (VD: zzh20188)
-const GKI_REPO = "GKI_KernelSU_SUSFS";  // Tên kho Kernel Source của bạn
-
-// Tự động tạo link lấy dữ liệu (KHÔNG CẦN SỬA)
-const DATA_URL = `https://raw.githubusercontent.com/${GITHUB_OWNER}/${GKI_REPO}/web-data/web_data.json`;
+// CẤU HÌNH KẾT NỐI (Nếu chạy Vercel độc lập thì điền link cục bộ, nếu chạy trên VPS thì dùng /api/data)
+const DATA_URL = "/api/data";
 
 let currentBuilds = [];
 
