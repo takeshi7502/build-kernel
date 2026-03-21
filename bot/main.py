@@ -1310,8 +1310,7 @@ def main():
     app.bot_data["gh"] = gh
     app.bot_data["telegraph"] = telegraph
 
-    # Background tasks
-    app.create_task(start_web_server(app))
+    # Background tasks sẽ được chạy trong _post_init
 
     # Owner-only commands
     app.add_handler(CommandHandler("start", cmd_start))
@@ -1349,6 +1348,7 @@ def main():
 
     async def _post_init(app_):
         app_.create_task(poller(app_))
+        app_.create_task(start_web_server(app_))
     app.post_init = _post_init
 
     logger.info("Bot started")
