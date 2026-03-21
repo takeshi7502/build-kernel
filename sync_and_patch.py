@@ -109,26 +109,6 @@ def patch_build_yml(content: str) -> str:
             "type": "string",
             "default": ""
         }
-        
-    if "build-kernel" in data.get("jobs", {}):
-        steps = data["jobs"]["build-kernel"].get("steps", [])
-        if steps and steps[0].get("id") != "check_sub":
-            check_step = {
-                "name": "Check sub_level filter",
-                "id": "check_sub",
-                "run": 'SUB_LEVELS="${{ inputs.sub_levels }}"\nCURRENT="${{ inputs.sub_level }}"\nif [ -z "$SUB_LEVELS" ]; then\n  echo "Building sub_level $CURRENT (no filter applied)"\n  echo "skip=false" >> $GITHUB_OUTPUT\nelif echo ",$SUB_LEVELS," | grep -q ",$CURRENT,"; then\n  echo "Building sub_level $CURRENT (matched filter)"\n  echo "skip=false" >> $GITHUB_OUTPUT\nelse\n  echo "Skipping sub_level $CURRENT (not in: $SUB_LEVELS)"\n  echo "skip=true" >> $GITHUB_OUTPUT\nfi\n'
-            }
-            steps.insert(0, check_step)
-            for step in steps[1:]:
-                if "if" in step:
-                    old_if = step["if"]
-                    if old_if.replace(" ", "") == "steps.check_sub.outputs.skip!='true'":
-                        continue
-                    if old_if.startswith("${{") and old_if.endswith("}}"):
-                        old_if = old_if[3:-2].strip()
-                    step["if"] = f"${{{{ steps.check_sub.outputs.skip != 'true' && ({old_if}) }}}}"
-                else:
-                    step["if"] = "${{ steps.check_sub.outputs.skip != 'true' }}"
                     
     set_self_hosted(data)
     out = StringIO()
@@ -191,12 +171,42 @@ def patch_kernel_yml(content: str) -> str:
                 }
                 
     jobs = data.get("jobs", {})
+    import json
+    new_jobs = {}
+    
     for job_name, job_data in jobs.items():
         if isinstance(job_data, dict) and job_name.startswith("build-kernels"):
             if "uses" in job_data and "build.yml" in job_data["uses"]:
                 w_block = job_data.get("with", {})
                 if "sub_levels" not in w_block:
                     w_block["sub_levels"] = "${{ inputs.sub_levels }}"
+                
+                # Biến ma trận tĩnh thành ma trận JSON động thông qua Setup Job
+                original_matrix = job_data.get("strategy", {}).get("matrix", {}).get("include", [])
+                if original_matrix and not isinstance(original_matrix, str):
+                    clean_matrix = [dict(x) for x in original_matrix]
+                    matrix_json_str = json.dumps(clean_matrix, separators=(',', ':'))
+                    
+                    setup_job_name = f"setup-{job_name}"
+                    setup_job = {
+                        "runs-on": "ubuntu-latest",
+                        "outputs": {
+                            "matrix": "${{ steps.filter.outputs.matrix }}"
+                        },
+                        "steps": [
+                            {
+                                "id": "filter",
+                                "run": f"""SUB_LEVELS="${{{{ inputs.sub_levels }}}}"\nMATRIX_JSON='{matrix_json_str}'\nif [ -z "$SUB_LEVELS" ]; then\n  echo "matrix=$MATRIX_JSON" >> $GITHUB_OUTPUT\nelse\n  JSON_OUT=$(echo "$MATRIX_JSON" | jq --arg subs ",$SUB_LEVELS," -c 'map(select(.sub_level as $sl | $subs | contains("," + ($sl|tostring) + ",")))')\n  if [ "$JSON_OUT" = "[]" ]; then\n     echo "matrix=$MATRIX_JSON" >> $GITHUB_OUTPUT\n  else\n     echo "matrix=$JSON_OUT" >> $GITHUB_OUTPUT\n  fi\nfi\n"""
+                            }
+                        ]
+                    }
+                    new_jobs[setup_job_name] = setup_job
+                    job_data["needs"] = setup_job_name
+                    job_data["strategy"]["matrix"]["include"] = f"${{{{ fromJSON(needs.{setup_job_name}.outputs.matrix) }}}}"
+        
+        new_jobs[job_name] = job_data
+        
+    data["jobs"] = new_jobs
             
     set_self_hosted(data)
     out = StringIO()

@@ -30,37 +30,51 @@ async def get_realtime_data(app):
             if inputs.get("build_all"):
                 os_list = ["ALL versions"]
             else:
-                if inputs.get("build_a12_5_10"): os_list.append("Android 12 (5.10)")
-                if inputs.get("build_a13_5_15"): os_list.append("Android 13 (5.15)")
-                if inputs.get("build_a14_6_1"): os_list.append("Android 14 (6.1)")
-                if inputs.get("build_a15_6_6"): os_list.append("Android 15 (6.6)")
-            if not os_list:
-                os_list = [j.get("workflow_file", "Custom")]
+                if inputs.get("build_a12_5_10"): os_list.append("A12-5.10")
+                if inputs.get("build_a13_5_15"): os_list.append("A13-5.15")
+                if inputs.get("build_a14_6_1"): os_list.append("A14-6.1")
+                if inputs.get("build_a15_6_6"): os_list.append("A15-6.6")
             
-            ksu = f"{inputs.get('kernelsu_variant', 'NoKSU')} {inputs.get('version', '')}".strip()
-            susfs = "Tắt (Cancelled)" if inputs.get("cancel_susfs", True) else "Bật (Enabled)"
+            os_str = os_list[0] if os_list else "Custom"
+            sub = inputs.get("sub_levels", "").replace(",", ".")
+            if sub and sub.lower() not in ["all", "*"]:
+                os_str = f"{os_str}.{sub}"
+                
+            variant = inputs.get("kernelsu_variant", "NoKSU")
+            branch = str(inputs.get("kernelsu_branch", "Stable")).replace("(标准)", "").replace("(开发)", "").strip()
+            if not branch: branch = "Stable"
+                
+            title = variant
+            sub_title = f"({os_str}-{branch})"
+            
+            custom_version = inputs.get("version", "").strip("-") or "Takeshi.dev"
+            zram = "Bật" if inputs.get("use_zram", True) else "Tắt"
+            bbg = "Bật" if inputs.get("use_bbg", True) else "Tắt"
+            kpm = "Bật" if inputs.get("use_kpm", True) else "Tắt"
+            susfs = "Tắt" if inputs.get("cancel_susfs", True) else "Bật"
             
             status = "building"
             if j.get("status") == "completed":
                 status = "success" if j.get("conclusion") == "success" else "failed"
                 
+            run_id = j.get("run_id")
+            github_link = f"https://github.com/{config.GITHUB_OWNER}/{config.GKI_REPO}/actions/runs/{run_id}" if run_id else "#"
+            nightly_link = f"https://nightly.link/{config.GITHUB_OWNER}/{config.GKI_REPO}/actions/runs/{run_id}" if run_id else "#"
+            
             b = {
-                "id": str(j.get("run_id") or j.get("_id", "TBD")),
-                "os_version": " / ".join(os_list),
-                "ksu_version": ksu,
-                "susfs_version": susfs,
+                "id": str(run_id or j.get("_id", "TBD")),
+                "title": title,
+                "sub_title": sub_title,
+                "custom_version": custom_version,
+                "zram": zram,
+                "kpm": kpm,
+                "bbg": bbg,
+                "susfs": susfs,
                 "status": status,
                 "date": j.get("created_at"),
-                "commit": inputs.get("sub_levels", "N/A"),
-                "commit_msg": j.get("commit_msg", ""),
-                "artifacts_url": j.get("telegraph_url"),
-                "build_log": j.get("build_log", ""),
-                "user": j.get("user_name", "Unknown"),
-                "dl_link": None
+                "github_link": github_link,
+                "nightly_link": nightly_link
             }
-            if status == "success" and j.get("run_id"):
-                b["dl_link"] = f"https://github.com/{config.GITHUB_OWNER}/{config.GKI_REPO}/actions/runs/{j.get('run_id')}"
-                
             data["builds"].append(b)
             
         return data

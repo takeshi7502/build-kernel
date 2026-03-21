@@ -3,28 +3,46 @@ const DATA_URL = "/api/data";
 
 let currentBuilds = [];
 
+// Hàm format thời gian
+function formatDate(isoString) {
+    if (!isoString) return "";
+    try {
+        const d = new Date(isoString);
+        const HH = String(d.getHours()).padStart(2, '0');
+        const mm = String(d.getMinutes()).padStart(2, '0');
+        const DD = String(d.getDate()).padStart(2, '0');
+        const MM = String(d.getMonth() + 1).padStart(2, '0');
+        const YYYY = d.getFullYear();
+        return `${HH}:${mm} ${DD}-${MM}-${YYYY}`;
+    } catch(e) {
+        return isoString;
+    }
+}
+
 // Hàm tạo mã HTML cho từng Card
 function createBuildCard(build) {
     // Xác định Status class & label
     let statusClass = build.status;
-    let statusLabel = build.status === 'success' ? 'Hoàn thành' 
+    let statusLabel = build.status === 'success' ? 'Success' 
                     : build.status === 'building' ? 'Đang Build' 
                     : 'Lỗi';
     
-    // Nút download tuỳ theo trạng thái
+    // Nút action (Download & Github)
     let actionButtons = '';
     if (build.status === 'success') {
         actionButtons = `
-            <a href="${build.dl_link}" class="btn btn-primary"><i class="fa-solid fa-download"></i> Tải Kernel</a>
-            <button class="btn btn-secondary" title="Copy Link"><i class="fa-regular fa-copy"></i></button>
+            <a href="${build.nightly_link}" target="_blank" class="btn btn-primary" style="flex: 1; text-align: center; text-decoration: none;"><i class="fa-solid fa-download"></i> Download</a>
+            <a href="${build.github_link}" target="_blank" class="btn btn-secondary" style="flex: 1; text-align: center; text-decoration: none;"><i class="fa-brands fa-github"></i> Github</a>
         `;
     } else if (build.status === 'building') {
         actionButtons = `
-            <button class="btn btn-primary" disabled><i class="fa-solid fa-spinner fa-spin"></i> Đang biên dịch...</button>
+            <button class="btn btn-primary" disabled style="flex: 1; opacity: 0.7;"><i class="fa-solid fa-spinner fa-spin"></i> Đang biên dịch</button>
+            <a href="${build.github_link}" target="_blank" class="btn btn-secondary" style="flex: 1; text-align: center; text-decoration: none;"><i class="fa-brands fa-github"></i> Github</a>
         `;
     } else {
         actionButtons = `
-            <button class="btn btn-secondary"><i class="fa-solid fa-terminal"></i> Xem Logs Lỗi</button>
+            <button class="btn btn-secondary" disabled style="flex: 1; opacity: 0.7; color: #ef4444; border-color: #ef4444;"><i class="fa-solid fa-xmark"></i> Thất bại</button>
+            <a href="${build.github_link}" target="_blank" class="btn btn-secondary" style="flex: 1; text-align: center; text-decoration: none;"><i class="fa-brands fa-github"></i> Github</a>
         `;
     }
 
@@ -32,28 +50,45 @@ function createBuildCard(build) {
         <div class="build-card" data-status="${build.status}">
             <div class="card-header">
                 <div>
-                    <h3 class="card-title">${build.os_version}</h3>
-                    <div class="card-date"><i class="fa-regular fa-clock"></i> ${build.date}</div>
+                    <h3 class="card-title" style="margin-bottom: 2px;">${build.title || 'Unknown OS'}</h3>
+                    <div style="font-size: 0.9rem; font-weight: 500; color: var(--text-secondary); margin-bottom: 10px;">${build.sub_title || ''}</div>
+                    <div class="card-date" style="color: var(--text-secondary); font-size: 0.85rem;">
+                        <i class="fa-regular fa-clock"></i> ${formatDate(build.date)}
+                    </div>
                 </div>
                 <div class="status ${statusClass}">${statusLabel}</div>
             </div>
             
-            <div class="specs-list">
+            <div class="specs-list" style="margin-top: 15px; margin-bottom: 20px; font-family: 'JetBrains Mono', monospace;">
                 <div class="spec-item">
-                    <span class="spec-label">Hệ KernelSU:</span>
-                    <span class="spec-value">${build.ksu_version}</span>
+                    <span class="spec-label">Custom version:</span>
+                    <span class="spec-value" style="font-weight: 700;">${build.custom_version}</span>
                 </div>
-                <div class="spec-item">
-                    <span class="spec-label">SUSFS:</span>
-                    <span class="spec-value">${build.susfs_version}</span>
+                
+                <div class="spec-item" style="display: flex; gap: 15px;">
+                    <div style="flex: 1; display: flex; justify-content: space-between;">
+                        <span class="spec-label">ZRAM:</span>
+                        <span class="spec-value" style="font-weight: 700;">${build.zram}</span>
+                    </div>
+                    <div style="flex: 1; display: flex; justify-content: space-between;">
+                        <span class="spec-label">KPM:</span>
+                        <span class="spec-value" style="font-weight: 700;">${build.kpm}</span>
+                    </div>
                 </div>
-                <div class="spec-item">
-                    <span class="spec-label">Mã Commit Git:</span>
-                    <span class="spec-value"><i class="fa-brands fa-git-alt" style="color:#f14e32"></i> ${build.commit}</span>
+                
+                <div class="spec-item" style="display: flex; gap: 15px; margin-bottom: 0px;">
+                    <div style="flex: 1; display: flex; justify-content: space-between;">
+                        <span class="spec-label">BBG:</span>
+                        <span class="spec-value" style="font-weight: 700;">${build.bbg}</span>
+                    </div>
+                    <div style="flex: 1; display: flex; justify-content: space-between;">
+                        <span class="spec-label">SUSFS:</span>
+                        <span class="spec-value" style="font-weight: 700;">${build.susfs}</span>
+                    </div>
                 </div>
             </div>
 
-            <div class="card-actions">
+            <div class="card-actions" style="display: flex; gap: 10px;">
                 ${actionButtons}
             </div>
         </div>
