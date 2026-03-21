@@ -1,4 +1,6 @@
-import config, aiohttp, asyncio, base64, sys, os
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "bot"))
+import config, aiohttp, asyncio, base64
 from io import StringIO
 from ruamel.yaml import YAML
 
@@ -93,7 +95,8 @@ def set_self_hosted(data):
         return
     for job_name, job_data in jobs.items():
         if isinstance(job_data, dict) and "runs-on" in job_data:
-            job_data["runs-on"] = "self-hosted"
+            if not str(job_name).startswith("setup-"):
+                job_data["runs-on"] = "self-hosted"
 
 def patch_build_yml(content: str) -> str:
     yaml = YAML()

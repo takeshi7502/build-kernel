@@ -14,7 +14,7 @@ function formatDate(isoString) {
         const MM = String(d.getMonth() + 1).padStart(2, '0');
         const YYYY = d.getFullYear();
         return `${HH}:${mm} ${DD}-${MM}-${YYYY}`;
-    } catch(e) {
+    } catch (e) {
         return isoString;
     }
 }
@@ -23,10 +23,10 @@ function formatDate(isoString) {
 function createBuildCard(build) {
     // Xác định Status class & label
     let statusClass = build.status;
-    let statusLabel = build.status === 'success' ? 'Success' 
-                    : build.status === 'building' ? 'Đang Build' 
-                    : 'Lỗi';
-    
+    let statusLabel = build.status === 'success' ? 'Success'
+        : build.status === 'building' ? 'Đang Build'
+            : 'Lỗi';
+
     // Nút action (Download & Github)
     let actionButtons = '';
     if (build.status === 'success') {
@@ -48,21 +48,25 @@ function createBuildCard(build) {
 
     return `
         <div class="build-card" data-status="${build.status}">
-            <div class="card-header">
-                <div>
+            <div class="card-header" style="margin-bottom: 8px;">
+                <div style="flex: 1; min-width: 0; overflow: hidden; padding-right: 10px;">
                     <h3 class="card-title" style="margin-bottom: 2px;">${build.title || 'Unknown OS'}</h3>
-                    <div style="font-size: 0.9rem; font-weight: 500; color: var(--text-secondary); margin-bottom: 10px;">${build.sub_title || ''}</div>
-                    <div class="card-date" style="color: var(--text-secondary); font-size: 0.85rem;">
-                        <i class="fa-regular fa-clock"></i> ${formatDate(build.date)}
-                    </div>
+                    <div style="font-size: 0.9rem; font-weight: 500; color: var(--text-secondary);">${build.sub_title || ''}</div>
                 </div>
-                <div class="status ${statusClass}">${statusLabel}</div>
+                <div class="status ${statusClass}" style="flex-shrink: 0;">${statusLabel}</div>
+            </div>
+            
+            <div class="card-date" style="color: var(--text-secondary); font-size: 0.85rem; display: flex; align-items: center; white-space: nowrap;">
+                <i class="fa-regular fa-clock" style="margin-right: 5px;"></i> 
+                <span style="margin-right: 5px;">${formatDate(build.date)}</span>
+                <span style="margin-right: 4px;">by</span>
+                <div class="user-name-scroller" style="font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0;">${build.user_name || 'Unknown'}</div>
             </div>
             
             <div class="specs-list" style="margin-top: 15px; margin-bottom: 20px; font-family: 'JetBrains Mono', monospace;">
                 <div class="spec-item">
                     <span class="spec-label">Custom version:</span>
-                    <span class="spec-value" style="font-weight: 700;">${build.custom_version}</span>
+                    <span class="spec-value" style="font-weight: 700;">${build.custom_version || '(Mặc định)'}</span>
                 </div>
                 
                 <div class="spec-item" style="display: flex; gap: 15px;">
@@ -98,7 +102,7 @@ function createBuildCard(build) {
 // Cập nhật trạng thái Bot (Online/Offline)
 function updateStatusBadge(botStatus, lastPing) {
     const badge = document.querySelector('.stat-badge');
-    
+
     // Nếu quá 6.5 phút (400s) không ping, coi như offline
     // (Lý do: Github Raw có bộ đệm Cache mặc định là 5 phút)
     let isOnline = false;
@@ -126,7 +130,7 @@ function updateStatusBadge(botStatus, lastPing) {
 function renderBuilds(filter = 'all') {
     const container = document.getElementById('builds-container');
     container.innerHTML = '';
-    
+
     if (currentBuilds.length === 0) {
         container.innerHTML = '<p style="color: var(--text-secondary); grid-column: 1 / -1; text-align: center; padding: 40px;">Đang tải dữ liệu hoặc chưa có bản build nào...</p>';
         return;
@@ -137,6 +141,15 @@ function renderBuilds(filter = 'all') {
             container.innerHTML += createBuildCard(build);
         }
     });
+    
+    // Xử lý hiệu ứng chữ chạy cho tên quá dài
+    document.querySelectorAll('.user-name-scroller').forEach(el => {
+        if (el.scrollWidth > el.clientWidth) {
+            const text = el.innerText;
+            el.innerHTML = `<marquee scrollamount="3" behavior="scroll" direction="left" style="vertical-align: middle;">${text}</marquee>`;
+            el.style.textOverflow = 'clip';
+        }
+    });
 }
 
 // Hàm Fetch dữ liệu thật
@@ -145,10 +158,10 @@ async function loadData() {
         const res = await fetch(`${DATA_URL}?t=${new Date().getTime()}`);
         if (!res.ok) throw new Error("Fetch failed");
         const data = await res.json();
-        
+
         currentBuilds = data.builds || [];
         updateStatusBadge(data.status, data.last_ping);
-        
+
         // Giữ nguyên filter đang kích hoạt
         const activeFilter = document.querySelector('.filter-btn.active').dataset.filter;
         renderBuilds(activeFilter);

@@ -45,9 +45,10 @@ async def get_realtime_data(app):
             if not branch: branch = "Stable"
                 
             title = variant
-            sub_title = f"({os_str}-{branch})"
+            sub_title = f"{os_str}-{branch}"
             
-            custom_version = inputs.get("version", "").strip("-") or "Takeshi.dev"
+            custom_version = inputs.get("version", "").strip("-")
+            user_name = j.get("user_name") or j.get("sender_name") or "Unknown"
             zram = "Bật" if inputs.get("use_zram", True) else "Tắt"
             bbg = "Bật" if inputs.get("use_bbg", True) else "Tắt"
             kpm = "Bật" if inputs.get("use_kpm", True) else "Tắt"
@@ -72,6 +73,7 @@ async def get_realtime_data(app):
                 "susfs": susfs,
                 "status": status,
                 "date": j.get("created_at"),
+                "user_name": user_name,
                 "github_link": github_link,
                 "nightly_link": nightly_link
             }
