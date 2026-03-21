@@ -22,9 +22,16 @@ if ! command -v pm2 &> /dev/null; then
     echo "✅ Đã cài đặt xong PM2!"
 fi
 
-# (Tùy chọn) Cài đặt thư viện Python
-echo "📦 Đang nạp các thư viện Python (mất vài giây)..."
-pip install -r requirements.txt > /dev/null 2>&1
+# 3. Cài đặt thư viện Python qua Virtual Environment (venv)
+echo "📦 Đang thiết lập môi trường Python..."
+if [ ! -d "venv" ]; then
+    echo "   >> Đang tạo thư mục venv..."
+    sudo apt install -y python3-venv > /dev/null 2>&1
+    python3 -m venv venv
+fi
+
+echo "   >> Đang nạp các thư viện từ requirements.txt..."
+./venv/bin/pip install -r requirements.txt
 
 # 3. Cho người dùng chọn chế độ
 echo ""
@@ -44,14 +51,16 @@ echo "🚀 Đang khởi động tiến trình theo lựa chọn [$choice]..."
 pm2 stop gki-bot gki-userbot > /dev/null 2>&1
 pm2 delete gki-bot gki-userbot > /dev/null 2>&1
 
-# 4. Chạy bot bằng pm2 dựa trên lựa chọn
+# 5. Chạy bot bằng pm2 với interpreter là Python trong venv
+INTERPRETER="./venv/bin/python"
+
 if [ "$choice" == "1" ]; then
-    pm2 start bot/main.py --interpreter python3 --name "gki-bot"
+    pm2 start bot/main.py --interpreter "$INTERPRETER" --name "gki-bot"
 elif [ "$choice" == "2" ]; then
-    pm2 start bot/userbot.py --interpreter python3 --name "gki-userbot"
+    pm2 start bot/userbot.py --interpreter "$INTERPRETER" --name "gki-userbot"
 elif [ "$choice" == "3" ]; then
-    pm2 start bot/main.py --interpreter python3 --name "gki-bot"
-    pm2 start bot/userbot.py --interpreter python3 --name "gki-userbot"
+    pm2 start bot/main.py --interpreter "$INTERPRETER" --name "gki-bot"
+    pm2 start bot/userbot.py --interpreter "$INTERPRETER" --name "gki-userbot"
 else
     echo "❌ Lựa chọn không hợp lệ. Đang thoát..."
     exit 1
