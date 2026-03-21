@@ -20,14 +20,14 @@ TELEGRAM_BOT_TOKEN: str = _required("TELEGRAM_BOT_TOKEN")
 # === GitHub ===
 GITHUB_TOKEN: str = _required("GITHUB_TOKEN")
 GITHUB_OWNER: str = _required("GITHUB_OWNER")
-UPSTREAM_OWNER: str = os.getenv("UPSTREAM_OWNER", "").strip()
+UPSTREAM_OWNER: str = os.getenv("UPSTREAM_OWNER", "zzh20188").strip()
 
 # === GKI Repo ===
 GKI_REPO: str = _required("GKI_REPO")
 GKI_DEFAULT_BRANCH: str = os.getenv("GKI_DEFAULT_BRANCH", "main").strip()
 
-# Parse GKI_WORKFLOWS: "Build=build.yml,Release=test_release.yml" -> dict
-_wf_raw = os.getenv("GKI_WORKFLOWS", "").strip()
+# Parse GKI_WORKFLOWS: "Build=main.yml" (Mặc định nếu trong .env không ghi)
+_wf_raw = os.getenv("GKI_WORKFLOWS", "Build=main.yml").strip()
 GKI_WORKFLOWS: dict = {}
 if _wf_raw:
     for pair in _wf_raw.split(","):

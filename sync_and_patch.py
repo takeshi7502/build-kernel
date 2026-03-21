@@ -87,6 +87,14 @@ async def put_file(session: aiohttp.ClientSession, path: str, content: str, sha:
 
 # ─────────────────────────── Patch logic ─────────────────────────────────────
 
+def set_self_hosted(data):
+    jobs = data.get("jobs", {})
+    if not isinstance(jobs, dict):
+        return
+    for job_name, job_data in jobs.items():
+        if isinstance(job_data, dict) and "runs-on" in job_data:
+            job_data["runs-on"] = "self-hosted"
+
 def patch_build_yml(content: str) -> str:
     yaml = YAML()
     yaml.preserve_quotes = True
@@ -122,6 +130,7 @@ def patch_build_yml(content: str) -> str:
                 else:
                     step["if"] = "${{ steps.check_sub.outputs.skip != 'true' }}"
                     
+    set_self_hosted(data)
     out = StringIO()
     yaml.dump(data, out)
     return out.getvalue()
@@ -152,6 +161,7 @@ def patch_main_yml(content: str) -> str:
             if "sub_levels" not in w_block:
                 w_block["sub_levels"] = "${{ inputs.sub_levels }}"
                 
+    set_self_hosted(data)
     out = StringIO()
     yaml.dump(data, out)
     return out.getvalue()
@@ -188,6 +198,7 @@ def patch_kernel_yml(content: str) -> str:
                 if "sub_levels" not in w_block:
                     w_block["sub_levels"] = "${{ inputs.sub_levels }}"
             
+    set_self_hosted(data)
     out = StringIO()
     yaml.dump(data, out)
     return out.getvalue()
