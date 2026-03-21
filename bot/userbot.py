@@ -1372,7 +1372,6 @@ async def delete_cmd(event):
 async def gki_cmd(event):
     if not _is_allowed_chat(event.chat_id):
         return
-    await _safe_delete(event)
     sk = _session_key(event)
     is_admin = _is_admin(event)
 
@@ -1381,17 +1380,25 @@ async def gki_cmd(event):
     last_name = user.last_name if hasattr(user, "last_name") and user.last_name else ""
     user_name = f"{first_name} {last_name}".strip() or "Unknown"
 
-    # Regular users need a key — silently ignore if no key
+    # Regular users need a key
     if not is_admin:
         key = event.pattern_match.group(1) if event.pattern_match else None
         if not key:
-            return  # Silent ignore
+            msg = await _reply(event, "⚠️ <b>Lỗi:</b> Thiếu Key!\nVD: <code>.gki &lt;key&gt;</code>", html=True)
+            await _delete_later(msg, 10)
+            await _delete_later(event, 10)
+            return
         uses = await storage.get_uses(key)
         if uses <= 0:
-            return  # Silent ignore invalid/expired key
+            msg = await _reply(event, f"❌ <b>Lỗi:</b> Key <code>{key}</code> sai hoặc hết lượt.", html=True)
+            await _delete_later(msg, 10)
+            await _delete_later(event, 10)
+            return
         session = _new_session(sk, build_key=key, admin=False, user_name=user_name, user_id=user.id)
     else:
         session = _new_session(sk, admin=True, user_name=user_name, user_id=user.id)
+        
+    await _safe_delete(event)
     await _show_step(event, session)
 
 
