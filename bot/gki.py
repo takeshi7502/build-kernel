@@ -11,26 +11,21 @@ from permissions import is_admin
     GKI_KSU_VARIANT,
     GKI_KSU_BRANCH,
     GKI_VERSION,
-    # GKI_CUSTOM_NAME,
-    # GKI_BUILD_TIME,
-    GKI_TOGGLE_ZRAM,
-    GKI_TOGGLE_BBG,
-    GKI_TOGGLE_KPM,
-    GKI_TOGGLE_SUSFS,
+    GKI_TOGGLES,
     GKI_BUILD_TARGET,
     GKI_SUB_VERSION,
     GKI_RELEASE_TYPE,
     GKI_CONFIRM
-) = range(11)
+) = range(8)
 
 VARIANTS = ["SukiSU", "ReSukiSU", "Official", "Next", "MKSU"]
 BRANCHES = ["Stable(标准)", "Dev(开发)"]
 RELEASE_TYPES = ["Actions", "Pre-Release", "Release"]
 BUILD_TARGETS = [
-    ("Android 12 - 5.10", "build_a12_5_10"),
-    ("Android 13 - 5.15", "build_a13_5_15"),
-    ("Android 14 - 6.1", "build_a14_6_1"),
-    ("Android 15 - 6.6", "build_a15_6_6"),
+    ("A12 - 5.10", "build_a12_5_10"),
+    ("A13 - 5.15", "build_a13_5_15"),
+    ("A14 - 6.1", "build_a14_6_1"),
+    ("A15 - 6.6", "build_a15_6_6"),
 ]
 
 # Sub-version (sub_level) lists per build target
@@ -80,10 +75,14 @@ def _yes_no(prefix: str, recommend: str = "", back_cb: str = ""):
 
 
 def _build_target_keyboard(back_cb: str = ""):
-    """Keyboard cho phép chọn 1 target duy nhất."""
+    """Keyboard chọn 1 target, xếp 2 cột 2 hàng."""
     rows = []
-    for label, key in BUILD_TARGETS:
-        rows.append([InlineKeyboardButton(label, callback_data=f"gkitgt:{key}")])
+    targets = [(label, key) for label, key in BUILD_TARGETS]
+    for i in range(0, len(targets), 2):
+        row = []
+        for label, key in targets[i:i+2]:
+            row.append(InlineKeyboardButton(label, callback_data=f"gkitgt:{key}"))
+        rows.append(row)
     if back_cb:
         rows.append([
             InlineKeyboardButton("⬅️", callback_data=back_cb),
@@ -91,6 +90,36 @@ def _build_target_keyboard(back_cb: str = ""):
         ])
     else:
         rows.append([InlineKeyboardButton("❌", callback_data="gki:cancel")])
+    return InlineKeyboardMarkup(rows)
+
+
+TOGGLE_FEATURES = [
+    ("ZRAM",  "use_zram",       "gkitog:zram"),
+    ("BBG",   "use_bbg",        "gkitog:bbg"),
+    ("KPM",   "use_kpm",        "gkitog:kpm"),
+    ("SUSFS", "cancel_susfs",   "gkitog:susfs"),
+]
+
+def _toggles_keyboard(inputs: dict, back_cb: str = "") -> InlineKeyboardMarkup:
+    """4 nút bật/tắt xếp 2×2, hàng cuối: back | cancel | next."""
+    rows = []
+    btns = []
+    for label, key, cb in TOGGLE_FEATURES:
+        # SUSFS: cancel_susfs=True nghĩa là tắt SUSFS, ngưởc lại
+        if key == "cancel_susfs":
+            active = not inputs.get(key, True)  # mặc định tắt SUSFS
+        else:
+            active = inputs.get(key, False)
+        icon = "✅" if active else "⬜"
+        btns.append(InlineKeyboardButton(f"{icon} {label}", callback_data=cb))
+    rows.append(btns[:2])
+    rows.append(btns[2:])
+    nav = []
+    if back_cb:
+        nav.append(InlineKeyboardButton("⬅️", callback_data=back_cb))
+    nav.append(InlineKeyboardButton("❌", callback_data="gki:cancel"))
+    nav.append(InlineKeyboardButton("➡️", callback_data="gkitog:next"))
+    rows.append(nav)
     return InlineKeyboardMarkup(rows)
 
 
@@ -196,10 +225,10 @@ class GKIFlow:
             "kernelsu_variant": "SukiSU",
             "kernelsu_branch": "Stable(标准)",
             "version": "",
-            "use_zram": True,
-            "use_bbg": True,
-            "use_kpm": True,
-            "cancel_susfs": False,
+            "use_zram": False,
+            "use_bbg": False,
+            "use_kpm": False,
+            "cancel_susfs": True,   # True = tắt SUSFS (mặc định SUSFS tắt)
             "build_a12_5_10": False,
             "build_a13_5_15": False,
             "build_a14_6_1": False,
@@ -313,37 +342,14 @@ class GKIFlow:
             )
             return GKI_VERSION
 
-        if target == "zram":
+        if target == "toggles":
+            inputs = context.user_data["gki"]["inputs"]
             await q.edit_message_text(
-                header + "Bật ZRAM?",
-                reply_markup=_yes_no("gkizr", back_cb="gkiback:version"),
+                header + "<b>Tùy chỉnh tính năng:</b>",
+                reply_markup=_toggles_keyboard(inputs, back_cb="gkiback:version"),
                 parse_mode="HTML"
             )
-            return GKI_TOGGLE_ZRAM
-
-        if target == "bbg":
-            await q.edit_message_text(
-                header + "Bật BBG?",
-                reply_markup=_yes_no("gkibb", back_cb="gkiback:zram"),
-                parse_mode="HTML"
-            )
-            return GKI_TOGGLE_BBG
-
-        if target == "kpm":
-            await q.edit_message_text(
-                header + "Bật KPM?",
-                reply_markup=_yes_no("gkikpm", back_cb="gkiback:bbg"),
-                parse_mode="HTML"
-            )
-            return GKI_TOGGLE_KPM
-
-        if target == "susfs":
-            await q.edit_message_text(
-                header + "Bật SUSFS?",
-                reply_markup=_yes_no("gkisusfs", back_cb="gkiback:kpm"),
-                parse_mode="HTML"
-            )
-            return GKI_TOGGLE_SUSFS
+            return GKI_TOGGLES
 
         if target == "target":
             await q.edit_message_text(
@@ -392,6 +398,7 @@ class GKIFlow:
 
         await q.answer("Không thể quay lại bước này.", show_alert=True)
         return ConversationHandler.END
+
     # === VARIANT ===
     async def set_variant(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await _ensure_owner(update, context): return GKI_KSU_VARIANT
@@ -436,47 +443,45 @@ class GKIFlow:
             await _safe_delete(context, chat_id, update.message.message_id)
 
         header = _task_header(context)
-        await _update_bot_msg(context, chat_id, header + "Bật ZRAM? (mặc định: bật)", reply_markup=_yes_no("gkizr", back_cb="gkiback:version"), parse_mode="HTML")
-        return GKI_TOGGLE_ZRAM
+        inputs = context.user_data["gki"]["inputs"]
+        await _update_bot_msg(context, chat_id,
+            header + "<b>Tùy chỉnh tính năng:</b>",
+            reply_markup=_toggles_keyboard(inputs, back_cb="gkiback:version"),
+            parse_mode="HTML")
+        return GKI_TOGGLES
 
-    # === TOGGLES ===
-    async def toggle_zram(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not await _ensure_owner(update, context): return GKI_TOGGLE_ZRAM
+    # === TOGGLES COMBINED ===
+    async def toggle_feature(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await _ensure_owner(update, context): return GKI_TOGGLES
         q = update.callback_query; await q.answer()
-        _, val = q.data.split(":", 1)
-        context.user_data["gki"]["inputs"]["use_zram"] = (val == "true")
-        header = _task_header(context)
-        await q.edit_message_text(header + "Bật BBG? (mặc định: bật)", reply_markup=_yes_no("gkibb", back_cb="gkiback:zram"), parse_mode="HTML")
-        return GKI_TOGGLE_BBG
+        _, key = q.data.split(":", 1)
+        inputs = context.user_data["gki"]["inputs"]
 
-    async def toggle_bbg(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not await _ensure_owner(update, context): return GKI_TOGGLE_BBG
-        q = update.callback_query; await q.answer()
-        _, val = q.data.split(":", 1)
-        context.user_data["gki"]["inputs"]["use_bbg"] = (val == "true")
-        header = _task_header(context)
-        await q.edit_message_text(header + "Bật KPM? (mặc định: bật)", reply_markup=_yes_no("gkikpm", back_cb="gkiback:bbg"), parse_mode="HTML")
-        return GKI_TOGGLE_KPM
+        if key == "next":
+            # Tiếp tục sang chọn Build Target
+            header = _task_header(context)
+            await q.edit_message_text(header + "Chọn phiên bản Android để build:",
+                reply_markup=_build_target_keyboard(back_cb="gkiback:toggles"), parse_mode="HTML")
+            return GKI_BUILD_TARGET
 
-    async def toggle_kpm(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not await _ensure_owner(update, context): return GKI_TOGGLE_KPM
-        q = update.callback_query; await q.answer()
-        _, val = q.data.split(":", 1)
-        context.user_data["gki"]["inputs"]["use_kpm"] = (val == "true")
-        header = _task_header(context)
-        await q.edit_message_text(header + "Tắt SUSFS? (mặc định: không tắt)", reply_markup=_yes_no("gkisusfs", back_cb="gkiback:kpm"), parse_mode="HTML")
-        return GKI_TOGGLE_SUSFS
+        # Toggle feature
+        toggle_map = {
+            "zram":  "use_zram",
+            "bbg":   "use_bbg",
+            "kpm":   "use_kpm",
+            "susfs": "cancel_susfs",
+        }
+        input_key = toggle_map.get(key)
+        if input_key:
+            inputs[input_key] = not inputs.get(input_key, False)
 
-    async def toggle_susfs(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not await _ensure_owner(update, context): return GKI_TOGGLE_SUSFS
-        q = update.callback_query; await q.answer()
-        _, val = q.data.split(":", 1)
-        context.user_data["gki"]["inputs"]["cancel_susfs"] = (val == "true")
-        # Hiển thị chọn build target (chỉ được chọn 1)
         header = _task_header(context)
-        await q.edit_message_text(header + "Chọn phiên bản Android để build:",
-                                  reply_markup=_build_target_keyboard(back_cb="gkiback:susfs"), parse_mode="HTML")
-        return GKI_BUILD_TARGET
+        await q.edit_message_text(
+            header + "<b>Tùy chỉnh tính năng:</b>",
+            reply_markup=_toggles_keyboard(inputs, back_cb="gkiback:version"),
+            parse_mode="HTML"
+        )
+        return GKI_TOGGLES
 
     # === BUILD TARGET (single-select) ===
     async def set_build_target(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -491,7 +496,6 @@ class GKIFlow:
 
         # Lưu target key và khởi tạo selected sub-versions = all
         context.user_data["gki"]["selected_target"] = key
-        available = SUB_LEVELS.get(key, [])
         context.user_data["gki"]["selected_subs"] = set()  # mặc định không chọn gì
 
         user_is_admin = await is_admin(update.effective_user.id, self.storage)
@@ -516,10 +520,6 @@ class GKIFlow:
         all_selected = len(selected) == len(available)
 
         rows = []
-        # Build All toggle
-        if user_is_admin:
-            all_icon = "✅" if all_selected else "⬜"
-            rows.append([InlineKeyboardButton(f"{all_icon} Build All", callback_data="gkisub:all")])
 
         # Sub-version buttons (4 per row)
         row = []
@@ -532,17 +532,28 @@ class GKIFlow:
             if len(row) == 4:
                 rows.append(row)
                 row = []
-        if row:
-            rows.append(row)
 
-        # Confirm + Back/Cancel
+        # Build All: append to last row if space, else own row
         if user_is_admin:
-            rows.append([InlineKeyboardButton("➡️ Tiếp tục", callback_data="gkisub:done")])
-            
-        rows.append([
-            InlineKeyboardButton("⬅️", callback_data="gkiback:target"),
-            InlineKeyboardButton("❌", callback_data="gki:cancel")
-        ])
+            all_icon = "✅" if all_selected else "⬜"
+            all_btn = InlineKeyboardButton(f"{all_icon} All", callback_data="gkisub:all")
+            if row and len(row) < 4:
+                row.append(all_btn)
+                rows.append(row)
+            else:
+                if row:
+                    rows.append(row)
+                rows.append([all_btn])
+        else:
+            if row:
+                rows.append(row)
+
+        # Nav: [⬅️] [❌] [➡️]
+        nav = [InlineKeyboardButton("⬅️", callback_data="gkiback:toggles")]
+        nav.append(InlineKeyboardButton("❌", callback_data="gki:cancel"))
+        if user_is_admin:
+            nav.append(InlineKeyboardButton("➡️", callback_data="gkisub:done"))
+        rows.append(nav)
         return InlineKeyboardMarkup(rows)
 
     # === SUB-VERSION TOGGLE ===
@@ -818,16 +829,7 @@ def build_gki_conversation(gh, storage, config):
                 back_handler,
                 cancel_handler
             ],
-            # GKI_CUSTOM_NAME: [
-            #     CallbackQueryHandler(flow.set_custom_name, pattern=r"^gkicname:none$"),
-            #     MessageHandler(filters.TEXT & ~filters.COMMAND, flow.set_custom_name),
-            #     back_handler,
-            #     cancel_handler
-            # ],
-            GKI_TOGGLE_ZRAM: [CallbackQueryHandler(flow.toggle_zram, pattern=r"^gkizr:(true|false)$"), back_handler, cancel_handler],
-            GKI_TOGGLE_BBG: [CallbackQueryHandler(flow.toggle_bbg, pattern=r"^gkibb:(true|false)$"), back_handler, cancel_handler],
-            GKI_TOGGLE_KPM: [CallbackQueryHandler(flow.toggle_kpm, pattern=r"^gkikpm:(true|false)$"), back_handler, cancel_handler],
-            GKI_TOGGLE_SUSFS: [CallbackQueryHandler(flow.toggle_susfs, pattern=r"^gkisusfs:(true|false)$"), back_handler, cancel_handler],
+            GKI_TOGGLES: [CallbackQueryHandler(flow.toggle_feature, pattern=r"^gkitog:.+$"), back_handler, cancel_handler],
             GKI_BUILD_TARGET: [CallbackQueryHandler(flow.set_build_target, pattern=r"^gkitgt:.+"), back_handler, cancel_handler],
             GKI_SUB_VERSION: [CallbackQueryHandler(flow.toggle_sub_version, pattern=r"^gkisub:.+"), back_handler, cancel_handler],
             GKI_RELEASE_TYPE: [CallbackQueryHandler(flow.set_release_type, pattern=r"^gkirel:.+"), back_handler, cancel_handler],
