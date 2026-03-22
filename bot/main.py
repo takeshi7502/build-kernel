@@ -328,7 +328,6 @@ class TelegraphAPI:
             "kernelsu_variant",
             "kernelsu_branch",
             "version",
-            "build_time",
             "use_zram",
             "use_bbg",
             "use_kpm",
@@ -1131,9 +1130,7 @@ async def send_saved_config(app, run_id, job, chat_id):
     
     if inputs.get('version'):
         lines.append(f"• <b>Version Custom</b>: <code>{inputs.get('version')}</code>")
-    if inputs.get('build_time'):
-        lines.append(f"• <b>Build Time Override</b>: <code>{inputs.get('build_time')}</code>")
-    
+
     lines.append(f"• <b>Compile BBG</b>: {'✅ Có' if inputs.get('use_bbg') else '❌ Không'}")
     lines.append(f"• <b>Compile KPM</b>: {'✅ Có' if inputs.get('use_kpm') else '❌ Không'}")
     lines.append(f"• <b>Dùng ZRAM</b>: {'✅ Có' if inputs.get('use_zram') else '❌ Không'}")

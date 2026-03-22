@@ -196,8 +196,6 @@ class GKIFlow:
             "kernelsu_variant": "SukiSU",
             "kernelsu_branch": "Stable(标准)",
             "version": "",
-            "custom_name": "",
-            "build_time": "",
             "use_zram": True,
             "use_bbg": True,
             "use_kpm": True,
@@ -315,28 +313,17 @@ class GKIFlow:
             )
             return GKI_VERSION
 
-        # if target == "custom_name":
-        #     kb = InlineKeyboardMarkup([
-        #         [InlineKeyboardButton("⏭️ Dùng mặc định", callback_data="gkicname:none")],
-        #         [InlineKeyboardButton("⬅️", callback_data="gkiback:version"), InlineKeyboardButton("❌", callback_data="gki:cancel")]
-        #     ])
-        #     await q.edit_message_text(
-        #         header + "⏭️ Nhập <code>custom_name</code> (hậu tố cho tên file ZIP).\nHoặc bấm nút để dùng mặc định.",
-        #         reply_markup=kb, parse_mode="HTML"
-        #     )
-            # return GKI_CUSTOM_NAME
-
         if target == "zram":
             await q.edit_message_text(
-                header + "Bật ZRAM? (mặc định: bật)",
-                reply_markup=_yes_no("gkizr", back_cb="gkiback:custom_name"),
+                header + "Bật ZRAM?",
+                reply_markup=_yes_no("gkizr", back_cb="gkiback:version"),
                 parse_mode="HTML"
             )
             return GKI_TOGGLE_ZRAM
 
         if target == "bbg":
             await q.edit_message_text(
-                header + "Bật BBG? (mặc định: bật)",
+                header + "Bật BBG?",
                 reply_markup=_yes_no("gkibb", back_cb="gkiback:zram"),
                 parse_mode="HTML"
             )
@@ -344,7 +331,7 @@ class GKIFlow:
 
         if target == "kpm":
             await q.edit_message_text(
-                header + "Bật KPM? (mặc định: bật)",
+                header + "Bật KPM?",
                 reply_markup=_yes_no("gkikpm", back_cb="gkiback:bbg"),
                 parse_mode="HTML"
             )
@@ -352,7 +339,7 @@ class GKIFlow:
 
         if target == "susfs":
             await q.edit_message_text(
-                header + "Tắt SUSFS? (mặc định: không tắt)",
+                header + "Bật SUSFS?",
                 reply_markup=_yes_no("gkisusfs", back_cb="gkiback:kpm"),
                 parse_mode="HTML"
             )
@@ -447,41 +434,10 @@ class GKIFlow:
                 val = txt if txt.startswith("-") else f"-{txt}"
             context.user_data["gki"]["inputs"]["version"] = val
             await _safe_delete(context, chat_id, update.message.message_id)
-        
-        kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("⏭️ Dùng mặc định", callback_data="gkicname:none")],
-            [InlineKeyboardButton("⬅️", callback_data="gkiback:version"), InlineKeyboardButton("❌", callback_data="gki:cancel")]
-        ])
-        header = _task_header(context)
-        await _update_bot_msg(context, chat_id,
-            header + "⏭️ Nhập <code>custom_name</code> (hậu tố cho tên file ZIP).\nHoặc bấm nút để dùng mặc định.",
-            reply_markup=kb, parse_mode="HTML")
-        # return GKI_CUSTOM_NAME
-        
-        # --- SKIP CUSTOM_NAME AND BUILD_TIME ---
-        context.user_data["gki"]["inputs"]["custom_name"] = ""
-        context.user_data["gki"]["inputs"]["build_time"] = ""
+
         header = _task_header(context)
         await _update_bot_msg(context, chat_id, header + "Bật ZRAM? (mặc định: bật)", reply_markup=_yes_no("gkizr", back_cb="gkiback:version"), parse_mode="HTML")
         return GKI_TOGGLE_ZRAM
-
-    # === CUSTOM NAME ===
-    # async def set_custom_name(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-    #     if not await _ensure_owner(update, context): return GKI_CUSTOM_NAME
-    #     chat_id = update.effective_chat.id
-    #     if update.callback_query:
-    #         q = update.callback_query; await q.answer()
-    #         context.user_data["gki"]["inputs"]["custom_name"] = ""
-    #     else:
-    #         txt = (update.message.text or "").strip()
-    #         context.user_data["gki"]["inputs"]["custom_name"] = "" if txt.lower() == "none" else txt
-    #         await _safe_delete(context, chat_id, update.message.message_id)
-
-    #     # Skip build time override for everyone and auto-set to None
-    #     context.user_data["gki"]["inputs"]["build_time"] = ""
-    #     header = _task_header(context)
-    #     await _update_bot_msg(context, chat_id, header + "Bật ZRAM? (mặc định: bật)", reply_markup=_yes_no("gkizr", back_cb="gkiback:custom_name"), parse_mode="HTML")
-    #     # return GKI_TOGGLE_ZRAM
 
     # === TOGGLES ===
     async def toggle_zram(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -660,17 +616,54 @@ class GKIFlow:
     # === CONFIRM ===
     async def confirm(self, q, context):
         inputs = context.user_data["gki"]["inputs"]
-        pretty = "\n".join([f"• {k}: {v}" for k, v in inputs.items()])
         user_is_admin = await is_admin(q.from_user.id, self.storage)
         back_data = "gkiback:release" if user_is_admin else "gkiback:target"
-        
+
+        # Dịch targets
+        targets = []
+        if inputs.get("build_all"):
+            targets = ["Tất cả"]
+        else:
+            if inputs.get("build_a12_5_10"): targets.append("Android 12 (5.10)")
+            if inputs.get("build_a13_5_15"): targets.append("Android 13 (5.15)")
+            if inputs.get("build_a14_6_1"):  targets.append("Android 14 (6.1)")
+            if inputs.get("build_a15_6_6"):  targets.append("Android 15 (6.6)")
+
+        branch_raw = str(inputs.get("kernelsu_branch", "Stable"))
+        branch = branch_raw.replace("(标准)", "(Stable)").replace("(开发)", "(Dev)")
+
+        rt_map = {"Actions": "GitHub Actions", "Pre-Release": "Pre-Release", "Release": "Release"}
+        release = rt_map.get(inputs.get("release_type", "Actions"), inputs.get("release_type", ""))
+
+        subs = inputs.get("sub_levels", "")
+        subs_display = "Tất cả" if not subs or str(subs).lower() in ("all", "*", "") else str(subs)
+
+        ver = str(inputs.get("version", "")).strip("-").strip()
+        ver_display = ver if ver else "(mặc định)"
+
+        def flag(val): return "✅ Bật" if val else "❌ Tắt"
+
+        lines = [
+            f"• Kernel Build: <b>{inputs.get('kernelsu_variant', '-')}</b>",
+            f"• Branch: {branch}",
+            f"• Custom version: {ver_display}",
+            f"• KernelSU version: {', '.join(targets) if targets else '(chưa chọn)'}",
+            f"• Sub-level: {subs_display}",
+            f"• ZRAM: {flag(inputs.get('use_zram', True))}",
+            f"• BBG: {flag(inputs.get('use_bbg', True))}",
+            f"• KPM: {flag(inputs.get('use_kpm', True))}",
+            f"• SUSFS: {flag(not inputs.get('cancel_susfs', False))}",
+            f"• Loại release: {release}",
+        ]
+        pretty = "\n".join(lines)
+
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("✅ Xác nhận", callback_data="gkiconfirm")],
             [InlineKeyboardButton("⬅️", callback_data=back_data), InlineKeyboardButton("❌", callback_data="gki:cancel")]
         ])
         header = _task_header(context)
         await q.edit_message_text(
-            header + f"<b>Xác nhận build GKI</b>\n<pre>{pretty}</pre>",
+            header + f"<b>Xác nhận build GKI</b>\n\n{pretty}",
             reply_markup=kb, parse_mode="HTML"
         )
         return GKI_CONFIRM

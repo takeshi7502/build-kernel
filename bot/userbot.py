@@ -103,7 +103,6 @@ DEFAULT_INPUTS: Dict[str, Any] = {
     "kernelsu_variant": "SukiSU",
     "kernelsu_branch": "Stable(标准)",
     "version": "",
-    "build_time": "",
     "use_zram": True,
     "use_bbg": True,
     "use_kpm": True,
@@ -726,8 +725,6 @@ async def _handle_input(event, session: Dict[str, Any], raw: str) -> bool:
             inputs["version"] = ""
         else:
             inputs["version"] = val if val.startswith("-") else f"-{val}"
-        inputs["custom_name"] = ""
-        inputs["build_time"] = ""
         session["step"] = "zram"
         await _show_step(event, session)
         return False
@@ -1048,7 +1045,7 @@ def _build_inputs(arg_string: str) -> Tuple[Dict[str, Any], List[str]]:
             if not cleaned: raise ValueError("subs cannot be empty when provided.")
             inputs["sub_levels"] = ",".join(cleaned)
     if "release" in pairs: inputs["release_type"] = _normalize_release(pairs["release"])
-    unknown = sorted(set(pairs.keys()) - {"variant", "branch", "version", "build_time", "zram", "bbg", "kpm", "susfs", "target", "subs", "release"})
+    unknown = sorted(set(pairs.keys()) - {"variant", "branch", "version", "zram", "bbg", "kpm", "susfs", "target", "subs", "release"})
     if unknown: notes.append(f"Ignored unknown keys: {', '.join(unknown)}")
     return inputs, notes
 
