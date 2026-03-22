@@ -69,7 +69,24 @@ if [ "$MENU_OPTION" = "2" ]; then
         fi
         i=$((i + 1))
     done
-    echo "🎉 Đã hoàn tất gỡ bỏ!"
+    echo "🎉 Đã hoàn tất gỡ bỏ dưới máy ảo VPS!"
+    
+    if [ -n "$GITHUB_TOKEN" ] && [ -n "$GITHUB_OWNER" ] && [ -n "$GKI_REPO" ]; then
+        echo ""
+        echo "🧹 BẮT ĐẦU CÀN QUÉT BÓNG MA (ZOMBIE RUNNERS) TRÊN GITHUB..."
+        echo "Đang liên lạc với máy chủ mẹ Github API để quét mã số ID..."
+        OFFLINE_IDS=$(curl -s -H "Authorization: token $GITHUB_TOKEN" -H "Accept: application/vnd.github.v3+json" "https://api.github.com/repos/${GITHUB_OWNER}/${GKI_REPO}/actions/runners" | grep -B 3 '"status": "offline"' | grep '"id":' | grep -o '[0-9]\+')
+        
+        if [ -z "$OFFLINE_IDS" ]; then
+            echo "✅ Không phát hiện thấy cái xác thối Zombie nào trên Github!"
+        else
+            for RUNNER_ID in $OFFLINE_IDS; do
+                echo "🔥 Đang phóng hoả tiêu huỷ xác Zombie Runner ID: $RUNNER_ID..."
+                curl -s -X DELETE -H "Authorization: token $GITHUB_TOKEN" -H "Accept: application/vnd.github.v3+json" "https://api.github.com/repos/${GITHUB_OWNER}/${GKI_REPO}/actions/runners/$RUNNER_ID"
+            done
+            echo "✨ SẠCH BÓNG KHÔNG CÒN TÌ VẾT! Danh sách Runner trên Github giờ đã trống trơn!"
+        fi
+    fi
     exit 0
 fi
 
