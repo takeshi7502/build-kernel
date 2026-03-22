@@ -774,7 +774,10 @@ class GKIFlow:
             if not user_is_admin:
                 await self.storage.consume(key)
             view_url = f"https://github.com/{self.config.GITHUB_OWNER}/{self.config.GKI_REPO}/actions/workflows/{wf}"
-            btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Mở GitHub Actions", url=view_url)]])
+            btn = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔗 Mở GitHub Actions", url=view_url)],
+                [InlineKeyboardButton("📊 Web Dashboard", url="https://kernel.takeshi.dev/")]
+            ])
             
             mention = f'<a href="tg://user?id={user.id}">{user.full_name}</a>'
             
