@@ -79,10 +79,10 @@ class JSONStorage(StorageBase):
         except Exception as e:
             logger.error("Save JSON failed: %s", e)
 
-    async def set_key(self, code: str, uses: int):
+    async def set_key(self, code: str, uses: int, vip: bool = False):
         async with self._lock:
             data = self._load()
-            data.setdefault("keys", {})[code] = {"uses": uses}
+            data.setdefault("keys", {})[code] = {"uses": uses, "vip": vip}
             self._save(data)
 
     async def get_uses(self, code: str) -> int:
@@ -90,12 +90,18 @@ class JSONStorage(StorageBase):
             data = self._load()
             return int(data.get("keys", {}).get(code, {}).get("uses", 0))
 
-    async def get_all_keys(self) -> Dict[str, int]:
-        """Trả về dict {code: số_lượt_còn} cho tất cả key."""
+    async def is_vip_key(self, code: str) -> bool:
+        async with self._lock:
+            data = self._load()
+            return bool(data.get("keys", {}).get(code, {}).get("vip", False))
+
+    async def get_all_keys(self) -> Dict[str, Any]:
+        """Trả về dict {code: {"uses": N, "vip": bool}} cho tất cả key."""
         async with self._lock:
             data = self._load()
             keys = data.get("keys", {})
-            return {code: int(info.get("uses", 0)) for code, info in keys.items()}
+            return {code: {"uses": int(info.get("uses", 0)), "vip": bool(info.get("vip", False))}
+                    for code, info in keys.items()}
 
     async def consume(self, code: str) -> bool:
         async with self._lock:
@@ -653,8 +659,25 @@ async def cmd_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
         uses = int(uses)
     except Exception:
         return await update.message.reply_text("Cú pháp: /key {mã} {số_lượt}")
-    await storage.set_key(code, uses)
+    await storage.set_key(code, uses, vip=False)
     await update.message.reply_text(f"Đã set key `{code}` với {uses} lượt.", parse_mode=constants.ParseMode.MARKDOWN)
+
+
+async def cmd_keyvip(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    storage: StorageBase = context.application.bot_data["storage"]
+    if not is_owner(user.id):
+        return
+    try:
+        _, code, uses = update.message.text.strip().split(maxsplit=2)
+        uses = int(uses)
+    except Exception:
+        return await update.message.reply_text("Cú pháp: /keyvip {mã} {số_lượt}")
+    await storage.set_key(code, uses, vip=True)
+    await update.message.reply_text(
+        f"💎 Đã tạo VIP key <code>{code}</code> với {uses} lượt (không giới hạn 1h).",
+        parse_mode=constants.ParseMode.HTML
+    )
 
 
 async def cmd_keys(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -668,9 +691,12 @@ async def cmd_keys(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.job_queue.run_once(_del_msg_job, when=60, chat_id=m.chat_id, data=m.message_id)
         return
     lines = ["🔑 <b>Danh sách Key</b>\n"]
-    for i, (code, uses) in enumerate(keys.items(), 1):
+    for i, (code, info) in enumerate(keys.items(), 1):
+        uses = info["uses"]
+        vip = info.get("vip", False)
+        tag = "💎 VIP" if vip else "🔑"
         status = f"✅ {uses} lượt" if uses > 0 else "❌ Hết lượt"
-        lines.append(f"{i}. <code>{code}</code> — {status}")
+        lines.append(f"{i}. {tag} <code>{code}</code> — {status}")
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Đóng", callback_data=f"closemsg:{update.message.message_id}")]])
     await update.message.reply_text("\n".join(lines), parse_mode=constants.ParseMode.HTML, reply_markup=kb)
 
@@ -1313,6 +1339,7 @@ def main():
     # Owner-only commands
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("key", cmd_key, filters=filters.User(user_id=config.OWNER_ID)))
+    app.add_handler(CommandHandler("keyvip", cmd_keyvip, filters=filters.User(user_id=config.OWNER_ID)))
     app.add_handler(CommandHandler("keys", cmd_keys, filters=filters.User(user_id=config.OWNER_ID)))
 
     # Admin commands (owner + static admins in .env)

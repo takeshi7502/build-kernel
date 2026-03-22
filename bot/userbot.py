@@ -842,21 +842,24 @@ async def _do_dispatch(event, session: Dict[str, Any]) -> bool:
     is_admin = _is_admin(event)
     menu_msg_id = session.get("menu_msg_id")
 
-    # Rate limit for regular users
+    # Rate limit for regular users (bypass if VIP key)
     if not is_admin:
         import time as _time
-        last = _user_last_build.get(sender_id, 0)
-        elapsed = _time.time() - last
-        if elapsed < RATE_LIMIT_SECONDS:
-            remaining = int((RATE_LIMIT_SECONDS - elapsed) // 60)
-            if menu_msg_id:
-                try:
-                    await client.delete_messages(chat_id, menu_msg_id)
-                except Exception:
-                    pass
-            _clear_session(sk)
-            await _reply_temp(event, f"⚠️ Giới hạn 1 build/30 phút. Vui lòng chờ ~{remaining} phút.", 10)
-            return True
+        build_key = session.get("build_key")
+        is_vip = build_key and await storage.is_vip_key(build_key)
+        if not is_vip:
+            last = _user_last_build.get(sender_id, 0)
+            elapsed = _time.time() - last
+            if elapsed < RATE_LIMIT_SECONDS:
+                remaining = int((RATE_LIMIT_SECONDS - elapsed) // 60)
+                if menu_msg_id:
+                    try:
+                        await client.delete_messages(chat_id, menu_msg_id)
+                    except Exception:
+                        pass
+                _clear_session(sk)
+                await _reply_temp(event, f"⚠️ Giới hạn 1 build/30 phút. Vui lòng chờ ~{remaining} phút.", 10)
+                return True
 
     # Edit menu message to show progress
     if menu_msg_id:
@@ -921,15 +924,18 @@ async def _do_dispatch(event, session: Dict[str, Any]) -> bool:
         _clear_session(sk)
         return True
 
-    # Consume key for regular users
+    # Consume key for regular users (VIP keys are NOT consumed)
     build_key = session.get("build_key")
     if not is_admin and build_key:
-        await storage.consume(build_key)
+        if not await storage.is_vip_key(build_key):
+            await storage.consume(build_key)
 
-    # Track rate limit
+    # Track rate limit (only for non-VIP users)
     if not is_admin:
         import time as _time
-        _user_last_build[sender_id] = _time.time()
+        build_key_for_rl = session.get("build_key")
+        if not build_key_for_rl or not await storage.is_vip_key(build_key_for_rl):
+            _user_last_build[sender_id] = _time.time()
 
     try:
         sender = await client.get_entity(sender_id)
@@ -1168,9 +1174,12 @@ async def keys_cmd(event):
         await _reply_temp(event, "Chưa có key nào.", 10)
         return
     lines = ["🔑 <b>Danh sách Key:</b>"]
-    for i, (code, uses) in enumerate(keys.items(), 1):
+    for i, (code, info) in enumerate(keys.items(), 1):
+        uses = info["uses"]
+        vip = info.get("vip", False)
+        tag = "💎 VIP" if vip else "🔑"
         status = f"✅ {uses} lượt" if uses > 0 else "❌ Hết lượt"
-        lines.append(f"  {i}. <code>{code}</code> — {status}")
+        lines.append(f"  {i}. {tag} <code>{code}</code> — {status}")
     await _reply_temp(event, "\n".join(lines), 60, html=True)
 
 
@@ -1181,8 +1190,19 @@ async def key_cmd(event):
     await _safe_delete(event)
     code = event.pattern_match.group(1)
     uses = int(event.pattern_match.group(2))
-    await storage.set_key(code, uses)
+    await storage.set_key(code, uses, vip=False)
     await _reply_temp(event, f"✅ Đã set key <code>{code}</code> với {uses} lượt.", 10, html=True)
+
+
+@client.on(events.NewMessage(pattern=r"^\.keyvip\s+(\S+)\s+(\d+)$"))
+async def keyvip_cmd(event):
+    if not _is_admin(event) or not _is_allowed_chat(event.chat_id):
+        return
+    await _safe_delete(event)
+    code = event.pattern_match.group(1)
+    uses = int(event.pattern_match.group(2))
+    await storage.set_key(code, uses, vip=True)
+    await _reply_temp(event, f"💎 Đã tạo VIP key <code>{code}</code> với {uses} lượt (không giới hạn 1h).", 10, html=True)
 
 
 # Track list message IDs for reply-based pagination
