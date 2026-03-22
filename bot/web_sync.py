@@ -47,8 +47,8 @@ async def get_realtime_data(app):
                         continue
                         
                     if run_id not in _GH_RUNS_CACHE:
-                        # Job ko còn ở Github -> tức là user đã delete -> xoá local
-                        await storage.delete_job_by_run_id(int(run_id))
+                        # Không cập nhật status nếu cache chưa fetch kịp hoặc ko nằm trong list Top 50, giữ nguyên.
+                        active_jobs.append(j)
                         continue
                         
                     gh_run = _GH_RUNS_CACHE[run_id]

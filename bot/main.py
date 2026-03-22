@@ -576,6 +576,8 @@ async def poller(app):
                             ])
                         else:
                             buttons.append([InlineKeyboardButton("🌐 Xem trên GitHub", url=html_url)])
+                        
+                        buttons.append([InlineKeyboardButton("📊 Web Dashboard", url="https://kernel.takeshi.dev/")])
                         kb = InlineKeyboardMarkup(buttons)
 
                         chat_id = job["chat_id"]

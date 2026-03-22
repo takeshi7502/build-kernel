@@ -964,7 +964,8 @@ async def _do_dispatch(event, session: Dict[str, Any]) -> bool:
     success_text = (
         "✅ <b>Đã gửi build thành công!</b>\n"
         f"⚙️ Workflow: <code>{WORKFLOW_FILE}</code>\n"
-        f"🔗 <a href='{view_url}'>Mở GitHub Actions</a>\n\n"
+        f"🔗 <a href='{view_url}'>Mở GitHub Actions</a>\n"
+        f"📊 <a href='https://kernel.takeshi.dev/'>Web Dashboard</a>\n\n"
         "<i>Tui sẽ thông báo khi build hoàn tất.</i>"
     )
     # Edit menu message to show success (single message)
