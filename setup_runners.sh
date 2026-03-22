@@ -29,6 +29,52 @@ get_token() {
 }
 
 echo "========================================="
+echo "💻 MENU QUẢN LÝ GITHUB ACTIONS"
+echo "========================================="
+echo "1. Cài đặt Runner mới"
+echo "2. Gỡ bỏ Runner hiện tại"
+echo "========================================="
+read -p "👉 Chọn chức năng [1/2, Nhấn Enter mặc định là 1]: " MENU_OPTION
+MENU_OPTION=${MENU_OPTION:-1}
+
+if [ "$MENU_OPTION" = "2" ]; then
+    echo ""
+    echo "========================================="
+    echo "🗑️ GỠ BỎ RUNNER ĐANG CHẠY"
+    echo "========================================="
+    read -p "🔢 Bạn muốn gỡ bỏ bao nhiêu Runner? [Mặc định: 1]: " INPUT_REMOVE
+    REMOVE_COUNT=${INPUT_REMOVE:-1}
+    
+    if ! [[ "$REMOVE_COUNT" =~ ^[0-9]+$ ]]; then
+        echo "❌ LỖI: Vui lòng gõ một con số hợp lệ!"
+        exit 1
+    fi
+    
+    get_token
+    VPS_NAME=$(hostname)
+    i=1
+    while [ $i -le $REMOVE_COUNT ]; do
+        DIR="runner-$i"
+        if [ -d "$DIR" ]; then
+            echo "🛑 Đang gỡ bỏ ${VPS_NAME}-Runner-$i..."
+            cd $DIR
+            sudo ./svc.sh stop
+            sudo ./svc.sh uninstall
+            ./config.sh remove --token "$FINAL_TOKEN"
+            cd ..
+            rm -rf $DIR
+            echo "✅ Gỡ bỏ thành công ${VPS_NAME}-Runner-$i!"
+        else
+            echo "⚠️ Thư mục $DIR không tồn tại. Bỏ qua."
+        fi
+        i=$((i + 1))
+    done
+    echo "🎉 Đã hoàn tất gỡ bỏ!"
+    exit 0
+fi
+
+echo ""
+echo "========================================="
 echo "💻 KIỂM TRA THÔNG SỐ SERVER VPS..."
 echo "========================================="
 CORES=$(nproc)
