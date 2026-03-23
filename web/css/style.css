@@ -340,50 +340,50 @@ footer {
 /* Mobile Responsive */
 @media (max-width: 768px) {
     .container {
-        padding: 20px 16px;
+        padding: 16px 12px;
     }
     
     .header {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 16px;
-        margin-bottom: 30px;
-        padding-bottom: 20px;
+        flex-direction: row;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 24px;
+        padding-bottom: 16px;
     }
     
     .header-logo {
-        gap: 16px;
+        gap: 12px;
     }
     
     .logo-icon {
-        width: 44px;
-        height: 44px;
-        font-size: 20px;
+        width: 38px;
+        height: 38px;
+        font-size: 18px;
+        border-radius: 12px;
     }
     
     .header h1 {
-        font-size: 24px;
+        font-size: 18px;
         letter-spacing: -0.2px;
     }
     
     .subtitle {
-        font-size: 13px;
+        font-size: 11px;
     }
     
     .stat-badge {
-        padding: 6px 12px;
-        font-size: 13px;
+        display: none; /* Hide 'Hệ thống đang Online' tag on mobile to save space, or make it dot only */
     }
     
     .section-title {
         flex-direction: column;
         align-items: flex-start;
-        gap: 20px;
-        margin-bottom: 24px;
+        gap: 16px;
+        margin-bottom: 20px;
     }
     
     .section-title h2 {
-        font-size: 20px;
+        font-size: 16px;
     }
     
     .filter-group {
@@ -395,57 +395,63 @@ footer {
     .filter-btn {
         flex: 1;
         text-align: center;
-        padding: 8px 12px;
-        font-size: 13px;
+        padding: 6px 10px;
+        font-size: 12px;
+        border-radius: 6px;
     }
     
     .builds-grid {
         grid-template-columns: 1fr;
-        gap: 16px;
+        gap: 12px;
     }
     
     .build-card {
-        padding: 20px;
+        padding: 16px;
+        border-radius: 12px;
     }
     
     .card-title {
-        font-size: 16px;
+        font-size: 15px;
     }
     
     .card-date {
-        font-size: 12px;
+        font-size: 11px;
     }
     
     .status {
-        font-size: 11px;
-        padding: 4px 8px;
+        font-size: 10px;
+        padding: 3px 6px;
+        border-radius: 4px;
     }
     
     .specs-list {
-        padding: 14px;
-        gap: 10px;
+        padding: 10px 12px;
+        gap: 6px;
+        border-radius: 8px;
     }
     
     .spec-item {
-        font-size: 13px;
-    }
-    
-    .spec-value {
         font-size: 12px;
     }
     
+    .spec-value {
+        font-size: 11px;
+    }
+    
     .card-actions {
+        margin-top: 14px;
         gap: 8px;
     }
     
     .btn {
-        padding: 10px;
-        font-size: 13px;
+        padding: 8px;
+        font-size: 12px;
+        border-radius: 6px;
     }
     
     footer {
-        margin-top: 50px;
-        padding-top: 24px;
-        font-size: 13px;
+        margin-top: 40px;
+        padding-top: 16px;
+        font-size: 12px;
     }
 }
