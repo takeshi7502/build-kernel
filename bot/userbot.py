@@ -960,39 +960,40 @@ async def _do_dispatch(event, session: Dict[str, Any]) -> bool:
     dispatch_file = WORKFLOW_FILE
     dispatch_inputs = inputs
 
-    selected_targets = [k for k in TARGET_KEYS if inputs.get(k)]
+    t_key = session.get("selected_target")
+    sel_subs: set = session.get("selected_subs") or set()
     sub_levels_str = str(inputs.get("sub_levels", "")).strip()
     sub_list = [s.strip() for s in sub_levels_str.split(",") if s.strip()] if sub_levels_str else []
+
+    # Use clean single-job workflow when: 1 target, exactly 1 specific sub chosen
     use_custom = (
-        len(selected_targets) == 1
-        and len(sub_list) == 1
+        t_key in TARGET_META
         and not inputs.get("build_all")
-        and selected_targets[0] in TARGET_META
+        and len(sel_subs) == 1
+        and len(sub_list) == 1
     )
     if use_custom:
-        t_key = selected_targets[0]
         sl = sub_list[0]
         android_ver, kernel_ver = TARGET_META[t_key]
         meta = SUB_LEVEL_META.get(t_key, {}).get(sl, ("lts", ""))
-        os_patch = meta[0]
-        revision = meta[1]
         dispatch_file = CUSTOM_WORKFLOW
         dispatch_inputs = {
             "android_version":  android_ver,
             "kernel_version":   kernel_ver,
             "sub_level":        sl,
-            "os_patch_level":   os_patch,
-            "revision":         revision,
+            "os_patch_level":   meta[0],
+            "revision":         meta[1] if meta[1] else "r1",
             "kernelsu_variant": inputs.get("kernelsu_variant", "SukiSU"),
             "kernelsu_branch":  inputs.get("kernelsu_branch", "Stable(标准)"),
             "version":          inputs.get("version", ""),
             "use_zram":         inputs.get("use_zram", False),
             "use_bbg":          inputs.get("use_bbg", False),
             "use_kpm":          inputs.get("use_kpm", False),
-            "cancel_susfs":     inputs.get("cancel_susfs", True),
+            "cancel_susfs":     inputs.get("cancel_susfs", False),
             "supp_op":          False,
         }
 
+    logger.info("[dispatch] file=%s use_custom=%s t_key=%s", dispatch_file, use_custom, t_key)
     res = await gh.dispatch_workflow(
         repo=GKI_REPO,
         workflow_file=dispatch_file,
@@ -1035,7 +1036,7 @@ async def _do_dispatch(event, session: Dict[str, Any]) -> bool:
     job = {
         "type": "gki",
         "repo": GKI_REPO,
-        "workflow_file": WORKFLOW_FILE,
+        "workflow_file": dispatch_file,
         "ref": GKI_DEFAULT_BRANCH,
         "inputs": inputs,
         "user_id": sender_id,
@@ -1050,12 +1051,11 @@ async def _do_dispatch(event, session: Dict[str, Any]) -> bool:
     }
     await storage.add_job(job)
 
-    view_url = f"https://github.com/{GITHUB_OWNER}/{GKI_REPO}/actions/workflows/{WORKFLOW_FILE}"
+    view_url = f"https://github.com/{GITHUB_OWNER}/{GKI_REPO}/actions/workflows/{dispatch_file}"
     success_text = (
         "✅ <b>Đã gửi build thành công!</b>\n"
-        f"⚙️ Workflow: <code>{WORKFLOW_FILE}</code>\n"
-        f"🔗 <a href='{view_url}'>Mở GitHub Actions</a>\n"
-        f"📊 <a href='https://kernel.takeshi.dev/'>Web Dashboard</a>\n\n"
+        f"🔗 <a href='{view_url}'>Github</a>  |  "
+        f"📊 <a href='https://kernel.takeshi.dev/'>Dashboard</a>\n\n"
         "<i>Tui sẽ thông báo khi build hoàn tất.</i>"
     )
     # Edit menu message to show success (single message)

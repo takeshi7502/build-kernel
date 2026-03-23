@@ -838,7 +838,7 @@ class GKIFlow:
             job = {
                 "type": "gki",
                 "repo": self.config.GKI_REPO,
-                "workflow_file": wf,
+                "workflow_file": dispatch_file,
                 "ref": self.config.GKI_DEFAULT_BRANCH,
                 "inputs": inputs,
                 "user_id": user.id,
@@ -853,11 +853,11 @@ class GKIFlow:
             await self.storage.add_job(job)
             if not user_is_admin:
                 await self.storage.consume(key)
-            view_url = f"https://github.com/{self.config.GITHUB_OWNER}/{self.config.GKI_REPO}/actions/workflows/{wf}"
-            btn = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔗 Mở GitHub Actions", url=view_url)],
-                [InlineKeyboardButton("📊 Web Dashboard", url="https://kernel.takeshi.dev/")]
-            ])
+            view_url = f"https://github.com/{self.config.GITHUB_OWNER}/{self.config.GKI_REPO}/actions/workflows/{dispatch_file}"
+            btn = InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔗 Github", url=view_url),
+                InlineKeyboardButton("📊 Dashboard", url="https://kernel.takeshi.dev/")
+            ]])
             
             mention = f'<a href="tg://user?id={user.id}">{user.full_name}</a>'
             
@@ -879,7 +879,7 @@ class GKIFlow:
                 f"✅ <b>Đã gửi build thành công!</b>\n"
                 f"👤 Người gửi: {mention}\n"
                 f"⏱️ Dự tính hoàn thành: {est_time}\n\n"
-                f"<i>Bot sẽ tự động gửi file qua tin nhắn khi hoàn tất.</i>"
+                f"<i>Bạn sẽ nhận được thông báo khi hoàn tất.</i>"
             )
             await q.edit_message_text(msg_text, reply_markup=btn, parse_mode="HTML")
         else:
