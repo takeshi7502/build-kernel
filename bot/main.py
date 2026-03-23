@@ -691,17 +691,17 @@ async def cmd_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if action == "delete":
             if await storage.delete_key(code):
-                await update.message.reply_text(f"🗑️ Đã xoá key <code>{code}</code>.", parse_mode=constants.ParseMode.HTML)
+                await update.message.reply_text(f"🗑️ Đã xoá key <code>{code}</code>.", parse_mode=constants.ParseMode.HTML, quote=False)
             else:
-                await update.message.reply_text(f"⚠️ Key <code>{code}</code> không tồn tại.", parse_mode=constants.ParseMode.HTML)
+                await update.message.reply_text(f"⚠️ Key <code>{code}</code> không tồn tại.", parse_mode=constants.ParseMode.HTML, quote=False)
             return
         else:
             uses = int(action)
     except Exception:
-        return await update.message.reply_text("Cú pháp: /key {mã} {số_lượt|delete}")
+        return await update.message.reply_text("Cú pháp: /key {mã} {số_lượt|delete}", quote=False)
         
     await storage.set_key(code, uses, vip=False)
-    await update.message.reply_text(f"✅ Đã set key <code>{code}</code> với {uses} lượt.", parse_mode=constants.ParseMode.HTML)
+    await update.message.reply_text(f"✅ Đã set key <code>{code}</code> với {uses} lượt.", parse_mode=constants.ParseMode.HTML, quote=False)
 
 
 async def cmd_keyvip(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -714,11 +714,12 @@ async def cmd_keyvip(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _, code, uses = update.message.text.strip().split(maxsplit=2)
         uses = int(uses)
     except Exception:
-        return await update.message.reply_text("Cú pháp: /keyvip {mã} {số_lượt}")
+        return await update.message.reply_text("Cú pháp: /keyvip {mã} {số_lượt}", quote=False)
     await storage.set_key(code, uses, vip=True)
     await update.message.reply_text(
         f"💎 Đã tạo VIP key <code>{code}</code> với {uses} lượt (không giới hạn 1h).",
-        parse_mode=constants.ParseMode.HTML
+        parse_mode=constants.ParseMode.HTML,
+        quote=False
     )
 
 
@@ -730,7 +731,7 @@ async def cmd_keys(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     keys = await storage.get_all_keys()
     if not keys:
-        m = await update.message.reply_text("ℹ️ Chưa có key nào được tạo.")
+        m = await update.message.reply_text("ℹ️ Chưa có key nào được tạo.", quote=False)
         context.job_queue.run_once(_del_msg_job, when=60, chat_id=m.chat_id, data=m.message_id)
         return
     lines = ["🔑 <b>Danh sách Key</b>\n"]
@@ -748,11 +749,11 @@ async def cmd_keys(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
         lines.append(f"{i}. {icon}- <code>{code}</code> - {status}")
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Đóng", callback_data=f"closemsg:{update.message.message_id}")]])
-    await update.message.reply_text("\n".join(lines), parse_mode=constants.ParseMode.HTML, reply_markup=kb)
+    await update.message.reply_text("\n".join(lines), parse_mode=constants.ParseMode.HTML, reply_markup=kb, quote=False)
 
 async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _safe_delete_user_msg(update, context)
-    m = await update.message.reply_text("🏓 Pong! Bot đang hoạt động bình thường.")
+    m = await update.message.reply_text("🏓 Pong! Bot đang hoạt động bình thường.", quote=False)
     if context.job_queue:
         context.job_queue.run_once(_del_msg_job, when=60, chat_id=m.chat_id, data=m.message_id)
         if update.message:
@@ -770,7 +771,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<i>Ghi chú: Bạn cần có cấu hình hợp lệ hoặc được Admin cấp quyền để sử dụng tính năng build.</i>"
     )
     if update.message:
-        await update.message.reply_text(msg, parse_mode=constants.ParseMode.HTML)
+        await update.message.reply_text(msg, parse_mode=constants.ParseMode.HTML, quote=False)
 
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -796,7 +797,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     active_runs.append(r)
 
     if not active_runs:
-        m = await update.message.reply_text("ℹ️ Hiện không có tiến trình build nào đang chạy.")
+        m = await update.message.reply_text("ℹ️ Hiện không có tiến trình build nào đang chạy.", quote=False)
         if context.job_queue:
             context.job_queue.run_once(_del_msg_job, when=60, chat_id=m.chat_id, data=m.message_id)
             if update.message:
@@ -903,7 +904,7 @@ async def show_list_page(update: Update, context: ContextTypes.DEFAULT_TYPE, pag
         if message_to_edit:
             return await message_to_edit.edit_text(text)
         else:
-            return await update.message.reply_text(text)
+            return await update.message.reply_text(text, quote=False)
 
     items_per_page = 5
     total_pages = max(1, (len(github_runs) + items_per_page - 1) // items_per_page)
@@ -923,7 +924,7 @@ async def show_list_page(update: Update, context: ContextTypes.DEFAULT_TYPE, pag
     if message_to_edit:
         await message_to_edit.edit_text("⏳ Đang tải thông tin trang...")
     else:
-        message_to_edit = await update.message.reply_text("⏳ Đang tải thông tin trang...")
+        message_to_edit = await update.message.reply_text("⏳ Đang tải thông tin trang...", quote=False)
 
     text = f"🗂 <b>Danh sách các bản build GKI:</b>\n\n"
 
@@ -1185,7 +1186,7 @@ async def check_user_job_limit(update: Update, context: ContextTypes.DEFAULT_TYP
         elapsed = (datetime.now(timezone.utc) - job_created_at).total_seconds()
         if elapsed < 3600:
             remaining = int((3600 - elapsed) // 60) + 1
-            m = await update.message.reply_text(f"⚠️ Chỉ được 1 job/1h. Vui lòng đợi {remaining} phút.")
+            m = await update.message.reply_text(f"⚠️ Chỉ được 1 job/1h. Vui lòng đợi {remaining} phút.", quote=False)
             context.job_queue.run_once(_del_msg_job, when=60, chat_id=m.chat_id, data=m.message_id)
             return False
     return True
@@ -1307,10 +1308,10 @@ async def cmd_cancel_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
         run_id_str = raw_cmd.split("_")[1].split("@")[0]
         run_id = int(run_id_str)
     except:
-        return await update.message.reply_text("❌ ID không hợp lệ.")
+        return await update.message.reply_text("❌ ID không hợp lệ.", quote=False)
         
     gh: GitHubAPI = context.application.bot_data["gh"]
-    msg = await update.message.reply_text(f"⏳ Đang gửi lệnh hủy Run #{run_id} lên GitHub...")
+    msg = await update.message.reply_text(f"⏳ Đang gửi lệnh hủy Run #{run_id} lên GitHub...", quote=False)
     res = await gh.cancel_run(config.GKI_REPO, run_id)
     if res["status"] in (202, 204):
         await gh.delete_run(config.GKI_REPO, run_id)
@@ -1337,11 +1338,11 @@ async def cmd_delete_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
         run_id_str = raw_cmd.split("_")[1].split("@")[0]
         run_id = int(run_id_str)
     except:
-        return await update.message.reply_text("❌ ID không hợp lệ.")
+        return await update.message.reply_text("❌ ID không hợp lệ.", quote=False)
         
     gh: GitHubAPI = context.application.bot_data["gh"]
     
-    msg = await update.message.reply_text(f"⏳ Đang gửi lệnh xoá Run #{run_id} lên GitHub...")
+    msg = await update.message.reply_text(f"⏳ Đang gửi lệnh xoá Run #{run_id} lên GitHub...", quote=False)
     res = await gh.delete_run(config.GKI_REPO, run_id)
     
     if res["status"] in (202, 204):
