@@ -616,8 +616,11 @@ async def _reply(event, text: str, html: bool = False):
     chat_id = event.chat_id
     _processing_chats.add(chat_id)
     try:
-        msg = await event.reply(text, link_preview=False,
-                                parse_mode="html" if html else None)
+        msg = await client.send_message(
+            chat_id, text,
+            link_preview=False,
+            parse_mode="html" if html else None
+        )
         return msg
     finally:
         _processing_chats.discard(chat_id)
