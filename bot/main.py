@@ -1108,6 +1108,14 @@ async def check_user_job_limit(update: Update, context: ContextTypes.DEFAULT_TYP
     storage: StorageBase = context.application.bot_data["storage"]
     if await is_admin(user.id, storage):
         return True
+
+    # Check if a valid VIP key is provided
+    if context.args:
+        key = context.args[0]
+        uses = await storage.get_uses(key)
+        if uses > 0 and await storage.is_vip_key(key):
+            return True  # Valid VIP key, bypass rate limit!
+
     active = await storage.list_user_active_jobs(user.id)
     if active:
         job_created_at = datetime.fromisoformat(active[0]["created_at"])
