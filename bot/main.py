@@ -665,7 +665,17 @@ async def poller(app):
         await asyncio.sleep(45)
 
 
+async def _safe_delete_user_msg(update: Update):
+    """Silently delete the user's message."""
+    try:
+        if update and update.message:
+            await update.message.delete()
+    except Exception:
+        pass
+
+
 async def cmd_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _safe_delete_user_msg(update)
     user = update.effective_user
     storage: StorageBase = context.application.bot_data["storage"]
     if not is_owner(user.id):
@@ -693,6 +703,7 @@ async def cmd_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_keyvip(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _safe_delete_user_msg(update)
     user = update.effective_user
     storage: StorageBase = context.application.bot_data["storage"]
     if not is_owner(user.id):
@@ -710,6 +721,7 @@ async def cmd_keyvip(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_keys(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _safe_delete_user_msg(update)
     user = update.effective_user
     storage: StorageBase = context.application.bot_data["storage"]
     if not is_owner(user.id):
@@ -737,6 +749,7 @@ async def cmd_keys(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode=constants.ParseMode.HTML, reply_markup=kb)
 
 async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _safe_delete_user_msg(update)
     m = await update.message.reply_text("🏓 Pong! Bot đang hoạt động bình thường.")
     if context.job_queue:
         context.job_queue.run_once(_del_msg_job, when=60, chat_id=m.chat_id, data=m.message_id)
@@ -745,6 +758,7 @@ async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _safe_delete_user_msg(update)
     msg = (
         "👋 Xin chào! Mình là Bot Build Kernel GKI.\n\n"
         "🤖 Mình giúp tự động hóa quá trình cấu hình và biên dịch (build) Kernel Android (GKI) qua GitHub Actions.\n\n"
@@ -758,6 +772,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _safe_delete_user_msg(update)
     user = update.effective_user
     storage: StorageBase = context.application.bot_data["storage"]
     
@@ -964,7 +979,15 @@ async def show_list_page(update: Update, context: ContextTypes.DEFAULT_TYPE, pag
     reply_markup = InlineKeyboardMarkup(kb)
     await message_to_edit.edit_text(text, parse_mode=constants.ParseMode.HTML, reply_markup=reply_markup, disable_web_page_preview=True)
 
+async def _safe_delete_user_msg(update: Update):
+    if update.message:
+        try:
+            await update.message.delete()
+        except Exception:
+            pass # Ignore errors if message already deleted or not found
+
 async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _safe_delete_user_msg(update)
     user = update.effective_user
     storage: StorageBase = context.application.bot_data["storage"]
     if not await is_admin(user.id, storage):
@@ -1268,6 +1291,7 @@ async def cb_save_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.answer("❌ Lỗi: Bạn cần nhắn tin cho Bot trước (nhấn START) để nhận tin nhắn riêng.", show_alert=True)
 
 async def cmd_cancel_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _safe_delete_user_msg(update)
     user = update.effective_user
     storage: StorageBase = context.application.bot_data["storage"]
     if not await is_admin(user.id, storage):
@@ -1297,6 +1321,7 @@ async def cmd_cancel_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.job_queue.run_once(_del_msg_job, when=10, chat_id=update.message.chat_id, data=update.message.message_id)
 
 async def cmd_delete_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _safe_delete_user_msg(update)
     user = update.effective_user
     storage: StorageBase = context.application.bot_data["storage"]
     if not await is_admin(user.id, storage):
