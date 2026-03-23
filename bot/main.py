@@ -38,9 +38,12 @@ DATA_JSON = "data.json"
 
 
 class StorageBase:
-    async def set_key(self, code: str, uses: int): ...
+    async def set_key(self, code: str, uses: int, vip: bool = False): ...
     async def get_uses(self, code: str) -> int: ...
+    async def is_vip_key(self, code: str) -> bool: ...
+    async def get_all_keys(self) -> Dict[str, Any]: ...
     async def consume(self, code: str) -> bool: ...
+    async def delete_key(self, code: str) -> bool: ...
     async def add_job(self, job: Dict[str, Any]) -> Any: ...
     async def update_job(self, job_id, fields: Dict[str, Any]): ...
     async def list_unnotified_jobs(self) -> List[Dict[str, Any]]: ...
@@ -102,6 +105,15 @@ class JSONStorage(StorageBase):
             keys = data.get("keys", {})
             return {code: {"uses": int(info.get("uses", 0)), "vip": bool(info.get("vip", False))}
                     for code, info in keys.items()}
+
+    async def delete_key(self, code: str) -> bool:
+        async with self._lock:
+            data = self._load()
+            if code in data.get("keys", {}):
+                del data["keys"][code]
+                self._save(data)
+                return True
+            return False
 
     async def consume(self, code: str) -> bool:
         async with self._lock:
@@ -593,9 +605,13 @@ async def poller(app):
                         mention = f'<a href="tg://user?id={user_id}">{user_name}</a>'
                         icon = "✅" if conclusion == "success" else "❌" if conclusion == "failure" else "⚠️"
                         
+                        created_at_dt = datetime.fromisoformat(job.get("created_at", datetime.now(timezone.utc).isoformat()).replace("Z", "+00:00"))
+                        elapsed = int((datetime.now(timezone.utc) - created_at_dt).total_seconds() // 60)
+
                         text = (
                             f"{icon} <b>Build {job.get('type','?').upper()} kết thúc!</b>\n"
                             f"📌 Trạng thái: <b>{conclusion.upper()}</b>\n"
+                            f"⏱️ Thời gian: <b>{elapsed} phút</b>\n"
                             f"👤 Người gửi: {mention}"
                         )
                             
@@ -655,12 +671,25 @@ async def cmd_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_owner(user.id):
         return
     try:
-        _, code, uses = update.message.text.strip().split(maxsplit=2)
-        uses = int(uses)
+        parts = update.message.text.strip().split(maxsplit=2)
+        if len(parts) != 3:
+            raise ValueError()
+        code = parts[1]
+        action = parts[2].lower()
+        
+        if action == "delete":
+            if await storage.delete_key(code):
+                await update.message.reply_text(f"🗑️ Đã xoá key <code>{code}</code>.", parse_mode=constants.ParseMode.HTML)
+            else:
+                await update.message.reply_text(f"⚠️ Key <code>{code}</code> không tồn tại.", parse_mode=constants.ParseMode.HTML)
+            return
+        else:
+            uses = int(action)
     except Exception:
-        return await update.message.reply_text("Cú pháp: /key {mã} {số_lượt}")
+        return await update.message.reply_text("Cú pháp: /key {mã} {số_lượt|delete}")
+        
     await storage.set_key(code, uses, vip=False)
-    await update.message.reply_text(f"Đã set key `{code}` với {uses} lượt.", parse_mode=constants.ParseMode.MARKDOWN)
+    await update.message.reply_text(f"✅ Đã set key <code>{code}</code> với {uses} lượt.", parse_mode=constants.ParseMode.HTML)
 
 
 async def cmd_keyvip(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -694,9 +723,16 @@ async def cmd_keys(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for i, (code, info) in enumerate(keys.items(), 1):
         uses = info["uses"]
         vip = info.get("vip", False)
-        tag = "💎 VIP" if vip else "🔑"
-        status = f"✅ {uses} lượt" if uses > 0 else "❌ Hết lượt"
-        lines.append(f"{i}. {tag} <code>{code}</code> — {status}")
+        
+        status = f"còn {uses} lượt" if uses > 0 else "Hết lượt"
+        if vip:
+            icon = "💎"
+        elif uses > 0:
+            icon = "✅"
+        else:
+            icon = "❌"
+            
+        lines.append(f"{i}. {icon}- <code>{code}</code> - {status}")
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Đóng", callback_data=f"closemsg:{update.message.message_id}")]])
     await update.message.reply_text("\n".join(lines), parse_mode=constants.ParseMode.HTML, reply_markup=kb)
 

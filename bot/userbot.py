@@ -234,6 +234,15 @@ class JSONStorage:
                 return bool(info.get("vip", False))
             return False
 
+    async def delete_key(self, code: str) -> bool:
+        async with self._lock:
+            data = self._load()
+            if code in data.get("keys", {}):
+                del data["keys"][code]
+                self._save(data)
+                return True
+            return False
+
     async def add_job(self, job: Dict[str, Any]) -> Any:
         async with self._lock:
             data = self._load()
@@ -628,12 +637,18 @@ async def _delete_later(msg, seconds: int = 10):
 
 async def _reply(event, text: str, html: bool = False):
     chat_id = event.chat_id
+    kwargs = {
+        "link_preview": False,
+        "parse_mode": "html" if html else None
+    }
+    
+    if hasattr(event.message, "reply_to") and event.message.reply_to and getattr(event.message.reply_to, "forum_topic", False):
+        kwargs["reply_to"] = event.message.reply_to.reply_to_top_id or event.message.reply_to_msg_id
+
     _processing_chats.add(chat_id)
     try:
         msg = await client.send_message(
-            chat_id, text,
-            link_preview=False,
-            parse_mode="html" if html else None
+            chat_id, text, **kwargs
         )
         return msg
     finally:
@@ -843,7 +858,12 @@ async def _handle_input(event, session: Dict[str, Any], raw: str) -> bool:
         available = SUB_LEVELS.get(target_key, [])
         selected = session["selected_subs"]
 
+        is_admin = _is_admin(event)
+
         if val.lower() == "a":
+            if not is_admin:
+                await _reply_temp(event, "⚠️ User thường chỉ được phép chọn 1 sub-version!", 10)
+                return False
             if len(selected) == len(available):
                 selected.clear()
             else:
@@ -867,6 +887,14 @@ async def _handle_input(event, session: Dict[str, Any], raw: str) -> bool:
             idx = int(val) - 1
             if 0 <= idx < len(available):
                 sv = available[idx]
+                if not is_admin:
+                    selected.clear()
+                    selected.add(sv)
+                    inputs["sub_levels"] = sv
+                    session["step"] = "release"
+                    await _show_step(event, session)
+                    return False
+                    
                 if sv in selected:
                     selected.discard(sv)
                 else:
@@ -1277,25 +1305,44 @@ async def keys_cmd(event):
     if not keys:
         await _reply_temp(event, "Chưa có key nào.", 10)
         return
-    lines = ["🔑 <b>Danh sách Key:</b>"]
+    lines = ["🔑 <b>Danh sách Key</b>\n"]
     for i, (code, info) in enumerate(keys.items(), 1):
         uses = info["uses"]
         vip = info.get("vip", False)
-        tag = "💎 VIP" if vip else "🔑"
-        status = f"✅ {uses} lượt" if uses > 0 else "❌ Hết lượt"
-        lines.append(f"  {i}. {tag} <code>{code}</code> — {status}")
+        
+        # 1. ✅- loli - còn 9 lượt
+        # 2. ❌- test - Hết lượt
+        # 3. 💎- provipmax - còn 10 lượt
+        
+        status = f"còn {uses} lượt" if uses > 0 else "Hết lượt"
+        if vip:
+            icon = "💎"
+        elif uses > 0:
+            icon = "✅"
+        else:
+            icon = "❌"
+            
+        lines.append(f"{i}. {icon}- <code>{code}</code> - {status}")
     await _reply_temp(event, "\n".join(lines), 60, html=True)
 
 
-@client.on(events.NewMessage(pattern=r"^\.key\s+(\S+)\s+(\d+)$"))
+@client.on(events.NewMessage(pattern=r"^\.key\s+(\S+)\s+(\d+|delete)$", flags=re.IGNORECASE))
 async def key_cmd(event):
     if not _is_admin(event) or not _is_allowed_chat(event.chat_id):
         return
     await _safe_delete(event)
     code = event.pattern_match.group(1)
-    uses = int(event.pattern_match.group(2))
-    await storage.set_key(code, uses, vip=False)
-    await _reply_temp(event, f"✅ Đã set key <code>{code}</code> với {uses} lượt.", 10, html=True)
+    action = event.pattern_match.group(2).lower()
+    
+    if action == "delete":
+        if await storage.delete_key(code):
+            await _reply_temp(event, f"🗑️ Đã xoá key <code>{code}</code>.", 10, html=True)
+        else:
+            await _reply_temp(event, f"⚠️ Key <code>{code}</code> không tồn tại.", 10, html=True)
+    else:
+        uses = int(action)
+        await storage.set_key(code, uses, vip=False)
+        await _reply_temp(event, f"✅ Đã set key <code>{code}</code> với {uses} lượt.", 10, html=True)
 
 
 @client.on(events.NewMessage(pattern=r"^\.keyvip\s+(\S+)\s+(\d+)$"))
@@ -1760,18 +1807,24 @@ async def poller_loop():
                         icon = "✅" if conclusion == "success" else "❌" if conclusion == "failure" else "⚠️"
                         mention = f'<a href="tg://user?id={user_id}">{user_name}</a>'
 
+                        created_at_dt = datetime.fromisoformat(job["created_at"].replace("Z", "+00:00"))
+                        elapsed = int((datetime.now(timezone.utc) - created_at_dt).total_seconds() // 60)
+
                         if conclusion == "success":
                             text = (
                                 f"{icon} <b>Build GKI hoàn tất!</b>\n"
                                 f"👤 Người gửi: {mention}\n"
+                                f"⏱️ Thời gian: <b>{elapsed} phút</b>\n"
                                 f"📊 Trạng thái: <b>{conclusion.upper()}</b>\n"
-                                f"🔗 <a href='{html_url}'>Mở GitHub Actions</a>\n"
+                                f"🔗 <a href='{html_url}'>Github</a>  |  "
+                                f"📊 <a href='https://kernel.takeshi.dev/'>Dashboard</a>\n"
                                 f"📦 <a href='{nightly_url}'>Tải file</a>"
                             )
                         else:
                             text = (
                                 f"{icon} <b>Build GKI thất bại!</b>\n"
                                 f"👤 Người gửi: {mention}\n"
+                                f"⏱️ Thời gian: <b>{elapsed} phút</b>\n"
                                 f"📊 Trạng thái: <b>{conclusion.upper()}</b>\n"
                                 f"🔗 <a href='{html_url}'>Xem lỗi trên GitHub</a>"
                             )
