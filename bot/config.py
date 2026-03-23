@@ -49,3 +49,8 @@ _admin_raw = os.getenv("ADMIN_IDS", "").strip()
 ADMIN_IDS: list = []
 if _admin_raw:
     ADMIN_IDS = [int(x.strip()) for x in _admin_raw.split(",") if x.strip().isdigit()]
+
+# === OKI Repo ===
+OKI_REPO: str = os.getenv("OKI_REPO", "AnyKernel3").strip()
+OKI_DEFAULT_BRANCH: str = os.getenv("OKI_DEFAULT_BRANCH", "main").strip()
+OKI_WORKFLOW: str = os.getenv("OKI_WORKFLOW", "oki.yml").strip()
