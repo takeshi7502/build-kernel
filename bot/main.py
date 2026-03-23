@@ -24,6 +24,7 @@ from telegram.request import HTTPXRequest
 
 import config
 from gki import build_gki_conversation, _del_msg_job, SUB_LEVELS
+from oki import build_oki_conversation
 from permissions import is_owner, is_admin
 import aiohttp.web as aiohttp_web
 from web_sync import get_realtime_data
@@ -1438,6 +1439,9 @@ def main():
         per_chat=False,
         conversation_timeout=300  # 5 phút timeout tránh conversation treo
     ))
+
+    # OKI conversation
+    app.add_handler(build_oki_conversation(gh, storage, config))
 
     async def _post_init(app_):
         app_.create_task(poller(app_))
