@@ -86,9 +86,59 @@ BUILD_TARGETS = [
 SUB_LEVELS = {
     "build_a12_5_10": ["66","81","101","110","117","136","149","160","168","177","185","198","205","209","218","226","233","236","237","240","246"],
     "build_a13_5_15": ["74","78","94","104","119","123","137","144","148","149","151","153","167","170","178","180","185","189","194"],
-    "build_a14_6_1": ["25","43","57","68","75","78","84","90","93","99","112","115","118","124","128","129","134","138","141","145","157"],
-    "build_a15_6_6": ["50","56","57","58","66","77","82","87","89","92","98","102","118"],
+    "build_a14_6_1":  ["25","43","57","68","75","78","84","90","93","99","112","115","118","124","128","129","134","138","141","145","157"],
+    "build_a15_6_6":  ["50","56","57","58","66","77","82","87","89","92","98","102","118"],
 }
+
+# Metadata per sub_level (os_patch_level, revision) — mirrors the kernel-aXX workflow matrix
+SUB_LEVEL_META: Dict[str, Dict[str, tuple]] = {
+    "build_a12_5_10": {
+        "66":("2022-01","r11"),"81":("2022-03","r11"),"101":("2022-04","r28"),
+        "110":("2022-07","r1"),"117":("2022-09","r1"),"136":("2022-11","r15"),
+        "149":("2023-01","r1"),"160":("2023-03","r1"),"168":("2023-04","r9"),
+        "177":("2023-07","r3"),"185":("2023-09","r1"),"198":("2024-01","r17"),
+        "205":("2024-03","r1"),"209":("2024-05","r13"),"218":("2024-08","r14"),
+        "226":("2024-11","r8"),"233":("2025-02","r1"),"236":("2025-05","r1"),
+        "237":("2025-06","r1"),"240":("2025-09","r1"),"246":("2025-12","r1"),
+    },
+    "build_a13_5_15": {
+        "74":("2023-01",""),"78":("2023-03",""),"94":("2023-05",""),
+        "104":("2023-07",""),"119":("2023-09",""),"123":("2023-11",""),
+        "137":("2024-01",""),"144":("2024-03",""),"148":("2024-05",""),
+        "149":("2024-07",""),"151":("2024-08",""),"153":("2024-09",""),
+        "167":("2024-11",""),"170":("2025-01",""),"178":("2025-03",""),
+        "180":("2025-05",""),"185":("2025-07",""),"189":("2025-09",""),
+        "194":("2025-12",""),
+    },
+    "build_a14_6_1": {
+        "25":("2023-10",""),"43":("2023-11",""),"57":("2024-01",""),
+        "68":("2024-03",""),"75":("2024-05",""),"78":("2024-06",""),
+        "84":("2024-07",""),"90":("2024-08",""),"93":("2024-09",""),
+        "99":("2024-10",""),"112":("2024-11",""),"115":("2024-12",""),
+        "118":("2025-01",""),"124":("2025-02",""),"128":("2025-03",""),
+        "129":("2025-04",""),"134":("2025-05",""),"138":("2025-06",""),
+        "141":("2025-07",""),"145":("2025-09",""),"157":("2025-12",""),
+    },
+    "build_a15_6_6": {
+        "50":("2024-06",""),"56":("2024-09",""),"57":("2024-10",""),
+        "58":("2024-11",""),"66":("2025-01",""),"77":("2025-03",""),
+        "82":("2025-04",""),"87":("2025-05",""),"89":("2025-06",""),
+        "92":("2025-07",""),"98":("2025-09",""),"102":("2025-10",""),
+        "118":("2025-12",""),
+    },
+}
+
+# Maps bot target_key → (android_version, kernel_version) as expected by kernel-custom.yml
+TARGET_META: Dict[str, tuple] = {
+    "build_a12_5_10": ("android12", "5.10"),
+    "build_a13_5_15": ("android13", "5.15"),
+    "build_a14_6_1":  ("android14", "6.1"),
+    "build_a15_6_6":  ("android15", "6.6"),
+}
+
+CUSTOM_WORKFLOW = "kernel-custom.yml"  # Single-job clean dispatch target
+
+
 TARGET_ALIASES = {
     "a12": "build_a12_5_10", "a13": "build_a13_5_15",
     "a14": "build_a14_6_1", "a15": "build_a15_6_6",
@@ -906,11 +956,48 @@ async def _do_dispatch(event, session: Dict[str, Any]) -> bool:
         _clear_session(sk)
         return True
 
+    # --- Smart dispatch: use kernel-custom.yml if exactly 1 target + 1 sub_level ---
+    dispatch_file = WORKFLOW_FILE
+    dispatch_inputs = inputs
+
+    selected_targets = [k for k in TARGET_KEYS if inputs.get(k)]
+    sub_levels_str = str(inputs.get("sub_levels", "")).strip()
+    sub_list = [s.strip() for s in sub_levels_str.split(",") if s.strip()] if sub_levels_str else []
+    use_custom = (
+        len(selected_targets) == 1
+        and len(sub_list) == 1
+        and not inputs.get("build_all")
+        and selected_targets[0] in TARGET_META
+    )
+    if use_custom:
+        t_key = selected_targets[0]
+        sl = sub_list[0]
+        android_ver, kernel_ver = TARGET_META[t_key]
+        meta = SUB_LEVEL_META.get(t_key, {}).get(sl, ("lts", ""))
+        os_patch = meta[0]
+        revision = meta[1]
+        dispatch_file = CUSTOM_WORKFLOW
+        dispatch_inputs = {
+            "android_version":  android_ver,
+            "kernel_version":   kernel_ver,
+            "sub_level":        sl,
+            "os_patch_level":   os_patch,
+            "revision":         revision,
+            "kernelsu_variant": inputs.get("kernelsu_variant", "SukiSU"),
+            "kernelsu_branch":  inputs.get("kernelsu_branch", "Stable(标准)"),
+            "version":          inputs.get("version", ""),
+            "use_zram":         inputs.get("use_zram", False),
+            "use_bbg":          inputs.get("use_bbg", False),
+            "use_kpm":          inputs.get("use_kpm", False),
+            "cancel_susfs":     inputs.get("cancel_susfs", True),
+            "supp_op":          False,
+        }
+
     res = await gh.dispatch_workflow(
         repo=GKI_REPO,
-        workflow_file=WORKFLOW_FILE,
+        workflow_file=dispatch_file,
         ref=GKI_DEFAULT_BRANCH,
-        inputs=inputs,
+        inputs=dispatch_inputs,
     )
     if res.get("status") not in (201, 202, 204):
         err = f"⚠️ Dispatch failed: HTTP {res.get('status')} | {res.get('json')}"

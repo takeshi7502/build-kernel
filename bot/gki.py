@@ -36,6 +36,53 @@ SUB_LEVELS = {
     "build_a15_6_6": ["50","56","57","58","66","77","82","87","89","92","98","102","118"],
 }
 
+# Metadata per sub_level → (os_patch_level, revision)
+SUB_LEVEL_META: Dict[str, Dict[str, tuple]] = {
+    "build_a12_5_10": {
+        "66":("2022-01","r11"),"81":("2022-03","r11"),"101":("2022-04","r28"),
+        "110":("2022-07","r1"),"117":("2022-09","r1"),"136":("2022-11","r15"),
+        "149":("2023-01","r1"),"160":("2023-03","r1"),"168":("2023-04","r9"),
+        "177":("2023-07","r3"),"185":("2023-09","r1"),"198":("2024-01","r17"),
+        "205":("2024-03","r1"),"209":("2024-05","r13"),"218":("2024-08","r14"),
+        "226":("2024-11","r8"),"233":("2025-02","r1"),"236":("2025-05","r1"),
+        "237":("2025-06","r1"),"240":("2025-09","r1"),"246":("2025-12","r1"),
+    },
+    "build_a13_5_15": {
+        "74":("2023-01",""),"78":("2023-03",""),"94":("2023-05",""),
+        "104":("2023-07",""),"119":("2023-09",""),"123":("2023-11",""),
+        "137":("2024-01",""),"144":("2024-03",""),"148":("2024-05",""),
+        "149":("2024-07",""),"151":("2024-08",""),"153":("2024-09",""),
+        "167":("2024-11",""),"170":("2025-01",""),"178":("2025-03",""),
+        "180":("2025-05",""),"185":("2025-07",""),"189":("2025-09",""),
+        "194":("2025-12",""),
+    },
+    "build_a14_6_1": {
+        "25":("2023-10",""),"43":("2023-11",""),"57":("2024-01",""),
+        "68":("2024-03",""),"75":("2024-05",""),"78":("2024-06",""),
+        "84":("2024-07",""),"90":("2024-08",""),"93":("2024-09",""),
+        "99":("2024-10",""),"112":("2024-11",""),"115":("2024-12",""),
+        "118":("2025-01",""),"124":("2025-02",""),"128":("2025-03",""),
+        "129":("2025-04",""),"134":("2025-05",""),"138":("2025-06",""),
+        "141":("2025-07",""),"145":("2025-09",""),"157":("2025-12",""),
+    },
+    "build_a15_6_6": {
+        "50":("2024-06",""),"56":("2024-09",""),"57":("2024-10",""),
+        "58":("2024-11",""),"66":("2025-01",""),"77":("2025-03",""),
+        "82":("2025-04",""),"87":("2025-05",""),"89":("2025-06",""),
+        "92":("2025-07",""),"98":("2025-09",""),"102":("2025-10",""),
+        "118":("2025-12",""),
+    },
+}
+
+TARGET_META: Dict[str, tuple] = {
+    "build_a12_5_10": ("android12", "5.10"),
+    "build_a13_5_15": ("android13", "5.15"),
+    "build_a14_6_1":  ("android14", "6.1"),
+    "build_a15_6_6":  ("android15", "6.6"),
+}
+
+CUSTOM_WORKFLOW = "kernel-custom.yml"
+
 
 def _kb_from_list(prefix: str, values: List[str], back_cb: str = ""):
     rows, row = [], []
@@ -752,11 +799,40 @@ class GKIFlow:
             _cleanup(context)
             return ConversationHandler.END
 
+        # Smart dispatch: use kernel-custom.yml for single target + single sub_level
+        target_keys = [k for k in ("build_a12_5_10","build_a13_5_15","build_a14_6_1","build_a15_6_6") if inputs.get(k)]
+        sub_levels_str = str(inputs.get("sub_levels", "")).strip()
+        sub_list = [s.strip() for s in sub_levels_str.split(",") if s.strip()] if sub_levels_str else []
+        dispatch_file = wf
+        dispatch_inputs = inputs
+        if (len(target_keys) == 1 and len(sub_list) == 1
+                and not inputs.get("build_all") and target_keys[0] in TARGET_META):
+            t_key = target_keys[0]
+            sl = sub_list[0]
+            android_ver, kernel_ver = TARGET_META[t_key]
+            meta = SUB_LEVEL_META.get(t_key, {}).get(sl, ("lts", ""))
+            dispatch_file = CUSTOM_WORKFLOW
+            dispatch_inputs = {
+                "android_version": android_ver,
+                "kernel_version":  kernel_ver,
+                "sub_level":       sl,
+                "os_patch_level":  meta[0],
+                "revision":        meta[1],
+                "kernelsu_variant": inputs.get("kernelsu_variant", "SukiSU"),
+                "kernelsu_branch":  inputs.get("kernelsu_branch", "Stable(标准)"),
+                "version":          inputs.get("version", ""),
+                "use_zram":         inputs.get("use_zram", False),
+                "use_bbg":          inputs.get("use_bbg", False),
+                "use_kpm":          inputs.get("use_kpm", False),
+                "cancel_susfs":     inputs.get("cancel_susfs", True),
+                "supp_op":          False,
+            }
+
         res = await self.gh.dispatch_workflow(
             repo=self.config.GKI_REPO,
-            workflow_file=wf,
+            workflow_file=dispatch_file,
             ref=self.config.GKI_DEFAULT_BRANCH,
-            inputs=inputs
+            inputs=dispatch_inputs
         )
         if res["status"] in (201, 202, 204):
             job = {
