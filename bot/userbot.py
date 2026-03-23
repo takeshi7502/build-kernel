@@ -1327,7 +1327,7 @@ async def keys_cmd(event):
     await _reply_temp(event, "\n".join(lines), 60, html=True)
 
 
-@client.on(events.NewMessage(pattern=r"^\.key\s+(\S+)\s+(\d+|delete)$", flags=re.IGNORECASE))
+@client.on(events.NewMessage(pattern=re.compile(r"^\.key\s+(\S+)\s+(\d+|delete)$", re.IGNORECASE)))
 async def key_cmd(event):
     if not _is_admin(event) or not _is_allowed_chat(event.chat_id):
         return
