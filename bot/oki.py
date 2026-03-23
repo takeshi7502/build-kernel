@@ -8,6 +8,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, constan
 from telegram.ext import (
     ContextTypes, ConversationHandler, CallbackQueryHandler, MessageHandler, CommandHandler, filters
 )
+from permissions import is_admin
 
 # States
 (
@@ -87,22 +88,77 @@ def _ensure_owner(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     return False
 
 
+async def _del_msg_job(context: ContextTypes.DEFAULT_TYPE):
+    try:
+        await context.bot.delete_message(chat_id=context.job.chat_id, message_id=context.job.data)
+    except:
+        pass
+
+
 class OKIFlow:
     def __init__(self, gh, storage, config):
         self.gh = gh
         self.storage = storage
         self.config = config
 
+    async def _send_msg(self, update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, **kwargs):
+        kwargs.pop('quote', None)
+        chat_id = update.effective_chat.id
+        thread_id = update.effective_message.message_thread_id if (update.effective_message and update.effective_message.is_topic_message) else None
+        return await context.bot.send_message(chat_id=chat_id, message_thread_id=thread_id, text=text, **kwargs)
+
+    async def _safe_delete_user_msg(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if update.message:
+            try:
+                await update.message.delete()
+            except:
+                pass
+
+    async def _check_user_job_limit(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+        user = update.effective_user
+        if await is_admin(user.id, self.storage):
+            return True
+
+        if context.args:
+            key = context.args[0]
+            uses = await self.storage.get_uses(key)
+            if uses > 0 and await self.storage.is_vip_key(key):
+                return True
+
+        active = await self.storage.list_user_active_jobs(user.id)
+        if active:
+            job_created_at = datetime.fromisoformat(active[0]["created_at"])
+            elapsed = (datetime.now(timezone.utc) - job_created_at).total_seconds()
+            if elapsed < 3600:
+                remaining = int((3600 - elapsed) // 60) + 1
+                m = await self._send_msg(update, context, f"⚠️ Chỉ được 1 job/1h. Vui lòng đợi {remaining} phút.")
+                context.job_queue.run_once(_del_msg_job, when=45, chat_id=m.chat_id, data=m.message_id)
+                return False
+        return True
+
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        await self._safe_delete_user_msg(update, context)
+
+        if not await self._check_user_job_limit(update, context):
+            return ConversationHandler.END
+
         # Enforce key for non-admin
         text = update.message.text.strip() if update.message else ""
         parts = text.split(maxsplit=1)
         key = parts[1].strip() if len(parts) == 2 else None
 
-        if int(update.effective_user.id) != int(self.config.OWNER_ID):
+        if not await is_admin(update.effective_user.id, self.storage):
             if not key:
-                await update.message.reply_text("Thiếu key. Dùng: /oki {key}")
+                m = await self._send_msg(update, context, "Thiếu key. Dùng: /oki {key}")
+                context.job_queue.run_once(_del_msg_job, when=30, chat_id=m.chat_id, data=m.message_id)
                 return ConversationHandler.END
+            
+            uses = await self.storage.get_uses(key)
+            if uses <= 0:
+                m = await self._send_msg(update, context, f"❌ Key `{key}` không hợp lệ hoặc đã hết lượt.", parse_mode="Markdown")
+                context.job_queue.run_once(_del_msg_job, when=30, chat_id=m.chat_id, data=m.message_id)
+                return ConversationHandler.END
+
             context.user_data["build_key"] = key
 
         context.chat_data["oki_owner"] = update.effective_user.id
@@ -117,7 +173,7 @@ class OKIFlow:
             "SCHED": False,
             "ZRAM": False
         }}
-        await update.message.reply_text("Chọn máy:", reply_markup=_file_keyboard(0))
+        await self._send_msg(update, context, "Chọn máy:", reply_markup=_file_keyboard(0))
         return OKI_CHOOSE_FILE
 
     async def cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -172,25 +228,28 @@ class OKIFlow:
         return OKI_KSU_META
 
     async def set_ksu_meta(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        await self._safe_delete_user_msg(update, context)
         txt = (update.message.text or "").strip()
         context.user_data["oki"]["inputs"]["KSU_META"] = "" if txt.lower() == "none" else txt
-        await update.message.reply_text("Nhập `BUILD_TIME` (reply). Nhập `F` để dùng thời gian hiện tại. Gõ 'none' để bỏ qua.", parse_mode="Markdown")
+        await self._send_msg(update, context, "Nhập `BUILD_TIME` (reply). Nhập `F` để dùng thời gian hiện tại. Gõ 'none' để bỏ qua.", parse_mode="Markdown")
         return OKI_BUILD_TIME
 
     async def set_build_time(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        await self._safe_delete_user_msg(update, context)
         txt = (update.message.text or "").strip()
         if txt.upper() == "F":
             import time
             t = time.gmtime()
             txt = time.strftime("%a %b %d %H:%M:%S UTC %Y", t)
         context.user_data["oki"]["inputs"]["BUILD_TIME"] = "" if txt.lower() == "none" else txt
-        await update.message.reply_text("Nhập `SUFFIX` (reply). Tên sẽ dạng 5.10.209-android12-yourname.", parse_mode="Markdown")
+        await self._send_msg(update, context, "Nhập `SUFFIX` (reply). Tên sẽ dạng 5.10.209-android12-yourname.", parse_mode="Markdown")
         return OKI_SUFFIX
 
     async def set_suffix(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        await self._safe_delete_user_msg(update, context)
         txt = (update.message.text or "").strip()
         context.user_data["oki"]["inputs"]["SUFFIX"] = "" if txt.lower() == "none" else txt
-        await update.message.reply_text("Bật FAST_BUILD?, nên bật", reply_markup=_yes_no("okifast"))
+        await self._send_msg(update, context, "Bật FAST_BUILD?, nên bật", reply_markup=_yes_no("okifast"))
         return OKI_FAST_BUILD
 
     async def set_fast(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -243,7 +302,7 @@ class OKIFlow:
 
         # Admin bypass key; else check key exists and consume AFTER success
         key = context.user_data.get("build_key")
-        if int(user.id) != int(self.config.OWNER_ID):
+        if not await is_admin(user.id, self.storage):
             uses = await self.storage.get_uses(key or "")
             if not key or uses <= 0:
                 await q.edit_message_text("Key không hợp lệ hoặc hết lượt. Dừng.")
@@ -274,7 +333,7 @@ class OKIFlow:
                 "notified": False
             }
             job_id = await self.storage.add_job(job)
-            if int(user.id) != int(self.config.OWNER_ID):
+            if not await is_admin(user.id, self.storage):
                 await self.storage.consume(key)
             view_url = f"https://github.com/{self.config.GITHUB_OWNER}/{self.config.OKI_REPO}/actions/workflows/{self.config.OKI_WORKFLOW}"
             await q.edit_message_text(f"✅ Đã gửi build OKI!\nMình sẽ ping khi xong.\nXem: {view_url}")
