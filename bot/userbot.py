@@ -196,11 +196,17 @@ class JSONStorage:
             data = self._load()
             return int(data.get("keys", {}).get(code, {}).get("uses", 0))
 
-    async def get_all_keys(self) -> Dict[str, int]:
+    async def get_all_keys(self) -> Dict[str, Any]:
         async with self._lock:
             data = self._load()
             keys = data.get("keys", {})
-            return {code: int(info.get("uses", 0)) for code, info in keys.items()}
+            result = {}
+            for code, info in keys.items():
+                if isinstance(info, dict):
+                    result[code] = {"uses": int(info.get("uses", 0)), "vip": bool(info.get("vip", False))}
+                else:
+                    result[code] = {"uses": int(info), "vip": False}
+            return result
 
     async def consume(self, code: str) -> bool:
         async with self._lock:
@@ -214,11 +220,19 @@ class JSONStorage:
             self._save(data)
             return True
 
-    async def set_key(self, code: str, uses: int):
+    async def set_key(self, code: str, uses: int, vip: bool = False):
         async with self._lock:
             data = self._load()
-            data.setdefault("keys", {})[code] = {"uses": uses}
+            data.setdefault("keys", {})[code] = {"uses": uses, "vip": vip}
             self._save(data)
+
+    async def is_vip_key(self, code: str) -> bool:
+        async with self._lock:
+            data = self._load()
+            info = data.get("keys", {}).get(code, {})
+            if isinstance(info, dict):
+                return bool(info.get("vip", False))
+            return False
 
     async def add_job(self, job: Dict[str, Any]) -> Any:
         async with self._lock:
