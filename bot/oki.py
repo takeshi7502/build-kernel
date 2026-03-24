@@ -96,6 +96,13 @@ async def _del_msg_job(context: ContextTypes.DEFAULT_TYPE):
         pass
 
 
+def _cleanup(context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.pop("oki", None)
+    context.user_data.pop("build_key", None)
+    context.user_data.pop("oki_bot_msg_id", None)
+    context.chat_data.pop("oki_owner", None)
+
+
 class OKIFlow:
     def __init__(self, gh, storage, config):
         self.gh = gh
@@ -107,6 +114,32 @@ class OKIFlow:
         chat_id = update.effective_chat.id
         thread_id = update.effective_message.message_thread_id if (update.effective_message and update.effective_message.is_topic_message) else None
         return await context.bot.send_message(chat_id=chat_id, message_thread_id=thread_id, text=text, **kwargs)
+
+    async def _update_bot_msg(self, update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, **kwargs):
+        kwargs.pop("quote", None)
+        chat_id = update.effective_chat.id
+        thread_id = update.effective_message.message_thread_id if (update.effective_message and update.effective_message.is_topic_message) else None
+        bot_msg_id = context.user_data.get("oki_bot_msg_id")
+
+        if bot_msg_id:
+            try:
+                await context.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=bot_msg_id,
+                    text=text,
+                    **kwargs
+                )
+                return
+            except Exception:
+                pass
+
+        msg = await context.bot.send_message(
+            chat_id=chat_id,
+            message_thread_id=thread_id,
+            text=text,
+            **kwargs
+        )
+        context.user_data["oki_bot_msg_id"] = msg.message_id
 
     async def _safe_delete_user_msg(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if update.message:
@@ -174,7 +207,7 @@ class OKIFlow:
             "SCHED": False,
             "ZRAM": False
         }}
-        await self._send_msg(update, context, "Chọn máy:", reply_markup=_file_keyboard(0))
+        await self._update_bot_msg(update, context, "Chọn máy:", reply_markup=_file_keyboard(0))
         return OKI_CHOOSE_FILE
 
     async def cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -185,10 +218,8 @@ class OKIFlow:
             await q.answer()
             await q.edit_message_text("Đã huỷ phiên OKI.")
         else:
-            await self._send_msg(update, context, "Đã huỷ phiên OKI.")
-        context.user_data.pop("oki", None)
-        context.user_data.pop("build_key", None)
-        context.chat_data.pop("oki_owner", None)
+            await self._update_bot_msg(update, context, "Đã huỷ phiên OKI.")
+        _cleanup(context)
         return ConversationHandler.END
 
     async def page(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -238,7 +269,12 @@ class OKIFlow:
         if txt.lower() in ("/cancel", "huy", "hủy"):
             return await self.cancel(update, context)
         context.user_data["oki"]["inputs"]["KSU_META"] = "" if txt.lower() == "none" else txt
-        await self._send_msg(update, context, "Nhập `BUILD_TIME` (reply). Nhập `F` để dùng thời gian hiện tại. Gõ 'none' để bỏ qua.", parse_mode="Markdown")
+        await self._update_bot_msg(
+            update,
+            context,
+            "Nhập `BUILD_TIME` (reply). Nhập `F` để dùng thời gian hiện tại. Gõ 'none' để bỏ qua.",
+            parse_mode="Markdown"
+        )
         return OKI_BUILD_TIME
 
     async def set_build_time(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -252,7 +288,12 @@ class OKIFlow:
             t = time.gmtime()
             txt = time.strftime("%a %b %d %H:%M:%S UTC %Y", t)
         context.user_data["oki"]["inputs"]["BUILD_TIME"] = "" if txt.lower() == "none" else txt
-        await self._send_msg(update, context, "Nhập `SUFFIX` (reply). Tên sẽ dạng 5.10.209-android12-yourname.", parse_mode="Markdown")
+        await self._update_bot_msg(
+            update,
+            context,
+            "Nhập `SUFFIX` (reply). Tên sẽ dạng 5.10.209-android12-yourname.",
+            parse_mode="Markdown"
+        )
         return OKI_SUFFIX
 
     async def set_suffix(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -262,7 +303,7 @@ class OKIFlow:
         if txt.lower() in ("/cancel", "huy", "hủy"):
             return await self.cancel(update, context)
         context.user_data["oki"]["inputs"]["SUFFIX"] = "" if txt.lower() == "none" else txt
-        await self._send_msg(update, context, "Bật FAST_BUILD?, nên bật", reply_markup=_yes_no("okifast"))
+        await self._update_bot_msg(update, context, "Bật FAST_BUILD?, nên bật", reply_markup=_yes_no("okifast"))
         return OKI_FAST_BUILD
 
     async def set_fast(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -319,9 +360,7 @@ class OKIFlow:
             uses = await self.storage.get_uses(key or "")
             if not key or uses <= 0:
                 await q.edit_message_text("Key không hợp lệ hoặc hết lượt. Dừng.")
-                context.user_data.pop("oki", None)
-                context.user_data.pop("build_key", None)
-                context.chat_data.pop("oki_owner", None)
+                _cleanup(context)
                 return ConversationHandler.END
 
         res = await self.gh.dispatch_workflow(
@@ -354,9 +393,7 @@ class OKIFlow:
         else:
             await q.edit_message_text(f"⚠️ Dispatch lỗi: {res['status']} {res.get('json')}")
 
-        context.user_data.pop("oki", None)
-        context.user_data.pop("build_key", None)
-        context.chat_data.pop("oki_owner", None)
+        _cleanup(context)
         return ConversationHandler.END
 
 
