@@ -633,7 +633,8 @@ async def poller(app):
                                 await storage.add_successful_build(run_id, user_id, job.get("ref", "unknown"), user_name)
                                 # Tự động gửi tin nhắn lưu cấu hình
                                 try:
-                                    await send_saved_config(app, run_id, job, user_id)
+                                    if job.get("type", "gki") == "gki":
+                                        await send_saved_config(app, run_id, job, user_id)
                                 except Exception as e:
                                     logger.error("Auto PM save config failed: %s", e)
                         except Exception as e:
@@ -1309,9 +1310,17 @@ async def cmd_cancel_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await _send_msg(update, context, f"⏳ Đang gửi lệnh hủy Run #{run_id} lên GitHub...")
     res = await gh.cancel_run(config.GKI_REPO, run_id)
     if res["status"] in (202, 204):
-        await gh.delete_run(config.GKI_REPO, run_id)
-        await storage.delete_job_by_run_id(run_id)
-        await msg.edit_text(f"✅ Đã hủy và dọn dẹp thành công Run #{run_id}.")
+        for _ in range(10):
+            await asyncio.sleep(5)
+            rn = await gh.get_run(config.GKI_REPO, run_id)
+            if rn["status"] == 200 and rn["json"].get("status") == "completed":
+                break
+        del_res = await gh.delete_run(config.GKI_REPO, run_id)
+        if del_res["status"] == 204:
+            await storage.delete_job_by_run_id(run_id)
+            await msg.edit_text(f"✅ Đã hủy và dọn dẹp thành công Run #{run_id}.")
+        else:
+            await msg.edit_text(f"⚠️ Hủy thành công nhưng xóa thất bại (HTTP {del_res['status']}).")
     else:
         await msg.edit_text(f"❌ Lỗi hủy: {res['status']} {res.get('json', '')}")
         

@@ -76,13 +76,14 @@ def _yes_no(prefix: str):
     ])
 
 
-def _ensure_owner(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+async def _ensure_owner(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     uid = update.effective_user.id
     owner = context.chat_data.get("oki_owner")
     if owner is None or owner == uid:
         return True
     try:
-        update.callback_query.answer("Phiên này không thuộc về bạn.", show_alert=True)
+        if update.callback_query:
+            await update.callback_query.answer("Phiên này không thuộc về bạn.", show_alert=True)
     except Exception:
         pass
     return False
@@ -177,18 +178,21 @@ class OKIFlow:
         return OKI_CHOOSE_FILE
 
     async def cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if update.callback_query and not _ensure_owner(update, context):
+        if update.callback_query and not await _ensure_owner(update, context):
             return ConversationHandler.END
         q = update.callback_query
-        await q.answer()
-        await q.edit_message_text("Đã huỷ phiên.")
+        if q:
+            await q.answer()
+            await q.edit_message_text("Đã huỷ phiên OKI.")
+        else:
+            await self._send_msg(update, context, "Đã huỷ phiên OKI.")
         context.user_data.pop("oki", None)
         context.user_data.pop("build_key", None)
         context.chat_data.pop("oki_owner", None)
         return ConversationHandler.END
 
     async def page(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not _ensure_owner(update, context): return OKI_CHOOSE_FILE
+        if not await _ensure_owner(update, context): return OKI_CHOOSE_FILE
         q = update.callback_query; await q.answer()
         _, page = q.data.split(":", 1)
         page = int(page)
@@ -196,7 +200,7 @@ class OKIFlow:
         return OKI_CHOOSE_FILE
 
     async def set_file(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not _ensure_owner(update, context): return OKI_CHOOSE_FILE
+        if not await _ensure_owner(update, context): return OKI_CHOOSE_FILE
         q = update.callback_query; await q.answer()
         _, fileval = q.data.split(":", 1)
         context.user_data["oki"]["inputs"]["FILE"] = fileval
@@ -208,7 +212,7 @@ class OKIFlow:
         return OKI_HOOK
 
     async def set_hook(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not _ensure_owner(update, context): return OKI_HOOK
+        if not await _ensure_owner(update, context): return OKI_HOOK
         q = update.callback_query; await q.answer()
         _, val = q.data.split(":", 1)
         context.user_data["oki"]["inputs"]["HOOK"] = val
@@ -220,7 +224,7 @@ class OKIFlow:
         return OKI_SUSFS
 
     async def set_susfs(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not _ensure_owner(update, context): return OKI_SUSFS
+        if not await _ensure_owner(update, context): return OKI_SUSFS
         q = update.callback_query; await q.answer()
         _, val = q.data.split(":", 1)
         context.user_data["oki"]["inputs"]["SUSFS_CI"] = val
@@ -229,14 +233,20 @@ class OKIFlow:
 
     async def set_ksu_meta(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await self._safe_delete_user_msg(update, context)
+        if not await _ensure_owner(update, context): return OKI_KSU_META
         txt = (update.message.text or "").strip()
+        if txt.lower() in ("/cancel", "huy", "hủy"):
+            return await self.cancel(update, context)
         context.user_data["oki"]["inputs"]["KSU_META"] = "" if txt.lower() == "none" else txt
         await self._send_msg(update, context, "Nhập `BUILD_TIME` (reply). Nhập `F` để dùng thời gian hiện tại. Gõ 'none' để bỏ qua.", parse_mode="Markdown")
         return OKI_BUILD_TIME
 
     async def set_build_time(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await self._safe_delete_user_msg(update, context)
+        if not await _ensure_owner(update, context): return OKI_BUILD_TIME
         txt = (update.message.text or "").strip()
+        if txt.lower() in ("/cancel", "huy", "hủy"):
+            return await self.cancel(update, context)
         if txt.upper() == "F":
             import time
             t = time.gmtime()
@@ -247,13 +257,16 @@ class OKIFlow:
 
     async def set_suffix(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await self._safe_delete_user_msg(update, context)
+        if not await _ensure_owner(update, context): return OKI_SUFFIX
         txt = (update.message.text or "").strip()
+        if txt.lower() in ("/cancel", "huy", "hủy"):
+            return await self.cancel(update, context)
         context.user_data["oki"]["inputs"]["SUFFIX"] = "" if txt.lower() == "none" else txt
         await self._send_msg(update, context, "Bật FAST_BUILD?, nên bật", reply_markup=_yes_no("okifast"))
         return OKI_FAST_BUILD
 
     async def set_fast(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not _ensure_owner(update, context): return OKI_FAST_BUILD
+        if not await _ensure_owner(update, context): return OKI_FAST_BUILD
         q = update.callback_query; await q.answer()
         _, val = q.data.split(":", 1)
         context.user_data["oki"]["inputs"]["FAST_BUILD"] = (val == "true")
@@ -261,7 +274,7 @@ class OKIFlow:
         return OKI_LSM
 
     async def set_lsm(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not _ensure_owner(update, context): return OKI_LSM
+        if not await _ensure_owner(update, context): return OKI_LSM
         q = update.callback_query; await q.answer()
         _, val = q.data.split(":", 1)
         context.user_data["oki"]["inputs"]["LSM"] = (val == "true")
@@ -269,7 +282,7 @@ class OKIFlow:
         return OKI_SCHED
 
     async def set_sched(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not _ensure_owner(update, context): return OKI_SCHED
+        if not await _ensure_owner(update, context): return OKI_SCHED
         q = update.callback_query; await q.answer()
         _, val = q.data.split(":", 1)
         context.user_data["oki"]["inputs"]["SCHED"] = (val == "true")
@@ -277,7 +290,7 @@ class OKIFlow:
         return OKI_ZRAM
 
     async def set_zram(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not _ensure_owner(update, context): return OKI_ZRAM
+        if not await _ensure_owner(update, context): return OKI_ZRAM
         q = update.callback_query; await q.answer()
         _, val = q.data.split(":", 1)
         context.user_data["oki"]["inputs"]["ZRAM"] = (val == "true")
@@ -295,7 +308,7 @@ class OKIFlow:
         return OKI_CONFIRM
 
     async def do_dispatch(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not _ensure_owner(update, context): return OKI_CONFIRM
+        if not await _ensure_owner(update, context): return OKI_CONFIRM
         q = update.callback_query; await q.answer()
         inputs = context.user_data["oki"]["inputs"].copy()
         user = update.effective_user
@@ -322,6 +335,7 @@ class OKIFlow:
                 "type": "oki",
                 "repo": self.config.OKI_REPO,
                 "workflow_file": self.config.OKI_WORKFLOW,
+                "ref": self.config.OKI_DEFAULT_BRANCH,
                 "branch": self.config.OKI_DEFAULT_BRANCH,
                 "inputs": inputs,
                 "user_id": user.id,
@@ -367,8 +381,9 @@ def build_oki_conversation(gh, storage, config):
             OKI_ZRAM: [CallbackQueryHandler(flow.set_zram, pattern=r"^okizram:(true|false)$"), CallbackQueryHandler(flow.cancel, pattern=r"^oki:cancel$")],
             OKI_CONFIRM: [CallbackQueryHandler(flow.do_dispatch, pattern=r"^okiconfirm$"), CallbackQueryHandler(flow.cancel, pattern=r"^oki:cancel$")],
         },
-        fallbacks=[CallbackQueryHandler(flow.cancel, pattern=r"^oki:cancel$")],
+        fallbacks=[CallbackQueryHandler(flow.cancel, pattern=r"^oki:cancel$"), CommandHandler("cancel", flow.cancel)],
         allow_reentry=True,
         name="oki_conversation",
         persistent=False,
+        conversation_timeout=300
     )

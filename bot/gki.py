@@ -401,7 +401,7 @@ class GKIFlow:
         if target == "target":
             await q.edit_message_text(
                 header + "Chọn phiên bản Android để build:",
-                reply_markup=_build_target_keyboard(back_cb="gkiback:susfs"),
+                reply_markup=_build_target_keyboard(back_cb="gkiback:toggles"),
                 parse_mode="HTML"
             )
             return GKI_BUILD_TARGET
