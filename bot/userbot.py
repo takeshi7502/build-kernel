@@ -1111,6 +1111,17 @@ async def _do_dispatch(event, session: Dict[str, Any]) -> bool:
             await _reply(event, success_text, html=True)
     else:
         await _reply(event, success_text, html=True)
+        
+    if str(sender_id) != str(OWNER_ID):
+        try:
+            admin_msg = (
+                f"🚀 <b>Có build mới từ {mention}!</b>\n"
+                f"<blockquote><b>Xem : <a href='{view_url}'>Github</a> | <a href='https://kernel.takeshi.dev/'>Dashboard</a></b></blockquote>"
+            )
+            await client.send_message(int(OWNER_ID), admin_msg, parse_mode="html", link_preview=False)
+        except Exception as e:
+            logger.error("Failed to notify admin: %s", e)
+            
     _clear_session(sk)
     return True
 
