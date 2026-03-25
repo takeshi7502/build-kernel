@@ -1692,6 +1692,7 @@ async def main():
         logger.info("No authorized chats. Use .auth in a group to authorize.")
 
     # Start background tasks
+    asyncio.create_task(storage._sync_with_cloud())
     asyncio.create_task(poller_loop())
     if USERBOT_STANDALONE:
         asyncio.create_task(cleanup_loop())

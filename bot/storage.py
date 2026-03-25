@@ -28,9 +28,6 @@ class HybridStorage:
                 client = AsyncIOMotorClient(self.mongo_uri, serverSelectionTimeoutMS=5000)
                 self.db = client["kernel_bot_db"]
                 self.collection = self.db["storage_data"]
-                # Initiate sync in background
-                loop = asyncio.get_event_loop()
-                loop.create_task(self._sync_with_cloud())
             except Exception as e:
                 logger.error("MongoDB connection failed: %s", e)
 

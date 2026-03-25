@@ -1167,6 +1167,7 @@ def main():
     app.add_handler(build_oki_conversation(gh, storage, config))
 
     async def _post_init(app_):
+        app_.create_task(app_.bot_data["storage"]._sync_with_cloud())
         app_.create_task(poller(app_))
         app_.create_task(start_web_server(app_))
     app.post_init = _post_init
