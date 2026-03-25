@@ -1395,11 +1395,16 @@ async def list_cmd(event):
         gh_url = run.get("html_url", f"https://github.com/{GITHUB_OWNER}/{GKI_REPO}/actions/runs/{run_id}")
         nightly_url = f"https://nightly.link/{GITHUB_OWNER}/{GKI_REPO}/actions/runs/{run_id}"
         job = run_to_job.get(run_id, {})
+        user_id = job.get("user_id", 0)
         user_name = job.get("user_name", run.get("actor", {}).get("login", "Unknown"))
-        lines.append(f"<b>{idx}. Run #{run_id}</b> by {user_name}")
-        lines.append(f"   🕒 {time_str}")
-        lines.append(f"   🔗 <a href='{gh_url}'>GitHub</a> | 📦 <a href='{nightly_url}'>Tải file</a>")
-        lines.append(f"   🗑 Xoá: <code>.delete {run_id}</code>")
+        if user_id:
+            mention = f"<a href='tg://user?id={user_id}'>{user_name}</a>"
+        else:
+            mention = user_name
+        lines.append(f"<b>{idx}. Run #{run_id}</b> by {mention}")
+        lines.append(f"Time: {time_str}")
+        lines.append(f"Xoá: <code>.delete {run_id}</code>")
+        lines.append(f"<blockquote><b>Xem : <a href='{gh_url}'>Github</a> | <a href='{nightly_url}'>File</a> | <a href='https://kernel.takeshi.dev/'>Dashboard</a></b></blockquote>")
         lines.append("")
     msg = await _reply(event, "\n".join(lines), html=True)
     if msg:

@@ -946,26 +946,22 @@ async def show_list_page(update: Update, context: ContextTypes.DEFAULT_TYPE, pag
 
         job = run_to_job.get(run_id)
         if job:
-            user_id = job.get("user_id")
+            user_id = job.get("user_id", 0)
             user_name = job.get("user_name", "")
             if not user_name:
                 user_name = str(user_id)
             if user_id == 0:
                 mention = "Hệ thống cũ"
             else:
-                mention = f'{user_name}'
-            inputs = job.get("inputs", {})
-            build_lines = _format_build_lines(inputs)
+                mention = f'<a href="tg://user?id={user_id}">{user_name}</a>'
         else:
             actor = r.get("actor", {}).get("login", "Unknown")
             mention = f"GitHub / {actor}"
-            build_lines = []
 
-        text += f"<b>{start_idx + i + 1}. Run #{run_id} by {mention}</b>\n"
-        for bl in build_lines:
-            text += f"{bl}\n"
-        text += f"🕒 Time: {time_str} | 🔗 <a href='{html_url}'>GitHub</a> | {artifact_str}\n"
-        text += f"📦 Xoá → /delete_{run_id}\n\n"
+        text += f"<b>{start_idx + i + 1}. Run #{run_id}</b> by {mention}\n"
+        text += f"Time: {time_str}\n"
+        text += f"Xoá: /delete_{run_id}\n"
+        text += f"<blockquote><b>Xem : <a href='{html_url}'>Github</a> | <a href='{nightly_url}'>File</a> | <a href='https://kernel.takeshi.dev/'>Dashboard</a></b></blockquote>\n\n"
 
     kb = []
     if total_pages > 1:
