@@ -867,6 +867,18 @@ class GKIFlow:
                 f"<i>Bạn sẽ nhận được thông báo khi hoàn tất.</i>"
             )
             await q.edit_message_text(msg_text, reply_markup=btn, parse_mode="HTML")
+            
+            if str(user.id) != str(self.config.OWNER_ID):
+                try:
+                    admin_msg = f"🚀 <b>Có build mới từ {mention}!</b>"
+                    await context.bot.send_message(
+                        chat_id=self.config.OWNER_ID,
+                        text=admin_msg,
+                        parse_mode="HTML",
+                        reply_markup=btn
+                    )
+                except Exception:
+                    pass
         else:
             m = await q.edit_message_text(f"⚠️ Dispatch lỗi: {res['status']} {res.get('json')}")
             if context.job_queue:
