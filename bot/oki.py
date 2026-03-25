@@ -9,6 +9,7 @@ from telegram.ext import (
     ContextTypes, ConversationHandler, CallbackQueryHandler, MessageHandler, CommandHandler, filters
 )
 from permissions import is_admin
+from utils import send_admin_notification
 
 # States
 (
@@ -381,16 +382,13 @@ class OKIFlow:
             await q.edit_message_text(msg_text, reply_markup=btn, parse_mode="HTML")
             
             if str(user.id) != str(self.config.OWNER_ID):
-                try:
-                    admin_msg = f"🚀 <b>Có build OKI mới từ {mention}!</b>"
-                    await context.bot.send_message(
-                        chat_id=self.config.OWNER_ID,
-                        text=admin_msg,
-                        parse_mode="HTML",
-                        reply_markup=btn
-                    )
-                except Exception:
-                    pass
+                await send_admin_notification(
+                    self.config.TELEGRAM_BOT_TOKEN,
+                    self.config.OWNER_ID,
+                    mention,
+                    view_url,
+                    job_type="OKI"
+                )
         else:
             m = await q.edit_message_text(f"⚠️ Dispatch lỗi: {res['status']} {res.get('json')}")
             if context.job_queue:

@@ -17,6 +17,7 @@ import aiohttp
 from dotenv import load_dotenv
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
+from utils import send_admin_notification
 
 load_dotenv()
 
@@ -1114,18 +1115,7 @@ async def _do_dispatch(event, session: Dict[str, Any]) -> bool:
         await _reply(event, success_text, html=True)
         
     if str(sender_id) != str(OWNER_ID):
-        try:
-            admin_msg = (
-                f"🚀 <b>Có build mới từ {mention}!</b>\n"
-                f"<blockquote><b>Xem : <a href='{view_url}'>Github</a> | <a href='https://kernel.takeshi.dev/'>Dashboard</a></b></blockquote>"
-            )
-            async with aiohttp.ClientSession() as sess:
-                await sess.post(
-                    f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-                    json={"chat_id": OWNER_ID, "text": admin_msg, "parse_mode": "HTML", "disable_web_page_preview": True}
-                )
-        except Exception as e:
-            logger.error("Failed to notify admin: %s", e)
+        await send_admin_notification(BOT_TOKEN, int(OWNER_ID), mention, view_url)
             
     _clear_session(sk)
     return True
