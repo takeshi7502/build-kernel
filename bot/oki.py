@@ -9,7 +9,7 @@ from telegram.ext import (
     ContextTypes, ConversationHandler, CallbackQueryHandler, MessageHandler, CommandHandler, filters
 )
 from permissions import is_admin
-from utils import send_admin_notification
+from config import send_admin_notification
 
 # States
 (

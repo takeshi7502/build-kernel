@@ -17,7 +17,7 @@ import aiohttp
 from dotenv import load_dotenv
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
-from utils import send_admin_notification
+from config import send_admin_notification
 
 load_dotenv()
 
