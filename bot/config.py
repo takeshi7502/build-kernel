@@ -1,3 +1,16 @@
+import os
+import sys
+import aiohttp
+import logging
+from dotenv import load_dotenv
+
+# Load .env từ thư mục gốc (lùi lại 1 cấp so với file config.py)
+env_path = os.path.join(os.path.dirname(__file__), '..', '.env')
+load_dotenv(dotenv_path=env_path)
+
+logger = logging.getLogger("notify")
+
+def _required(key: str) -> str:
     val = os.getenv(key, "").strip()
     if not val:
         print(f"[CONFIG] Thiếu biến môi trường bắt buộc: {key}")
