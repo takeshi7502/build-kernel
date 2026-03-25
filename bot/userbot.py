@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 from config import send_admin_notification
+from storage import HybridStorage
 
 load_dotenv()
 
@@ -170,219 +171,7 @@ DEFAULT_INPUTS: Dict[str, Any] = {
 }
 
 
-# ─── JSONStorage (shared with bot) ────────────────────────────────────
-class JSONStorage:
-    def __init__(self, path: str):
-        self.path = path
-        self._lock = asyncio.Lock()
-        if not os.path.exists(self.path):
-            self._save({"keys": {}, "jobs": [], "messages": {}})
-
-    def _load(self) -> Dict[str, Any]:
-        if not os.path.exists(self.path):
-            return {"keys": {}, "jobs": [], "messages": {}}
-        try:
-            with open(self.path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {"keys": {}, "jobs": [], "messages": {}}
-
-    def _save(self, data: Dict[str, Any]):
-        try:
-            with open(self.path, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            logger.error("Save JSON failed: %s", e)
-
-    async def get_uses(self, code: str) -> int:
-        async with self._lock:
-            data = self._load()
-            return int(data.get("keys", {}).get(code, {}).get("uses", 0))
-
-    async def get_all_keys(self) -> Dict[str, Any]:
-        async with self._lock:
-            data = self._load()
-            keys = data.get("keys", {})
-            result = {}
-            for code, info in keys.items():
-                if isinstance(info, dict):
-                    result[code] = {"uses": int(info.get("uses", 0)), "vip": bool(info.get("vip", False))}
-                else:
-                    result[code] = {"uses": int(info), "vip": False}
-            return result
-
-    async def consume(self, code: str) -> bool:
-        async with self._lock:
-            data = self._load()
-            if code not in data.get("keys", {}):
-                return False
-            uses = int(data["keys"][code].get("uses", 0))
-            if uses <= 0:
-                return False
-            data["keys"][code]["uses"] = uses - 1
-            self._save(data)
-            return True
-
-    async def set_key(self, code: str, uses: int, vip: bool = False):
-        async with self._lock:
-            data = self._load()
-            data.setdefault("keys", {})[code] = {"uses": uses, "vip": vip}
-            self._save(data)
-
-    async def is_vip_key(self, code: str) -> bool:
-        async with self._lock:
-            data = self._load()
-            info = data.get("keys", {}).get(code, {})
-            if isinstance(info, dict):
-                return bool(info.get("vip", False))
-            return False
-
-    async def delete_key(self, code: str) -> bool:
-        async with self._lock:
-            data = self._load()
-            if code in data.get("keys", {}):
-                del data["keys"][code]
-                self._save(data)
-                return True
-            return False
-
-    async def add_job(self, job: Dict[str, Any]) -> Any:
-        async with self._lock:
-            data = self._load()
-            jobs = data.setdefault("jobs", [])
-            job_id = max((j.get("_id", 0) for j in jobs), default=0) + 1
-            job["_id"] = job_id
-            job["created_at"] = datetime.now(timezone.utc).isoformat()
-            jobs.append(job)
-            self._save(data)
-            return job_id
-
-    async def update_job(self, job_id, fields: Dict[str, Any]):
-        async with self._lock:
-            data = self._load()
-            for j in data.get("jobs", []):
-                if j.get("_id") == job_id:
-                    j.update(fields)
-                    break
-            self._save(data)
-
-    async def get_jobs(self) -> List[Dict[str, Any]]:
-        async with self._lock:
-            data = self._load()
-            return data.get("jobs", [])
-
-    async def list_unnotified_jobs(self) -> List[Dict[str, Any]]:
-        async with self._lock:
-            data = self._load()
-            return [j for j in data.get("jobs", []) if not j.get("notified")]
-
-    async def get_job_by_run_id(self, run_id: int) -> Optional[Dict[str, Any]]:
-        async with self._lock:
-            data = self._load()
-            for j in data.get("jobs", []):
-                if j.get("run_id") == run_id:
-                    return j
-            return None
-
-    async def delete_job_by_run_id(self, run_id: int) -> bool:
-        async with self._lock:
-            data = self._load()
-            jobs = data.get("jobs", [])
-            new_jobs = [j for j in jobs if j.get("run_id") != run_id]
-            if len(new_jobs) != len(jobs):
-                data["jobs"] = new_jobs
-                self._save(data)
-                return True
-            return False
-
-    async def add_successful_build(self, run_id: int, user_id: int, branch: str, user_name: str = ""):
-        async with self._lock:
-            data = self._load()
-            builds = data.setdefault("successful_builds", [])
-            build = {"run_id": run_id, "user_id": user_id, "user_name": user_name, "branch": branch, "timestamp": datetime.now(timezone.utc).isoformat()}
-            builds.insert(0, build)
-            data["successful_builds"] = builds[:50]
-            self._save(data)
-
-    async def delete_old_messages(self, older_than_hours: int = 24):
-        async with self._lock:
-            data = self._load()
-            cutoff = datetime.now(timezone.utc) - timedelta(hours=older_than_hours)
-            messages = data.get("messages", {})
-            deleted = 0
-            for msg_id, info in list(messages.items()):
-                try:
-                    ts = datetime.fromisoformat(info["timestamp"])
-                    if ts < cutoff:
-                        del messages[msg_id]
-                        deleted += 1
-                except Exception:
-                    del messages[msg_id]
-                    deleted += 1
-            data["messages"] = messages
-            self._save(data)
-            return deleted
-
-    async def delete_old_jobs(self, older_than_days: int = 7):
-        async with self._lock:
-            data = self._load()
-            cutoff = datetime.now(timezone.utc) - timedelta(days=older_than_days)
-            jobs = data.get("jobs", [])
-            new_jobs = []
-            deleted = 0
-            for j in jobs:
-                try:
-                    ts = datetime.fromisoformat(j.get("created_at", ""))
-                    if ts >= cutoff:
-                        new_jobs.append(j)
-                    else:
-                        deleted += 1
-                except Exception:
-                    deleted += 1
-            data["jobs"] = new_jobs
-            self._save(data)
-            return deleted
-
-    # ─── Auth chats ───────────────────────────────────────────────
-    async def get_auth_chats(self) -> set:
-        async with self._lock:
-            data = self._load()
-            return set(data.get("auth_chats", []))
-
-    async def add_auth_chat(self, chat_id: int):
-        async with self._lock:
-            data = self._load()
-            chats = set(data.get("auth_chats", []))
-            chats.add(chat_id)
-            data["auth_chats"] = list(chats)
-            self._save(data)
-
-    async def remove_auth_chat(self, chat_id: int):
-        async with self._lock:
-            data = self._load()
-            chats = set(data.get("auth_chats", []))
-            chats.discard(chat_id)
-            data["auth_chats"] = list(chats)
-            self._save(data)
-
-    async def add_waiter(self, user_id: int, chat_id: int, user_name: str = ""):
-        async with self._lock:
-            data = self._load()
-            waiters = data.setdefault("waiters", [])
-            if not any(w.get("user_id") == user_id for w in waiters):
-                waiters.append({"user_id": user_id, "chat_id": chat_id, "user_name": user_name})
-                self._save(data)
-
-    async def clear_waiters(self):
-        async with self._lock:
-            data = self._load()
-            data["waiters"] = []
-            self._save(data)
-
-    async def get_waiters(self) -> List[dict]:
-        async with self._lock:
-            data = self._load()
-            return data.get("waiters", [])
+# ─── HybridStorage ────────────────────────────────────
 
 
 # ─── GitHub API ───────────────────────────────────────────────────────
@@ -576,7 +365,7 @@ def _build_confirm_text(inputs: Dict[str, Any]) -> str:
 
 # ─── Init ─────────────────────────────────────────────────────────────
 gh = GitHubAPI(GITHUB_TOKEN, GITHUB_OWNER)
-storage = JSONStorage(DATA_JSON)
+storage = HybridStorage(DATA_JSON, config.MONGODB_URI)
 
 # Use StringSession if available, else file-based session
 _string_session = os.getenv("TELEGRAM_STRING_SESSION", "").strip()

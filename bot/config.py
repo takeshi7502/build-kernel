@@ -13,20 +13,6 @@ logger = logging.getLogger("notify")
 def _required(key: str) -> str:
     val = os.getenv(key, "").strip()
     if not val:
-        print(f"[CONFIG] Thiếu biến môi trường bắt buộc: {key}")
-        print(f"[CONFIG] Hãy copy .env.example thành .env và điền đầy đủ.")
-        sys.exit(1)
-    return val
-
-
-# === Telegram ===
-TELEGRAM_BOT_TOKEN: str = _required("TELEGRAM_BOT_TOKEN")
-
-# === GitHub ===
-GITHUB_TOKEN: str = _required("GITHUB_TOKEN")
-GITHUB_OWNER: str = _required("GITHUB_OWNER")
-UPSTREAM_OWNER: str = os.getenv("UPSTREAM_OWNER", "zzh20188").strip()
-
 # === GKI Repo ===
 GKI_REPO: str = _required("GKI_REPO")
 GKI_DEFAULT_BRANCH: str = os.getenv("GKI_DEFAULT_BRANCH", "main").strip()

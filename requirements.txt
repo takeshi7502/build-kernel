@@ -4,3 +4,4 @@ aiodns
 python-dotenv
 telethon
 ruamel.yaml
+motor
