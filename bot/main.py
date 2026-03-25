@@ -1437,7 +1437,7 @@ def main():
     ))
 
     # OKI conversation
-    # app.add_handler(build_oki_conversation(gh, storage, config))
+    app.add_handler(build_oki_conversation(gh, storage, config))
 
     async def _post_init(app_):
         app_.create_task(poller(app_))

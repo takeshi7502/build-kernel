@@ -51,6 +51,6 @@ if _admin_raw:
     ADMIN_IDS = [int(x.strip()) for x in _admin_raw.split(",") if x.strip().isdigit()]
 
 # === OKI Repo ===
-OKI_REPO: str = os.getenv("OKI_REPO", "AnyKernel3").strip()
-OKI_DEFAULT_BRANCH: str = os.getenv("OKI_DEFAULT_BRANCH", "main").strip()
-OKI_WORKFLOW: str = os.getenv("OKI_WORKFLOW", "oki.yml").strip()
+OKI_REPO: str = os.getenv("OKI_REPO", "Action-Build").strip()
+OKI_DEFAULT_BRANCH: str = os.getenv("OKI_DEFAULT_BRANCH", "SukiSU-Ultra").strip()
+OKI_WORKFLOW: str = os.getenv("OKI_WORKFLOW", "Build Kernel OnePlus.yml").strip()

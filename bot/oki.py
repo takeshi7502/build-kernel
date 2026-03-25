@@ -3,8 +3,8 @@
 # ==============================
 from typing import Dict, Any, List
 from datetime import datetime, timezone
-import time, math
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, constants
+import time
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ContextTypes, ConversationHandler, CallbackQueryHandler, MessageHandler, CommandHandler, filters
 )
@@ -14,30 +14,30 @@ from permissions import is_admin
 (
     OKI_START,
     OKI_CHOOSE_FILE,
-    OKI_HOOK,
-    OKI_SUSFS,
-    OKI_KSU_META,
-    OKI_BUILD_TIME,
-    OKI_SUFFIX,
-    OKI_FAST_BUILD,
-    OKI_LSM,
-    OKI_SCHED,
-    OKI_ZRAM,
+    OKI_CHOOSE_KSU_VARIANT,
+    OKI_CHOOSE_KPM,
+    OKI_CHOOSE_MANAGER,
     OKI_CONFIRM
-) = range(12)
+) = range(6)
 
 FILES = [
-  "oneplus_nord_ce4_lite_5g_v","oneplus_nord_ce4_v","oneplus_nord_4_v","oneplus_ace_3v_v","oneplus_10_pro_v",
-  "oneplus_10t_v","oneplus_11r_v","oneplus_ace2_v","oneplus_ace_pro_v","oneplus_11_v","oneplus_12r_v",
-  "oneplus_ace2_pro_v","oneplus_ace3_v","oneplus_open_v","oneplus12_v","oneplus_13r","oneplus_ace3_pro_v",
-  "oneplus_ace5","oneplus_pad_pro_v","oneplus_pad2_v","oneplus_nord_5","oneplus_ace5_pro","oneplus_13",
-  "oneplus_13_global","oneplus_13t","oneplus_13s","oneplus_pad_2_pro","oneplus_pad_3","oneplus_ace5_ultra"
+  "oneplus_nord_n30_se_5g_v", "oneplus_10r_v", "oneplus_nord_3_v", "oneplus_ace_v", "oneplus_ace_race_v",
+  "oneplus_10_pro_b", "oneplus_10t_v", "oneplus_11r_b", "oneplus_ace2_b", "oneplus_pad_lite_v", "oneplus_pad_mt6983_b",
+  "oneplus_ace_2v_b", "oneplus_ace_pro_v", "oneplus_11_b", "oneplus_12r_b", "oneplus_ace2_pro_b", "oneplus_ace3_b",
+  "oneplus_open_b", "oneplus_nord_ce4_b", "oneplus_12_b", "oneplus_pad_go_2_b", "oneplus_nord_ce4_lite_5g_b",
+  "oneplus_nord_4_b", "oneplus_ace_3v_b", "oneplus_pad_mt6897_v", "oneplus_13r_b", "oneplus_ace3_pro_b",
+  "oneplus_ace5_b", "oneplus_pad_pro_b", "oneplus_pad2_b", "oneplus_nord_ce5_b", "oneplus_nord_5_b",
+  "oneplus_ace5_pro_b", "oneplus_13_b", "oneplus_13t_b", "oneplus_13s_b", "oneplus_pad_2_pro_b", "oneplus_pad_3_b",
+  "oneplus_ace5_race_b", "oneplus_ace5_ultra_b", "oneplus_ace5_ultra_bak_b", "oneplus_pad2_mt6991_b",
+  "oneplus_ace_6", "oneplus_ace_6t", "oneplus_ace_6t_aosp", "oneplus_15r", "oneplus_15r_aosp", "oneplus_15", "oneplus_15_aosp"
 ]
 
 def _clean_label(s: str) -> str:
     if s.startswith("oneplus_"):
         s = s[len("oneplus_"):]
     if s.endswith("_v"):
+        s = s[:-2]
+    if s.endswith("_b"):
         s = s[:-2]
     return s.replace("_", " ")
 
@@ -65,16 +65,11 @@ def _file_keyboard(page: int = 0):
     rows.append([InlineKeyboardButton("❌ Hủy", callback_data="oki:cancel")])
     return InlineKeyboardMarkup(rows)
 
-
-def _yes_no(prefix: str):
+def _back_cancel(back_to: str):
     return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("✅ Bật", callback_data=f"{prefix}:true"),
-            InlineKeyboardButton("❌ Tắt", callback_data=f"{prefix}:false"),
-        ],
+        [InlineKeyboardButton("🔙 Quay lại", callback_data=f"okiback:{back_to}")],
         [InlineKeyboardButton("❌ Hủy", callback_data="oki:cancel")]
     ])
-
 
 async def _ensure_owner(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     uid = update.effective_user.id
@@ -88,13 +83,11 @@ async def _ensure_owner(update: Update, context: ContextTypes.DEFAULT_TYPE) -> b
         pass
     return False
 
-
 async def _del_msg_job(context: ContextTypes.DEFAULT_TYPE):
     try:
         await context.bot.delete_message(chat_id=context.job.chat_id, message_id=context.job.data)
     except:
         pass
-
 
 def _cleanup(context: ContextTypes.DEFAULT_TYPE):
     context.user_data.pop("oki", None)
@@ -196,18 +189,30 @@ class OKIFlow:
             context.user_data["build_key"] = key
 
         context.chat_data["oki_owner"] = update.effective_user.id
+        # Mặc định tất cả các tham số
         context.user_data["oki"] = {"inputs": {
-            "HOOK": "manual",
-            "SUSFS_CI": "NoN",
-            "KSU_META": "susfs-main/Numbersf/",
+            "FILE": "oneplus_12_b",
+            "MANAGER_SOURCE": "MIUIX",
+            "SUSFS_CI": "N/A",  
+            "KPM": "KPM",
+            "SUSFS_META": "",
+            "DYNAMIC_REPO": "Numbersf",
             "BUILD_TIME": "F",
+            "KSU_META": "susfs-main/Numbersf/",
+            "ZRAM": "0/lz4kd/8589934592",
             "SUFFIX": "",
+            "SUBLEVEL": "",
             "FAST_BUILD": True,
-            "LSM": True,
-            "SCHED": False,
-            "ZRAM": False
+            "LSM_BBG": True,
+            "NETFILTER": True,
+            "CCM": True,
+            "UNICODE_BYPASS": False,
+            "SCHED_HMBIRD": False,
+            "SUSFS_DEV": False,
+            "SPACE_NOCLEAN": False,
+            "BUILD_NOCCACHE": False
         }}
-        await self._update_bot_msg(update, context, "Chọn máy:", reply_markup=_file_keyboard(0))
+        await self._update_bot_msg(update, context, "<b>Chọn máy bạn muốn build:</b>", parse_mode="HTML", reply_markup=_file_keyboard(0))
         return OKI_CHOOSE_FILE
 
     async def cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -222,12 +227,30 @@ class OKIFlow:
         _cleanup(context)
         return ConversationHandler.END
 
+    async def back(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await _ensure_owner(update, context): return
+        q = update.callback_query; await q.answer()
+        _, target = q.data.split(":", 1)
+        
+        if target == "file":
+            await q.edit_message_text("<b>Chọn máy bạn muốn build:</b>", parse_mode="HTML", reply_markup=_file_keyboard(0))
+            return OKI_CHOOSE_FILE
+        elif target == "ksu":
+            await self._ask_ksu(q)
+            return OKI_CHOOSE_KSU_VARIANT
+        elif target == "kpm":
+            await self._ask_kpm(q)
+            return OKI_CHOOSE_KPM
+        elif target == "manager":
+            await self._ask_manager(q)
+            return OKI_CHOOSE_MANAGER
+
     async def page(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await _ensure_owner(update, context): return OKI_CHOOSE_FILE
         q = update.callback_query; await q.answer()
         _, page = q.data.split(":", 1)
         page = int(page)
-        await q.edit_message_text("Chọn máy:", reply_markup=_file_keyboard(page))
+        await q.edit_message_text("<b>Chọn máy bạn muốn build:</b>", parse_mode="HTML", reply_markup=_file_keyboard(page))
         return OKI_CHOOSE_FILE
 
     async def set_file(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -235,149 +258,100 @@ class OKIFlow:
         q = update.callback_query; await q.answer()
         _, fileval = q.data.split(":", 1)
         context.user_data["oki"]["inputs"]["FILE"] = fileval
-        await q.edit_message_text("Chọn HOOK (khuyến khích manual):", reply_markup=InlineKeyboardMarkup([[
-            InlineKeyboardButton("kprobe", callback_data="okihook:kprobe"),
-            InlineKeyboardButton("manual", callback_data="okihook:manual"),
-            InlineKeyboardButton("tracepoint", callback_data="okihook:tracepoint"),
-        ], [InlineKeyboardButton("❌ Hủy", callback_data="oki:cancel")]]))
-        return OKI_HOOK
-
-    async def set_hook(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not await _ensure_owner(update, context): return OKI_HOOK
-        q = update.callback_query; await q.answer()
-        _, val = q.data.split(":", 1)
-        context.user_data["oki"]["inputs"]["HOOK"] = val
-        await q.edit_message_text("Chọn SUSFS_CI (khuyến khích CI hoặc Release):", reply_markup=InlineKeyboardMarkup([[
-            InlineKeyboardButton("CI", callback_data="okisci:CI"),
-            InlineKeyboardButton("Release", callback_data="okisci:Release"),
-            InlineKeyboardButton("NoN", callback_data="okisci:NoN"),
-        ], [InlineKeyboardButton("❌ Hủy", callback_data="oki:cancel")]]))
-        return OKI_SUSFS
-
-    async def set_susfs(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not await _ensure_owner(update, context): return OKI_SUSFS
-        q = update.callback_query; await q.answer()
-        _, val = q.data.split(":", 1)
-        context.user_data["oki"]["inputs"]["SUSFS_CI"] = val
-        await q.edit_message_text("Nhập `KSU_META` (reply). Nên sử dụng `susfs-main/Numbersf/`.", parse_mode="Markdown")
-        return OKI_KSU_META
-
-    async def set_ksu_meta(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await self._safe_delete_user_msg(update, context)
-        if not await _ensure_owner(update, context): return OKI_KSU_META
-        txt = (update.message.text or "").strip()
-        if txt.lower() in ("/cancel", "huy", "hủy"):
-            return await self.cancel(update, context)
-        context.user_data["oki"]["inputs"]["KSU_META"] = "" if txt.lower() == "none" else txt
-        await self._update_bot_msg(
-            update,
-            context,
-            "Nhập `BUILD_TIME` (reply). Nhập `F` để dùng thời gian hiện tại. Gõ 'none' để bỏ qua.",
-            parse_mode="Markdown"
-        )
-        return OKI_BUILD_TIME
-
-    async def set_build_time(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await self._safe_delete_user_msg(update, context)
-        if not await _ensure_owner(update, context): return OKI_BUILD_TIME
-        txt = (update.message.text or "").strip()
-        if txt.lower() in ("/cancel", "huy", "hủy"):
-            return await self.cancel(update, context)
-        if txt.upper() == "F":
-            import time
-            t = time.gmtime()
-            txt = time.strftime("%a %b %d %H:%M:%S UTC %Y", t)
-        context.user_data["oki"]["inputs"]["BUILD_TIME"] = "" if txt.lower() == "none" else txt
-        await self._update_bot_msg(
-            update,
-            context,
-            "Nhập `SUFFIX` (reply). Tên sẽ dạng 5.10.209-android12-yourname.",
-            parse_mode="Markdown"
-        )
-        return OKI_SUFFIX
-
-    async def set_suffix(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await self._safe_delete_user_msg(update, context)
-        if not await _ensure_owner(update, context): return OKI_SUFFIX
-        txt = (update.message.text or "").strip()
-        if txt.lower() in ("/cancel", "huy", "hủy"):
-            return await self.cancel(update, context)
-        context.user_data["oki"]["inputs"]["SUFFIX"] = "" if txt.lower() == "none" else txt
-        await self._update_bot_msg(update, context, "Bật FAST_BUILD?, nên bật", reply_markup=_yes_no("okifast"))
-        return OKI_FAST_BUILD
-
-    async def set_fast(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not await _ensure_owner(update, context): return OKI_FAST_BUILD
-        q = update.callback_query; await q.answer()
-        _, val = q.data.split(":", 1)
-        context.user_data["oki"]["inputs"]["FAST_BUILD"] = (val == "true")
-        await q.edit_message_text("Bật LSM?, nên bật", reply_markup=_yes_no("okilsm"))
-        return OKI_LSM
-
-    async def set_lsm(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not await _ensure_owner(update, context): return OKI_LSM
-        q = update.callback_query; await q.answer()
-        _, val = q.data.split(":", 1)
-        context.user_data["oki"]["inputs"]["LSM"] = (val == "true")
-        await q.edit_message_text("Bật SCHED?, nên tắt", reply_markup=_yes_no("okischd"))
-        return OKI_SCHED
-
-    async def set_sched(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not await _ensure_owner(update, context): return OKI_SCHED
-        q = update.callback_query; await q.answer()
-        _, val = q.data.split(":", 1)
-        context.user_data["oki"]["inputs"]["SCHED"] = (val == "true")
-        await q.edit_message_text("Bật ZRAM?, nên tắt", reply_markup=_yes_no("okizram"))
-        return OKI_ZRAM
-
-    async def set_zram(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not await _ensure_owner(update, context): return OKI_ZRAM
-        q = update.callback_query; await q.answer()
-        _, val = q.data.split(":", 1)
-        context.user_data["oki"]["inputs"]["ZRAM"] = (val == "true")
-        return await self.confirm(q, context)
-
-    async def confirm(self, q, context):
-        inputs = context.user_data["oki"]["inputs"]
-        pretty = "\n".join([f"• {k}: {v}" for k, v in inputs.items()])
+        await self._ask_ksu(q)
+        return OKI_CHOOSE_KSU_VARIANT
+        
+    async def _ask_ksu(self, q):
         kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ Xác nhận", callback_data="okiconfirm")],
+            [InlineKeyboardButton("SukiSU (susfs-main)", callback_data="okiksuvar:susfs-main/Numbersf/")],
+            [InlineKeyboardButton("NextSU (next nhánh)", callback_data="okiksuvar:next/Numbersf/")],
+            [InlineKeyboardButton("ReSuKi (resuki nhánh)", callback_data="okiksuvar:resuki/Numbersf/")],
+            [InlineKeyboardButton("🔙 Quay lại", callback_data="okiback:file")],
             [InlineKeyboardButton("❌ Hủy", callback_data="oki:cancel")]
         ])
-        file_label = inputs.get("FILE", "?")
-        await q.edit_message_text(f"OKI — FILE: `{file_label}`\nInputs:\n{pretty}", reply_markup=kb, parse_mode="Markdown")
+        await q.edit_message_text("<b>Chọn loại KernelSU bạn muốn tích hợp:</b>", parse_mode="HTML", reply_markup=kb)
+
+    async def set_ksu_var(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await _ensure_owner(update, context): return OKI_CHOOSE_KSU_VARIANT
+        q = update.callback_query; await q.answer()
+        _, val = q.data.split(":", 1)
+        context.user_data["oki"]["inputs"]["KSU_META"] = val
+        await self._ask_kpm(q)
+        return OKI_CHOOSE_KPM
+
+    async def _ask_kpm(self, q):
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("KPM", callback_data="okikpm:KPM"), InlineKeyboardButton("KPN", callback_data="okikpm:KPN")],
+            [InlineKeyboardButton("N/A (Tắt Module)", callback_data="okikpm:N/A")],
+            [InlineKeyboardButton("🔙 Quay lại", callback_data="okiback:ksu")],
+            [InlineKeyboardButton("❌ Hủy", callback_data="oki:cancel")]
+        ])
+        await q.edit_message_text("<b>Chọn phương thức module KernelSU (KPM):</b>", parse_mode="HTML", reply_markup=kb)
+
+    async def set_kpm(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await _ensure_owner(update, context): return OKI_CHOOSE_KPM
+        q = update.callback_query; await q.answer()
+        _, val = q.data.split(":", 1)
+        context.user_data["oki"]["inputs"]["KPM"] = val
+        await self._ask_manager(q)
+        return OKI_CHOOSE_MANAGER
+
+    async def _ask_manager(self, q):
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("MIUIX", callback_data="okimgr:MIUIX"), InlineKeyboardButton("MIUIX_SPOOF", callback_data="okimgr:MIUIX_SPOOF")],
+            [InlineKeyboardButton("MD3", callback_data="okimgr:MD3"), InlineKeyboardButton("MD3_SPOOF", callback_data="okimgr:MD3_SPOOF")],
+            [InlineKeyboardButton("🔙 Quay lại", callback_data="okiback:kpm")],
+            [InlineKeyboardButton("❌ Hủy", callback_data="oki:cancel")]
+        ])
+        await q.edit_message_text("<b>Chọn nguồn Manager (Trình quản lý):</b>", parse_mode="HTML", reply_markup=kb)
+
+    async def set_manager(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await _ensure_owner(update, context): return OKI_CHOOSE_MANAGER
+        q = update.callback_query; await q.answer()
+        _, val = q.data.split(":", 1)
+        context.user_data["oki"]["inputs"]["MANAGER_SOURCE"] = val
+        await self._ask_confirm(q)
         return OKI_CONFIRM
 
-    async def do_dispatch(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def _ask_confirm(self, q):
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("⚡ BẬT Fast Build", callback_data="okiconf:fast"), InlineKeyboardButton("🐢 TẮT Fast Build", callback_data="okiconf:slow")],
+            [InlineKeyboardButton("🔙 Quay lại", callback_data="okiback:manager")],
+            [InlineKeyboardButton("❌ Hủy", callback_data="oki:cancel")]
+        ])
+        await q.edit_message_text("<b>Cấu hình cuối cùng: Chọn tốc độ Build (Fast Build):</b>\n<i>(Các cấu hình khác như ZRAM, BBG, DYNAMIC_REPO sẽ dùng mặc định)</i>", parse_mode="HTML", reply_markup=kb)
+
+    async def set_confirm(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await _ensure_owner(update, context): return OKI_CONFIRM
         q = update.callback_query; await q.answer()
-        inputs = context.user_data["oki"]["inputs"].copy()
+        _, val = q.data.split(":", 1)
+        
+        inputs = context.user_data["oki"]["inputs"]
+        inputs["FAST_BUILD"] = (val == "fast")
+        
+        await q.edit_message_text("⏳ Đang gửi request tới GitHub...")
+        
         user = update.effective_user
-
-        # Admin bypass key; else check key exists and consume AFTER success
         key = context.user_data.get("build_key")
-        if not await is_admin(user.id, self.storage):
-            uses = await self.storage.get_uses(key or "")
-            if not key or uses <= 0:
-                await q.edit_message_text("Key không hợp lệ hoặc hết lượt. Dừng.")
-                _cleanup(context)
-                return ConversationHandler.END
+        user_is_admin = await is_admin(user.id, self.storage)
 
-        res = await self.gh.dispatch_workflow(
-            repo=self.config.OKI_REPO,
-            workflow_file=self.config.OKI_WORKFLOW,
-            ref=self.config.OKI_DEFAULT_BRANCH,
-            inputs=inputs
-        )
-        if res["status"] in (201, 202, 204):
+        dispatch_file = self.config.OKI_WORKFLOW
+        
+        payload = {
+            "ref": self.config.OKI_DEFAULT_BRANCH,
+            "inputs": {k: str(v).lower() if isinstance(v, bool) else str(v) for k, v in inputs.items()}
+        }
+        res = await self.gh.dispatch_workflow(self.config.OKI_REPO, dispatch_file, payload)
+        
+        if res.get("status") == 204:
             job = {
                 "type": "oki",
                 "repo": self.config.OKI_REPO,
-                "workflow_file": self.config.OKI_WORKFLOW,
+                "workflow_file": dispatch_file,
                 "ref": self.config.OKI_DEFAULT_BRANCH,
-                "branch": self.config.OKI_DEFAULT_BRANCH,
                 "inputs": inputs,
                 "user_id": user.id,
+                "user_name": user.full_name,
                 "chat_id": update.effective_chat.id,
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "run_id": None,
@@ -385,42 +359,48 @@ class OKIFlow:
                 "conclusion": None,
                 "notified": False
             }
-            job_id = await self.storage.add_job(job)
-            if not await is_admin(user.id, self.storage):
+            await self.storage.add_job(job)
+            if not user_is_admin and key:
                 await self.storage.consume(key)
-            view_url = f"https://github.com/{self.config.GITHUB_OWNER}/{self.config.OKI_REPO}/actions/workflows/{self.config.OKI_WORKFLOW}"
-            await q.edit_message_text(f"✅ Đã gửi build OKI!\nMình sẽ ping khi xong.\nXem: {view_url}")
+            
+            view_url = f"https://github.com/{self.config.GITHUB_OWNER}/{self.config.OKI_REPO}/actions/workflows/{dispatch_file}"
+            btn = InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔗 Github", url=view_url),
+                InlineKeyboardButton("📊 Dashboard", url="https://kernel.takeshi.dev/")
+            ]])
+            
+            mention = f'<a href="tg://user?id={user.id}">{user.full_name}</a>'
+            
+            msg_text = (
+                f"✅ <b>Đã gửi OKI Build thành công!</b>\n"
+                f"👤 Người gửi: {mention}\n\n"
+                f"<i>Bạn sẽ nhận được thông báo khi hoàn tất.</i>"
+            )
+            await q.edit_message_text(msg_text, reply_markup=btn, parse_mode="HTML")
         else:
-            await q.edit_message_text(f"⚠️ Dispatch lỗi: {res['status']} {res.get('json')}")
-
+            m = await q.edit_message_text(f"⚠️ Dispatch lỗi: {res['status']} {res.get('json')}")
+            if context.job_queue:
+                context.job_queue.run_once(_del_msg_job, when=60, chat_id=m.chat_id, data=m.message_id)
+        
         _cleanup(context)
         return ConversationHandler.END
 
 
 def build_oki_conversation(gh, storage, config):
     flow = OKIFlow(gh, storage, config)
+    cancel_handler = CallbackQueryHandler(flow.cancel, pattern=r"^oki:cancel$")
+    back_handler = CallbackQueryHandler(flow.back, pattern=r"^okiback:.+$")
     return ConversationHandler(
         entry_points=[CommandHandler("oki", flow.start)],
         states={
-            OKI_CHOOSE_FILE: [
-                CallbackQueryHandler(flow.set_file, pattern=r"^okifile:.+"),
-                CallbackQueryHandler(flow.page, pattern=r"^okipage:\d+$"),
-                CallbackQueryHandler(flow.cancel, pattern=r"^oki:cancel$")
-            ],
-            OKI_HOOK: [CallbackQueryHandler(flow.set_hook, pattern=r"^okihook:(kprobe|manual|tracepoint)$"), CallbackQueryHandler(flow.cancel, pattern=r"^oki:cancel$")],
-            OKI_SUSFS: [CallbackQueryHandler(flow.set_susfs, pattern=r"^okisci:(CI|Release|NoN)$"), CallbackQueryHandler(flow.cancel, pattern=r"^oki:cancel$")],
-            OKI_KSU_META: [MessageHandler(filters.TEXT & ~filters.COMMAND, flow.set_ksu_meta)],
-            OKI_BUILD_TIME: [MessageHandler(filters.TEXT & ~filters.COMMAND, flow.set_build_time)],
-            OKI_SUFFIX: [MessageHandler(filters.TEXT & ~filters.COMMAND, flow.set_suffix)],
-            OKI_FAST_BUILD: [CallbackQueryHandler(flow.set_fast, pattern=r"^okifast:(true|false)$"), CallbackQueryHandler(flow.cancel, pattern=r"^oki:cancel$")],
-            OKI_LSM: [CallbackQueryHandler(flow.set_lsm, pattern=r"^okilsm:(true|false)$"), CallbackQueryHandler(flow.cancel, pattern=r"^oki:cancel$")],
-            OKI_SCHED: [CallbackQueryHandler(flow.set_sched, pattern=r"^okischd:(true|false)$"), CallbackQueryHandler(flow.cancel, pattern=r"^oki:cancel$")],
-            OKI_ZRAM: [CallbackQueryHandler(flow.set_zram, pattern=r"^okizram:(true|false)$"), CallbackQueryHandler(flow.cancel, pattern=r"^oki:cancel$")],
-            OKI_CONFIRM: [CallbackQueryHandler(flow.do_dispatch, pattern=r"^okiconfirm$"), CallbackQueryHandler(flow.cancel, pattern=r"^oki:cancel$")],
+            OKI_CHOOSE_FILE: [CallbackQueryHandler(flow.page, pattern=r"^okipage:"), CallbackQueryHandler(flow.set_file, pattern=r"^okifile:"), back_handler, cancel_handler],
+            OKI_CHOOSE_KSU_VARIANT: [CallbackQueryHandler(flow.set_ksu_var, pattern=r"^okiksuvar:"), back_handler, cancel_handler],
+            OKI_CHOOSE_KPM: [CallbackQueryHandler(flow.set_kpm, pattern=r"^okikpm:"), back_handler, cancel_handler],
+            OKI_CHOOSE_MANAGER: [CallbackQueryHandler(flow.set_manager, pattern=r"^okimgr:"), back_handler, cancel_handler],
+            OKI_CONFIRM: [CallbackQueryHandler(flow.set_confirm, pattern=r"^okiconf:"), back_handler, cancel_handler],
         },
-        fallbacks=[CallbackQueryHandler(flow.cancel, pattern=r"^oki:cancel$"), CommandHandler("cancel", flow.cancel)],
-        allow_reentry=True,
-        name="oki_conversation",
-        persistent=False,
+        fallbacks=[cancel_handler],
+        per_user=True,
+        per_chat=False,
         conversation_timeout=300
     )
