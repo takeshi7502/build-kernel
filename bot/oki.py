@@ -337,11 +337,13 @@ class OKIFlow:
 
         dispatch_file = self.config.OKI_WORKFLOW
         
-        payload = {
-            "ref": self.config.OKI_DEFAULT_BRANCH,
-            "inputs": {k: str(v).lower() if isinstance(v, bool) else str(v) for k, v in inputs.items()}
-        }
-        res = await self.gh.dispatch_workflow(self.config.OKI_REPO, dispatch_file, payload)
+        dispatch_inputs = {k: str(v).lower() if isinstance(v, bool) else str(v) for k, v in inputs.items()}
+        res = await self.gh.dispatch_workflow(
+            repo=self.config.OKI_REPO,
+            workflow_file=dispatch_file,
+            ref=self.config.OKI_DEFAULT_BRANCH,
+            inputs=dispatch_inputs
+        )
         
         if res.get("status") == 204:
             job = {
