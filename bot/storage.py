@@ -2,6 +2,7 @@ import os
 import json
 import asyncio
 import logging
+import socket
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone, timedelta
 
@@ -13,10 +14,19 @@ except ImportError:
     AsyncIOMotorClient = None
 
 class HybridStorage:
-    def __init__(self, path: str, mongo_uri: Optional[str] = None):
+    def __init__(
+        self,
+        path: str,
+        mongo_uri: Optional[str] = None,
+        sync_mode: str = "auto",
+        writer_hostname: str = "",
+    ):
         self.path = path
         self._lock = asyncio.Lock()
         self.mongo_uri = mongo_uri
+        self.sync_mode = (sync_mode or "auto").strip().lower()
+        self.writer_hostname = (writer_hostname or "").strip().lower()
+        self.hostname = socket.gethostname().strip().lower()
         self.client = None
         self.db = None
         self.collection = None
@@ -31,6 +41,24 @@ class HybridStorage:
                 self.collection = self.db["storage_data"]
             except Exception as e:
                 logger.error("MongoDB connection failed: %s", e)
+
+    def _resolved_sync_mode(self) -> str:
+        mode = self.sync_mode
+        if mode not in {"auto", "push", "pull", "off"}:
+            mode = "auto"
+        if mode == "auto":
+            return "pull" if os.name == "nt" else "push"
+        return mode
+
+    def _can_push(self) -> bool:
+        if self._resolved_sync_mode() != "push":
+            return False
+        if self.writer_hostname and self.hostname != self.writer_hostname:
+            return False
+        return True
+
+    def _can_pull(self) -> bool:
+        return self._resolved_sync_mode() in {"push", "pull"}
 
     async def _push_cloud(self, data: Dict[str, Any]):
         if self.collection is None:
@@ -53,12 +81,12 @@ class HybridStorage:
             local_data = self._load()
             
             # If fresh local (no keys and no jobs) but cloud has data -> Restore
-            if cloud_doc and not local_data.get("keys") and not local_data.get("jobs"):
+            if self._can_pull() and cloud_doc and not local_data.get("keys") and not local_data.get("jobs"):
                 cloud_doc.pop("_id", None)
                 async with self._lock:
                     self._save_local(cloud_doc)
                 logger.warning("Restored local data.json from MongoDB Atlas!")
-            else:
+            elif self._can_push():
                 await self._push_cloud(local_data)
         except Exception as e:
             logger.error("MongoDB Sync Error: %s", e)
@@ -81,7 +109,7 @@ class HybridStorage:
 
     async def _save(self, data: Dict[str, Any]):
         self._save_local(data)
-        if self.collection is not None:
+        if self.collection is not None and self._can_push():
             await self._push_cloud(data)
 
     # ==========================
@@ -347,7 +375,7 @@ class HybridStorage:
         data = self._load()
         data["telegraph_token"] = token
         self._save_local(data)
-        if self.collection is not None:
+        if self.collection is not None and self._can_push():
             try:
                 loop = asyncio.get_running_loop()
                 loop.create_task(self._push_cloud(data))

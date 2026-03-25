@@ -1117,7 +1117,12 @@ def main():
         logger.error("Missing TELEGRAM_BOT_TOKEN")
         return
 
-    storage = HybridStorage(DATA_JSON, config.MONGODB_URI)
+    storage = HybridStorage(
+        DATA_JSON,
+        config.MONGODB_URI,
+        sync_mode=config.MONGODB_SYNC_MODE,
+        writer_hostname=config.MONGODB_SYNC_WRITER_HOSTNAME,
+    )
     gh = GitHubAPI(config.GITHUB_TOKEN, config.GITHUB_OWNER)
     telegraph = TelegraphAPI(storage)
 

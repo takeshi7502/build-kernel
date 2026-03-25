@@ -367,7 +367,12 @@ def _build_confirm_text(inputs: Dict[str, Any]) -> str:
 
 # ─── Init ─────────────────────────────────────────────────────────────
 gh = GitHubAPI(GITHUB_TOKEN, GITHUB_OWNER)
-storage = HybridStorage(DATA_JSON, config.MONGODB_URI)
+storage = HybridStorage(
+    DATA_JSON,
+    config.MONGODB_URI,
+    sync_mode=config.MONGODB_SYNC_MODE,
+    writer_hostname=config.MONGODB_SYNC_WRITER_HOSTNAME,
+)
 
 # Use StringSession if available, else file-based session
 _string_session = os.getenv("TELEGRAM_STRING_SESSION", "").strip()

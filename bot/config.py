@@ -2,6 +2,7 @@ import os
 import sys
 import aiohttp
 import logging
+import socket
 from dotenv import load_dotenv
 
 # Load .env từ thư mục gốc (lùi lại 1 cấp so với file config.py)
@@ -23,6 +24,9 @@ TELEGRAM_BOT_TOKEN: str = _required("TELEGRAM_BOT_TOKEN")
 
 # === MongoDB (Optional) ===
 MONGODB_URI: str = os.getenv("MONGODB_URI", "").strip()
+MONGODB_SYNC_MODE: str = os.getenv("MONGODB_SYNC_MODE", "auto").strip().lower()
+MONGODB_SYNC_WRITER_HOSTNAME: str = os.getenv("MONGODB_SYNC_WRITER_HOSTNAME", "").strip().lower()
+HOSTNAME: str = socket.gethostname().strip().lower()
 
 # === GitHub ===
 GITHUB_TOKEN: str = _required("GITHUB_TOKEN")
