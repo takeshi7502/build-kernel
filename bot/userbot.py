@@ -1100,9 +1100,9 @@ async def _do_dispatch(event, session: Dict[str, Any]) -> bool:
     view_url = f"https://github.com/{GITHUB_OWNER}/{GKI_REPO}/actions/workflows/{dispatch_file}"
     success_text = (
         "✅ <b>Đã gửi build thành công!</b>\n"
-        f"🔗 <a href='{view_url}'>Github</a>  |  "
-        f"📊 <a href='https://kernel.takeshi.dev/'>Dashboard</a>\n\n"
-        "<i>Tui sẽ thông báo khi build hoàn tất.</i>"
+        f"👤 Người gửi: {sender_name}\n\n"
+        "<i>Tui sẽ thông báo khi build hoàn tất.</i>\n"
+        f"<blockquote><b>Xem :</b> <a href='{view_url}'>Github</a> | <a href='https://kernel.takeshi.dev/'>Dashboard</a></blockquote>"
     )
     # Edit menu message to show success (single message)
     if menu_msg_id:
@@ -1814,12 +1814,12 @@ async def poller_loop():
                         if conclusion == "success":
                             text = (
                                 f"{icon} <b>Build GKI hoàn tất!</b>\n"
-                                f"👤 Người gửi: {mention}\n"
+                                f"👤 Người nhận: {mention}\n"
                                 f"⏱️ Thời gian: <b>{elapsed} phút</b>\n"
                                 f"📊 Trạng thái: <b>{conclusion.upper()}</b>\n"
-                                f"🔗 <a href='{html_url}'>Github</a>  |  "
-                                f"📊 <a href='https://kernel.takeshi.dev/'>Dashboard</a>\n"
-                                f"📦 <a href='{nightly_url}'>Tải file</a>"
+                                f"<blockquote><b>Xem :</b> <a href='{html_url}'>Github</a> | "
+                                f"<a href='{nightly_url}'>File</a> | "
+                                f"<a href='https://kernel.takeshi.dev/'>Dashboard</a></blockquote>"
                             )
                         else:
                             text = (
