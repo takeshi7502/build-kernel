@@ -797,9 +797,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if res.get("status") == 200:
             runs = res["json"].get("workflow_runs", [])
             for r in runs:
-                # Lọc đúng branch
-                if r.get("head_branch") == config.GKI_DEFAULT_BRANCH:
-                    active_runs.append(r)
+                active_runs.append(r)
 
     if not active_runs:
         m = await _send_msg(update, context, "ℹ️ Hiện không có tiến trình build nào đang chạy.")
@@ -889,16 +887,9 @@ async def show_list_page(update: Update, context: ContextTypes.DEFAULT_TYPE, pag
     workflow_files = list(config.GKI_WORKFLOWS.values())
 
     def _is_target_success_run(run: dict) -> bool:
-        # GitHub list-runs endpoint có thể trả về nhiều workflow/conclusion,
-        # nên lọc lại thủ công để khớp với "build GKI thành công".
         if run.get("status") != "completed":
             return False
         if run.get("conclusion") != "success":
-            return False
-        if run.get("head_branch") != config.GKI_DEFAULT_BRANCH:
-            return False
-        run_path = run.get("path", "")
-        if workflow_files and not any(wf in run_path for wf in workflow_files):
             return False
         return True
 

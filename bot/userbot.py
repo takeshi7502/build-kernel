@@ -487,12 +487,10 @@ def _is_allowed_chat(chat_id: Optional[int]) -> bool:
 
 
 def _matches_target_run(run: dict) -> bool:
-    if run.get("head_branch") != GKI_DEFAULT_BRANCH:
-        return False
-    path = run.get("path", "")
-    if WORKFLOW_FILE and WORKFLOW_FILE not in path:
-        return False
+    # Accept all jobs in the GKI repo regardless of workflow file or branch
     return True
+
+
 
 
 # ─── GKI Flow State Machine ──────────────────────────────────────────
