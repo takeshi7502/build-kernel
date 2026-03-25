@@ -47,7 +47,15 @@ async def get_realtime_data(app):
                         continue
                         
                     if run_id not in _GH_RUNS_CACHE:
-                        # Không cập nhật status nếu cache chưa fetch kịp hoặc ko nằm trong list Top 50, giữ nguyên.
+                        # Không có trong top 50 run gần nhất. Nếu cũ quá 6 tiếng thì báo lỗi để tránh kẹt trạng thái.
+                        try:
+                            cat = datetime.fromisoformat(j.get("created_at", "").replace("Z", "+00:00"))
+                            if (datetime.now(timezone.utc) - cat).total_seconds() > 6 * 3600:
+                                if j.get("status") != "completed":
+                                    j["status"] = "completed"
+                                    j["conclusion"] = "timed_out"
+                        except Exception:
+                            pass
                         active_jobs.append(j)
                         continue
                         

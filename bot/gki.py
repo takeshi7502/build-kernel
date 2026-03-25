@@ -861,24 +861,9 @@ class GKIFlow:
             
             mention = f'<a href="tg://user?id={user.id}">{user.full_name}</a>'
             
-            target_count = sum(1 for k in ('build_a12_5_10', 'build_a13_5_15', 'build_a14_6_1', 'build_a15_6_6') if inputs.get(k))
-            if inputs.get("build_all"):
-                target_count = 4
-            target_count = max(1, target_count)
-            
-            if target_count == 1:
-                est_time = "~15-20 phút"
-            elif target_count == 2:
-                est_time = "~25-30 phút"
-            elif target_count == 3:
-                est_time = "~35-45 phút"
-            else:
-                est_time = "~45-60 phút"
-
             msg_text = (
                 f"✅ <b>Đã gửi build thành công!</b>\n"
-                f"👤 Người gửi: {mention}\n"
-                f"⏱️ Dự tính hoàn thành: {est_time}\n\n"
+                f"👤 Người gửi: {mention}\n\n"
                 f"<i>Bạn sẽ nhận được thông báo khi hoàn tất.</i>"
             )
             await q.edit_message_text(msg_text, reply_markup=btn, parse_mode="HTML")
