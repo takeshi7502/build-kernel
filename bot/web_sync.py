@@ -69,34 +69,70 @@ async def get_realtime_data(app):
         
         for j in jobs[:50]: # Lấy 50 build gần nhất
             inputs = j.get("inputs", {})
-            
-            os_list = []
-            if inputs.get("build_all"):
-                os_list = ["ALL versions"]
-            else:
-                if inputs.get("build_a12_5_10"): os_list.append("A12-5.10")
-                if inputs.get("build_a13_5_15"): os_list.append("A13-5.15")
-                if inputs.get("build_a14_6_1"): os_list.append("A14-6.1")
-                if inputs.get("build_a15_6_6"): os_list.append("A15-6.6")
-            
-            os_str = os_list[0] if os_list else "Custom"
-            sub = inputs.get("sub_levels", "").replace(",", ".")
-            if sub and sub.lower() not in ["all", "*"]:
-                os_str = f"{os_str}.{sub}"
-                
-            variant = inputs.get("kernelsu_variant", "NoKSU")
-            branch = str(inputs.get("kernelsu_branch", "Stable")).replace("(标准)", "").replace("(开发)", "").strip()
-            if not branch: branch = "Stable"
-                
-            title = variant
-            sub_title = f"{os_str}-{branch}"
-            
-            custom_version = inputs.get("version", "").strip("-")
             user_name = j.get("user_name") or j.get("sender_name") or "Unknown"
-            zram = "Bật" if inputs.get("use_zram", True) else "Tắt"
-            bbg = "Bật" if inputs.get("use_bbg", True) else "Tắt"
-            kpm = "Bật" if inputs.get("use_kpm", True) else "Tắt"
-            susfs = "Tắt" if inputs.get("cancel_susfs", True) else "Bật"
+            
+            if j.get("type") == "oki":
+                # OKI build parsing
+                file_val = str(inputs.get("FILE", "Unknown"))
+                # Clean label: 'oneplus_ace2_b' -> 'ace2'
+                clean_name = file_val
+                if clean_name.startswith("oneplus_"): clean_name = clean_name[len("oneplus_"):]
+                if clean_name.endswith("_v"): clean_name = clean_name[:-2]
+                if clean_name.endswith("_b"): clean_name = clean_name[:-2]
+                clean_name = clean_name.replace("_", " ").title()
+                
+                os_str = f"OnePlus - {clean_name}"
+                
+                ksu_meta = str(inputs.get("KSU_META", ""))
+                if "susfs-main" in ksu_meta: variant = "SukiSU"
+                elif "next" in ksu_meta: variant = "NextSU"
+                elif "resuki" in ksu_meta: variant = "ReSuKi"
+                else: variant = ksu_meta.split("/")[0] if ksu_meta else "NoKSU"
+                
+                title = variant
+                sub_title = os_str
+                
+                custom_version = inputs.get("SUFFIX", "")
+                zram_val = str(inputs.get("ZRAM", "0"))
+                zram = "Bật" if zram_val.startswith("1") else "Tắt"
+                
+                bbg_val = str(inputs.get("LSM_BBG", "true")).lower()
+                bbg = "Bật" if bbg_val == "true" else "Tắt"
+                
+                kpm_val = str(inputs.get("KPM", "KPM"))
+                kpm = kpm_val if kpm_val in ["KPM", "KPN"] else "Tắt"
+                
+                susfs_val = str(inputs.get("SUSFS_CI", "N/A"))
+                susfs = "Tắt" if susfs_val == "N/A" else "Bật"
+                
+            else:
+                # Normal GKI parsing
+                os_list = []
+                if inputs.get("build_all"):
+                    os_list = ["ALL versions"]
+                else:
+                    if inputs.get("build_a12_5_10"): os_list.append("A12-5.10")
+                    if inputs.get("build_a13_5_15"): os_list.append("A13-5.15")
+                    if inputs.get("build_a14_6_1"): os_list.append("A14-6.1")
+                    if inputs.get("build_a15_6_6"): os_list.append("A15-6.6")
+                
+                os_str = os_list[0] if os_list else "Custom"
+                sub = str(inputs.get("sub_levels", "")).replace(",", ".")
+                if sub and sub.lower() not in ["all", "*"]:
+                    os_str = f"{os_str}.{sub}"
+                    
+                variant = inputs.get("kernelsu_variant", "NoKSU")
+                branch = str(inputs.get("kernelsu_branch", "Stable")).replace("(标准)", "").replace("(开发)", "").strip()
+                if not branch: branch = "Stable"
+                    
+                title = variant
+                sub_title = f"{os_str}-{branch}"
+                
+                custom_version = str(inputs.get("version", "")).strip("-")
+                zram = "Bật" if inputs.get("use_zram", True) else "Tắt"
+                bbg = "Bật" if inputs.get("use_bbg", True) else "Tắt"
+                kpm = "Bật" if inputs.get("use_kpm", True) else "Tắt"
+                susfs = "Tắt" if inputs.get("cancel_susfs", True) else "Bật"
             
             status = "building"
             if j.get("status") == "completed":
