@@ -17,6 +17,7 @@ class HybridStorage:
         self.path = path
         self._lock = asyncio.Lock()
         self.mongo_uri = mongo_uri
+        self.client = None
         self.db = None
         self.collection = None
         
@@ -25,11 +26,24 @@ class HybridStorage:
             
         if self.mongo_uri and AsyncIOMotorClient:
             try:
-                client = AsyncIOMotorClient(self.mongo_uri, serverSelectionTimeoutMS=5000)
-                self.db = client["kernel_bot_db"]
+                self.client = AsyncIOMotorClient(self.mongo_uri, serverSelectionTimeoutMS=5000)
+                self.db = self.client["kernel_bot_db"]
                 self.collection = self.db["storage_data"]
             except Exception as e:
                 logger.error("MongoDB connection failed: %s", e)
+
+    async def _push_cloud(self, data: Dict[str, Any]):
+        if self.collection is None:
+            return
+        try:
+            payload = {"_id": "master_data", **data}
+            await self.collection.replace_one(
+                {"_id": "master_data"},
+                payload,
+                upsert=True
+            )
+        except Exception as e:
+            logger.error("MongoDB push error: %s", e)
 
     async def _sync_with_cloud(self):
         if self.collection is None:
@@ -44,13 +58,8 @@ class HybridStorage:
                 async with self._lock:
                     self._save_local(cloud_doc)
                 logger.warning("Restored local data.json from MongoDB Atlas!")
-            elif self.collection is not None:
-                # Mirror local to cloud
-                await self.collection.update_one(
-                    {"_id": "master_data"}, 
-                    {"$set": local_data}, 
-                    upsert=True
-                )
+            else:
+                await self._push_cloud(local_data)
         except Exception as e:
             logger.error("MongoDB Sync Error: %s", e)
 
@@ -73,9 +82,7 @@ class HybridStorage:
     async def _save(self, data: Dict[str, Any]):
         self._save_local(data)
         if self.collection is not None:
-            asyncio.create_task(
-                self.collection.update_one({"_id": "master_data"}, {"$set": data}, upsert=True)
-            )
+            await self._push_cloud(data)
 
     # ==========================
     # KEYS
@@ -341,9 +348,8 @@ class HybridStorage:
         data["telegraph_token"] = token
         self._save_local(data)
         if self.collection is not None:
-            # Lửa chùa: Push on background without await since `set_telegraph_token` was synch in `main.py`
             try:
                 loop = asyncio.get_running_loop()
-                loop.create_task(self.collection.update_one({"_id": "master_data"}, {"$set": data}, upsert=True))
+                loop.create_task(self._push_cloud(data))
             except RuntimeError:
                 pass
