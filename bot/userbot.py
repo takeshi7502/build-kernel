@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 from config import send_admin_notification
+import config
 from storage import HybridStorage
 
 load_dotenv()
