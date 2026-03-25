@@ -240,7 +240,7 @@ async def safe_delete_message(context: ContextTypes.DEFAULT_TYPE, chat_id: int, 
 
 async def poller(app):
     gh: GitHubAPI = app.bot_data["gh"]
-    storage: StorageBase = app.bot_data["storage"]
+    storage: HybridStorage = app.bot_data["storage"]
 
     async def cleanup_task():
         while True:
@@ -412,7 +412,7 @@ async def _safe_delete_user_msg(update: Update, context: ContextTypes.DEFAULT_TY
 async def cmd_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _safe_delete_user_msg(update, context)
     user = update.effective_user
-    storage: StorageBase = context.application.bot_data["storage"]
+    storage: HybridStorage = context.application.bot_data["storage"]
     if not is_owner(user.id):
         return
     try:
@@ -440,7 +440,7 @@ async def cmd_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_keyvip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _safe_delete_user_msg(update, context)
     user = update.effective_user
-    storage: StorageBase = context.application.bot_data["storage"]
+    storage: HybridStorage = context.application.bot_data["storage"]
     if not is_owner(user.id):
         return
     try:
@@ -458,7 +458,7 @@ async def cmd_keyvip(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_keys(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _safe_delete_user_msg(update, context)
     user = update.effective_user
-    storage: StorageBase = context.application.bot_data["storage"]
+    storage: HybridStorage = context.application.bot_data["storage"]
     if not is_owner(user.id):
         return
     keys = await storage.get_all_keys()
@@ -509,7 +509,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _safe_delete_user_msg(update, context)
     user = update.effective_user
-    storage: StorageBase = context.application.bot_data["storage"]
+    storage: HybridStorage = context.application.bot_data["storage"]
     
     if not await is_admin(user.id, storage):
         return
@@ -640,7 +640,7 @@ async def show_list_page(update: Update, context: ContextTypes.DEFAULT_TYPE, pag
     end_idx = start_idx + items_per_page
     current_builds = github_runs[start_idx:end_idx]
 
-    storage: StorageBase = context.application.bot_data["storage"]
+    storage: HybridStorage = context.application.bot_data["storage"]
     jobs = await storage.get_jobs()
     run_to_job = {j.get("run_id"): j for j in jobs if j.get("run_id")}
 
@@ -704,7 +704,7 @@ async def show_list_page(update: Update, context: ContextTypes.DEFAULT_TYPE, pag
 async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _safe_delete_user_msg(update, context)
     user = update.effective_user
-    storage: StorageBase = context.application.bot_data["storage"]
+    storage: HybridStorage = context.application.bot_data["storage"]
     if not await is_admin(user.id, storage):
         return
         
@@ -746,7 +746,7 @@ def _format_build_lines(inputs: dict) -> list[str]:
 
 async def cb_list_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
-    storage: StorageBase = context.application.bot_data["storage"]
+    storage: HybridStorage = context.application.bot_data["storage"]
     if not await is_admin(update.effective_user.id, storage):
         return await q.answer()
     await q.answer()
@@ -770,7 +770,7 @@ async def cb_list_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cb_run_controls(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
-    storage: StorageBase = context.application.bot_data["storage"]
+    storage: HybridStorage = context.application.bot_data["storage"]
     if not await is_admin(update.effective_user.id, storage):
         return await q.answer()
     gh: GitHubAPI = context.application.bot_data["gh"]
@@ -791,7 +791,7 @@ async def cb_run_controls(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cb_run_control_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
-    storage: StorageBase = context.application.bot_data["storage"]
+    storage: HybridStorage = context.application.bot_data["storage"]
     if not await is_admin(update.effective_user.id, storage):
         return await q.answer()
     gh: GitHubAPI = context.application.bot_data["gh"]
@@ -879,7 +879,7 @@ async def cb_run_control_action(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def check_user_job_limit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     user = update.effective_user
-    storage: StorageBase = context.application.bot_data["storage"]
+    storage: HybridStorage = context.application.bot_data["storage"]
     if await is_admin(user.id, storage):
         return True
 
@@ -903,7 +903,7 @@ async def check_user_job_limit(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def cb_close_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
-    storage: StorageBase = context.application.bot_data["storage"]
+    storage: HybridStorage = context.application.bot_data["storage"]
     if not await is_admin(update.effective_user.id, storage):
         return await q.answer()
     await q.answer()
@@ -981,7 +981,7 @@ async def send_saved_config(app, run_id, job, chat_id):
 
 async def cb_save_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
-    storage: StorageBase = context.application.bot_data["storage"]
+    storage: HybridStorage = context.application.bot_data["storage"]
     if not await is_admin(update.effective_user.id, storage):
         return await q.answer()
     await q.answer()
@@ -1008,7 +1008,7 @@ async def cb_save_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_cancel_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _safe_delete_user_msg(update, context)
     user = update.effective_user
-    storage: StorageBase = context.application.bot_data["storage"]
+    storage: HybridStorage = context.application.bot_data["storage"]
     if not await is_admin(user.id, storage):
         return
     
@@ -1046,7 +1046,7 @@ async def cmd_cancel_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_delete_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _safe_delete_user_msg(update, context)
     user = update.effective_user
-    storage: StorageBase = context.application.bot_data["storage"]
+    storage: HybridStorage = context.application.bot_data["storage"]
     if not await is_admin(user.id, storage):
         return
     
