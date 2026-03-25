@@ -52,6 +52,7 @@ TELEGRAM_SESSION = os.getenv("TELEGRAM_SESSION", "gki_user").strip() or "gki_use
 
 GITHUB_TOKEN = _required("GITHUB_TOKEN")
 GITHUB_OWNER = _required("GITHUB_OWNER")
+BOT_TOKEN = _required("BOT_TOKEN")
 GKI_REPO = _required("GKI_REPO")
 GKI_DEFAULT_BRANCH = os.getenv("GKI_DEFAULT_BRANCH", "main").strip() or "main"
 
@@ -1118,7 +1119,11 @@ async def _do_dispatch(event, session: Dict[str, Any]) -> bool:
                 f"🚀 <b>Có build mới từ {mention}!</b>\n"
                 f"<blockquote><b>Xem : <a href='{view_url}'>Github</a> | <a href='https://kernel.takeshi.dev/'>Dashboard</a></b></blockquote>"
             )
-            await client.send_message(int(OWNER_ID), admin_msg, parse_mode="html", link_preview=False)
+            async with aiohttp.ClientSession() as sess:
+                await sess.post(
+                    f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                    json={"chat_id": OWNER_ID, "text": admin_msg, "parse_mode": "HTML", "disable_web_page_preview": True}
+                )
         except Exception as e:
             logger.error("Failed to notify admin: %s", e)
             
