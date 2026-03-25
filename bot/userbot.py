@@ -52,7 +52,7 @@ TELEGRAM_SESSION = os.getenv("TELEGRAM_SESSION", "gki_user").strip() or "gki_use
 
 GITHUB_TOKEN = _required("GITHUB_TOKEN")
 GITHUB_OWNER = _required("GITHUB_OWNER")
-BOT_TOKEN = _required("BOT_TOKEN")
+BOT_TOKEN = _required("TELEGRAM_BOT_TOKEN")
 GKI_REPO = _required("GKI_REPO")
 GKI_DEFAULT_BRANCH = os.getenv("GKI_DEFAULT_BRANCH", "main").strip() or "main"
 
