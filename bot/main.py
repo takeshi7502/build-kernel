@@ -36,7 +36,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger("gww-bot")
 
-DATA_JSON = "data.json"
+import os
+DATA_JSON = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data.json")
 
 
 class TelegraphAPI:

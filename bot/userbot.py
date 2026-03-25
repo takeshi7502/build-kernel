@@ -73,7 +73,8 @@ if not GKI_WORKFLOWS:
 WORKFLOW_FILE = list(GKI_WORKFLOWS.values())[0]
 # ALLOWED_CHAT_IDS loaded dynamically from data.json via .auth command
 _auth_chats: set = set()  # Populated at startup
-DATA_JSON = os.getenv("USERBOT_DATA_FILE", "data.json").strip() or "data.json"
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_JSON = os.getenv("USERBOT_DATA_FILE", os.path.join(BASE_DIR, "data.json")).strip() or os.path.join(BASE_DIR, "data.json")
 OWNER_ID = int(os.getenv("OWNER_ID", "0").strip() or "0")
 ADMIN_IDS = set(_parse_int_list(os.getenv("ADMIN_IDS", "")))
 USERBOT_STANDALONE = os.getenv("USERBOT_STANDALONE", "0").strip().lower() in {"1", "true", "yes", "on"}
