@@ -11,14 +11,6 @@ load_dotenv(dotenv_path=env_path)
 logger = logging.getLogger("notify")
 
 def _required(key: str) -> str:
-    val = os.getenv(key, "").strip()
-    if not val:
-# === GKI Repo ===
-GKI_REPO: str = _required("GKI_REPO")
-GKI_DEFAULT_BRANCH: str = os.getenv("GKI_DEFAULT_BRANCH", "main").strip()
-
-# Parse GKI_WORKFLOWS: "Build=main.yml" (Mặc định nếu trong .env không ghi)
-_wf_raw = os.getenv("GKI_WORKFLOWS", "Build=main.yml").strip()
 GKI_WORKFLOWS: dict = {}
 if _wf_raw:
     for pair in _wf_raw.split(","):
