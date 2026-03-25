@@ -32,6 +32,8 @@ class HybridStorage:
                 logger.error("MongoDB connection failed: %s", e)
 
     async def _sync_with_cloud(self):
+        if self.collection is None:
+            return
         try:
             cloud_doc = await self.collection.find_one({"_id": "master_data"})
             local_data = self._load()
@@ -42,7 +44,7 @@ class HybridStorage:
                 async with self._lock:
                     self._save_local(cloud_doc)
                 logger.warning("Restored local data.json from MongoDB Atlas!")
-            elif self.collection:
+            elif self.collection is not None:
                 # Mirror local to cloud
                 await self.collection.update_one(
                     {"_id": "master_data"}, 
@@ -70,7 +72,7 @@ class HybridStorage:
 
     async def _save(self, data: Dict[str, Any]):
         self._save_local(data)
-        if self.collection:
+        if self.collection is not None:
             asyncio.create_task(
                 self.collection.update_one({"_id": "master_data"}, {"$set": data}, upsert=True)
             )
@@ -338,7 +340,7 @@ class HybridStorage:
         data = self._load()
         data["telegraph_token"] = token
         self._save_local(data)
-        if self.collection:
+        if self.collection is not None:
             # Lửa chùa: Push on background without await since `set_telegraph_token` was synch in `main.py`
             try:
                 loop = asyncio.get_running_loop()
