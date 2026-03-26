@@ -1,5 +1,5 @@
-import os
-# Xóa proxy để tránh lỗi kết nối trên môi trường Termux/VPS có proxy hệ thống
+﻿import os
+# XÃ³a proxy Ä‘á»ƒ trÃ¡nh lá»—i káº¿t ná»‘i trÃªn mÃ´i trÆ°á»ng Termux/VPS cÃ³ proxy há»‡ thá»‘ng
 os.environ.pop("HTTPS_PROXY", None)
 os.environ.pop("HTTP_PROXY", None)
 os.environ.pop("ALL_PROXY", None)
@@ -41,7 +41,7 @@ DATA_JSON = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file_
 
 
 class TelegraphAPI:
-    """Tạo trang Telegraph chứa link tải artifacts."""
+    """Táº¡o trang Telegraph chá»©a link táº£i artifacts."""
     BASE = "https://api.telegra.ph"
 
     def __init__(self, storage):
@@ -54,7 +54,7 @@ class TelegraphAPI:
         self._token = self.storage.get_telegraph_token()
         if self._token:
             return
-        # Tạo tài khoản mới
+        # Táº¡o tÃ i khoáº£n má»›i
         async with aiohttp.ClientSession() as s:
             resp = await s.post(f"{self.BASE}/createAccount", json={
                 "short_name": "GKI Bot",
@@ -104,17 +104,17 @@ class TelegraphAPI:
         return "\n".join(lines)
 
     async def create_artifacts_page(self, title: str, artifacts: list, repo: str, run_id, owner: str, config_inputs: Optional[Dict[str, Any]] = None) -> Optional[str]:
-        """Tạo trang Telegraph với danh sách artifacts. Trả về URL."""
+        """Táº¡o trang Telegraph vá»›i danh sÃ¡ch artifacts. Tráº£ vá» URL."""
         await self._ensure_token()
         if not self._token:
             return None
 
-        # Xây dựng nội dung trang
+        # XÃ¢y dá»±ng ná»™i dung trang
         content = [
             {"tag": "h4", "children": ["Cau hinh build"]},
             {"tag": "pre", "children": [self._format_build_config(config_inputs or {})]},
             {"tag": "hr"},
-            {"tag": "h4", "children": [f"📦 Danh sách file tải về"]},
+            {"tag": "h4", "children": [f"ðŸ“¦ Danh sÃ¡ch file táº£i vá»"]},
             {"tag": "p", "children": [f"Build: {title}"]},
             {"tag": "hr"},
         ]
@@ -122,13 +122,13 @@ class TelegraphAPI:
             name = a["name"]
             dl_url = f"https://nightly.link/{owner}/{repo}/actions/runs/{run_id}/{name}.zip"
             content.append({"tag": "p", "children": [
-                {"tag": "a", "attrs": {"href": dl_url}, "children": [f"📥 {name}.zip"]}
+                {"tag": "a", "attrs": {"href": dl_url}, "children": [f"ðŸ“¥ {name}.zip"]}
             ]})
         
         content.append({"tag": "hr"})
         gh_url = f"https://github.com/{owner}/{repo}/actions/runs/{run_id}"
         content.append({"tag": "p", "children": [
-            {"tag": "a", "attrs": {"href": gh_url}, "children": ["🔗 Xem trên GitHub"]}
+            {"tag": "a", "attrs": {"href": gh_url}, "children": ["ðŸ”— Xem trÃªn GitHub"]}
         ]})
 
         async with aiohttp.ClientSession() as s:
@@ -300,7 +300,7 @@ async def poller(app):
                         html_url = rn["json"].get("html_url")
 
                         buttons = []
-                        # Tạo trang Telegraph cho artifacts
+                        # Táº¡o trang Telegraph cho artifacts
                         telegraph: TelegraphAPI = app.bot_data.get("telegraph")
                         artifacts = await gh.list_artifacts_for_run(repo, int(run_id))
                         telegraph_url = None
@@ -317,13 +317,13 @@ async def poller(app):
 
                         if telegraph_url:
                             buttons.append([
-                                InlineKeyboardButton("🌐 Xem GitHub", url=html_url),
-                                InlineKeyboardButton("📦 Tải file", url=telegraph_url)
+                                InlineKeyboardButton("ðŸŒ Xem GitHub", url=html_url),
+                                InlineKeyboardButton("ðŸ“¦ Táº£i file", url=telegraph_url)
                             ])
                         else:
-                            buttons.append([InlineKeyboardButton("🌐 Xem trên GitHub", url=html_url)])
+                            buttons.append([InlineKeyboardButton("ðŸŒ Xem trÃªn GitHub", url=html_url)])
                         
-                        buttons.append([InlineKeyboardButton("📊 Web Dashboard", url="https://kernel.takeshi.dev/")])
+                        buttons.append([InlineKeyboardButton("ðŸ“Š Web Dashboard", url="https://kernel.takeshi.dev/")])
                         kb = InlineKeyboardMarkup(buttons)
 
                         chat_id = job["chat_id"]
@@ -332,16 +332,16 @@ async def poller(app):
                         if not user_name:
                             user_name = str(user_id)
                         mention = f'<a href="tg://user?id={user_id}">{user_name}</a>'
-                        icon = "✅" if conclusion == "success" else "❌" if conclusion == "failure" else "⚠️"
+                        icon = "âœ…" if conclusion == "success" else "âŒ" if conclusion == "failure" else "âš ï¸"
                         
                         created_at_dt = datetime.fromisoformat(job.get("created_at", datetime.now(timezone.utc).isoformat()).replace("Z", "+00:00"))
                         elapsed = int((datetime.now(timezone.utc) - created_at_dt).total_seconds() // 60)
 
                         text = (
-                            f"{icon} <b>Build {job.get('type','?').upper()} kết thúc!</b>\n"
-                            f"📌 Trạng thái: <b>{conclusion.upper()}</b>\n"
-                            f"⏱️ Thời gian: <b>{elapsed} phút</b>\n"
-                            f"👤 Người gửi: {mention}"
+                            f"{icon} <b>Build {job.get('type','?').upper()} káº¿t thÃºc!</b>\n"
+                            f"ðŸ“Œ Tráº¡ng thÃ¡i: <b>{conclusion.upper()}</b>\n"
+                            f"â±ï¸ Thá»i gian: <b>{elapsed} phÃºt</b>\n"
+                            f"ðŸ‘¤ NgÆ°á»i gá»­i: {mention}"
                         )
                             
                         try:
@@ -359,7 +359,7 @@ async def poller(app):
                             })
                             if conclusion == "success":
                                 await storage.add_successful_build(run_id, user_id, job.get("ref", "unknown"), user_name)
-                                # Tự động gửi tin nhắn lưu cấu hình
+                                # Tá»± Ä‘á»™ng gá»­i tin nháº¯n lÆ°u cáº¥u hÃ¬nh
                                 try:
                                     if job.get("type", "gki") == "gki":
                                         await send_saved_config(app, run_id, job, user_id)
@@ -369,7 +369,7 @@ async def poller(app):
                             logger.error("Send notification failed: %s", e)
                             await storage.update_job(job["_id"], {"notified": True})
 
-                        # Báo cho những người đang đợi
+                        # BÃ¡o cho nhá»¯ng ngÆ°á»i Ä‘ang Ä‘á»£i
                         waiters = await storage.get_waiters()
                         if waiters:
                             for w in waiters:
@@ -377,7 +377,7 @@ async def poller(app):
                                 w_chat_id = w["chat_id"]
                                 w_name = w.get("user_name", str(w_user_id))
                                 w_mention = f'<a href="tg://user?id={w_user_id}">{w_name}</a>'
-                                msg_waiter = f"🔔 {w_mention} ơi, tiến trình đã hoàn tất! Bạn có thể dùng lệnh /gki lại ngay bây giờ nhé."
+                                msg_waiter = f"ðŸ”” {w_mention} Æ¡i, tiáº¿n trÃ¬nh Ä‘Ã£ hoÃ n táº¥t! Báº¡n cÃ³ thá»ƒ dÃ¹ng lá»‡nh /gki láº¡i ngay bÃ¢y giá» nhÃ©."
                                 try:
                                     await app.bot.send_message(
                                         chat_id=w_chat_id, text=msg_waiter,
@@ -425,17 +425,17 @@ async def cmd_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if action == "delete":
             if await storage.delete_key(code):
-                await _send_msg(update, context, f"🗑️ Đã xoá key <code>{code}</code>.", parse_mode=constants.ParseMode.HTML)
+                await _send_msg(update, context, f"ðŸ—‘ï¸ ÄÃ£ xoÃ¡ key <code>{code}</code>.", parse_mode=constants.ParseMode.HTML)
             else:
-                await _send_msg(update, context, f"⚠️ Key <code>{code}</code> không tồn tại.", parse_mode=constants.ParseMode.HTML)
+                await _send_msg(update, context, f"âš ï¸ Key <code>{code}</code> khÃ´ng tá»“n táº¡i.", parse_mode=constants.ParseMode.HTML)
             return
         else:
             uses = int(action)
     except Exception:
-        return await _send_msg(update, context, "Cú pháp: /key {mã} {số_lượt|delete}")
+        return await _send_msg(update, context, "CÃº phÃ¡p: /key {mÃ£} {sá»‘_lÆ°á»£t|delete}")
         
     await storage.set_key(code, uses, vip=False)
-    await _send_msg(update, context, f"✅ Đã set key <code>{code}</code> với {uses} lượt.", parse_mode=constants.ParseMode.HTML)
+    await _send_msg(update, context, f"âœ… ÄÃ£ set key <code>{code}</code> vá»›i {uses} lÆ°á»£t.", parse_mode=constants.ParseMode.HTML)
 
 
 async def cmd_keyvip(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -448,10 +448,10 @@ async def cmd_keyvip(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _, code, uses = update.message.text.strip().split(maxsplit=2)
         uses = int(uses)
     except Exception:
-        return await _send_msg(update, context, "Cú pháp: /keyvip {mã} {số_lượt}")
+        return await _send_msg(update, context, "CÃº phÃ¡p: /keyvip {mÃ£} {sá»‘_lÆ°á»£t}")
     await storage.set_key(code, uses, vip=True)
     await _send_msg(update, context,
-        f"💎 Đã tạo VIP key <code>{code}</code> với {uses} lượt (không giới hạn 1h).",
+        f"ðŸ’Ž ÄÃ£ táº¡o VIP key <code>{code}</code> vá»›i {uses} lÆ°á»£t (khÃ´ng giá»›i háº¡n 1h).",
         parse_mode=constants.ParseMode.HTML
     )
 
@@ -464,29 +464,29 @@ async def cmd_keys(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     keys = await storage.get_all_keys()
     if not keys:
-        m = await _send_msg(update, context, "ℹ️ Chưa có key nào được tạo.")
+        m = await _send_msg(update, context, "â„¹ï¸ ChÆ°a cÃ³ key nÃ o Ä‘Æ°á»£c táº¡o.")
         context.job_queue.run_once(_del_msg_job, when=60, chat_id=m.chat_id, data=m.message_id)
         return
-    lines = ["🔑 <b>Danh sách Key</b>\n"]
+    lines = ["ðŸ”‘ <b>Danh sÃ¡ch Key</b>\n"]
     for i, (code, info) in enumerate(keys.items(), 1):
         uses = info["uses"]
         vip = info.get("vip", False)
         
-        status = f"còn {uses} lượt" if uses > 0 else "Hết lượt"
+        status = f"cÃ²n {uses} lÆ°á»£t" if uses > 0 else "Háº¿t lÆ°á»£t"
         if vip:
-            icon = "💎"
+            icon = "ðŸ’Ž"
         elif uses > 0:
-            icon = "✅"
+            icon = "âœ…"
         else:
-            icon = "❌"
+            icon = "âŒ"
             
         lines.append(f"{i}. {icon}- <code>{code}</code> - {status}")
-    kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Đóng", callback_data=f"closemsg:{update.message.message_id}")]])
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("âŒ ÄÃ³ng", callback_data=f"closemsg:{update.message.message_id}")]])
     await _send_msg(update, context, "\n".join(lines), parse_mode=constants.ParseMode.HTML, reply_markup=kb)
 
 async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _safe_delete_user_msg(update, context)
-    m = await _send_msg(update, context, "🏓 Pong! Bot đang hoạt động bình thường.")
+    m = await _send_msg(update, context, "ðŸ“ Pong! Bot Ä‘ang hoáº¡t Ä‘á»™ng bÃ¬nh thÆ°á»ng.")
     if context.job_queue:
         context.job_queue.run_once(_del_msg_job, when=60, chat_id=m.chat_id, data=m.message_id)
         if update.message:
@@ -502,19 +502,19 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if chat and chat.type == "private" and user:
         await storage.track_dm_user(user.id, chat.id)
     msg = (
-        "👋 Xin chào! Mình là Bot Build Kernel GKI.\n\n"
-        "🤖 Mình giúp tự động hóa quá trình cấu hình và biên dịch (build) Kernel Android (GKI) qua GitHub Actions.\n\n"
-        "📌 <b>Các lệnh cơ bản:</b>\n"
-        "• /gki - Bắt đầu quá trình chọn và build Kernel\n"
-        "• /ping - Kiểm tra tình trạng hoạt động của Bot\n\n"
-        "<i>Ghi chú: Bạn cần có cấu hình hợp lệ hoặc được Admin cấp quyền để sử dụng tính năng build.</i>"
+        "ðŸ‘‹ Xin chÃ o! MÃ¬nh lÃ  Bot Build Kernel GKI.\n\n"
+        "ðŸ¤– MÃ¬nh giÃºp tá»± Ä‘á»™ng hÃ³a quÃ¡ trÃ¬nh cáº¥u hÃ¬nh vÃ  biÃªn dá»‹ch (build) Kernel Android (GKI) qua GitHub Actions.\n\n"
+        "ðŸ“Œ <b>CÃ¡c lá»‡nh cÆ¡ báº£n:</b>\n"
+        "â€¢ /gki - Báº¯t Ä‘áº§u quÃ¡ trÃ¬nh chá»n vÃ  build Kernel\n"
+        "â€¢ /ping - Kiá»ƒm tra tÃ¬nh tráº¡ng hoáº¡t Ä‘á»™ng cá»§a Bot\n\n"
+        "<i>Ghi chÃº: Báº¡n cáº§n cÃ³ cáº¥u hÃ¬nh há»£p lá»‡ hoáº·c Ä‘Æ°á»£c Admin cáº¥p quyá»n Ä‘á»ƒ sá»­ dá»¥ng tÃ­nh nÄƒng build.</i>"
     )
     if update.message:
         await _send_msg(update, context, msg, parse_mode=constants.ParseMode.HTML)
 
 
 async def dm_tracker(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Catch-all: tự động lưu chat_id của mọi user DM bot."""
+    """Catch-all: tá»± Ä‘á»™ng lÆ°u chat_id cá»§a má»i user DM bot."""
     chat = update.effective_chat
     user = update.effective_user
     if chat and chat.type == "private" and user:
@@ -523,13 +523,13 @@ async def dm_tracker(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Admin gửi thông báo đến tất cả user đã từng DM bot."""
+    """Admin gá»­i thÃ´ng bÃ¡o Ä‘áº¿n táº¥t cáº£ user Ä‘Ã£ tá»«ng DM bot."""
     user = update.effective_user
     storage: HybridStorage = context.application.bot_data["storage"]
     if not await is_admin(user.id, storage):
         return
 
-    # Lấy danh sách admin để loại trừ
+    # Láº¥y danh sÃ¡ch admin Ä‘á»ƒ loáº¡i trá»«
     admin_ids = set()
     admin_ids.add(config.OWNER_ID)
     admin_ids.update(config.ADMIN_IDS)
@@ -540,7 +540,7 @@ async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     targets = [u for u in dm_users if u.get("user_id") not in admin_ids]
 
     if not targets:
-        await _send_msg(update, context, "⚠️ Chưa có user nào trong danh sách để gửi.")
+        await _send_msg(update, context, "âš ï¸ ChÆ°a cÃ³ user nÃ o trong danh sÃ¡ch Ä‘á»ƒ gá»­i.")
         return
 
     replied = update.message.reply_to_message if update.message else None
@@ -548,9 +548,9 @@ async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not replied and not text_body:
         await _send_msg(update, context,
-            "📌 <b>Cách dùng:</b>\n"
-            "• <code>/chat Nội dung thông báo</code>\n"
-            "• Reply một tin nhắn + gõ <code>/chat</code>",
+            "ðŸ“Œ <b>CÃ¡ch dÃ¹ng:</b>\n"
+            "â€¢ <code>/chat Ná»™i dung thÃ´ng bÃ¡o</code>\n"
+            "â€¢ Reply má»™t tin nháº¯n + gÃµ <code>/chat</code>",
             parse_mode=constants.ParseMode.HTML
         )
         return
@@ -561,7 +561,7 @@ async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cid = u.get("chat_id")
         try:
             if replied:
-                # Forward tin nhắn gốc
+                # Forward tin nháº¯n gá»‘c
                 await context.bot.forward_message(
                     chat_id=cid,
                     from_chat_id=replied.chat_id,
@@ -574,10 +574,51 @@ async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
             fail += 1
 
     await _send_msg(update, context,
-        f"📢 Đã gửi thành công <b>{success}/{success + fail}</b> user.",
+        f"ðŸ“¢ ÄÃ£ gá»­i thÃ nh cÃ´ng <b>{success}/{success + fail}</b> user.",
         parse_mode=constants.ParseMode.HTML
     )
 
+
+
+
+async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Hien danh sach lenh huong dan."""
+    user = update.effective_user
+    storage: HybridStorage = context.application.bot_data["storage"]
+    admin = await is_admin(user.id, storage)
+
+    text = (
+        "📖 <b>Danh sách lệnh Bot</b>\n\n"
+        "📌 <b>Ai cũng dùng được:</b>\n"
+        "/start — Bắt đầu sử dụng bot\n"
+        "/gki — Build GKI Kernel (cần key nếu không phải admin)\n"
+        "/oki — Build OKI Kernel\n"
+        "/ping — Kiểm tra bot hoạt động\n"
+        "/st — Xem build đang chạy\n"
+        "/list — Lịch sử build thành công\n"
+        "/help — Hiện hướng dẫn này\n"
+    )
+
+    if admin:
+        text += (
+            "\n🔒 <b>Chỉ Admin:</b>\n"
+            "/key <code>&lt;code&gt; &lt;uses&gt;</code> — Tạo/sửa key\n"
+            "/keyvip <code>&lt;code&gt; &lt;uses&gt;</code> — Tạo VIP key\n"
+            "/keys — Xem danh sách key\n"
+            "/chat <code>&lt;nội dung&gt;</code> — Broadcast cho all user\n"
+            "/cancel_<code>&lt;run_id&gt;</code> — Hủy build\n"
+            "/delete_<code>&lt;run_id&gt;</code> — Xóa run\n"
+        )
+
+    text += (
+        "\n🌐 <b>Dashboard:</b> "
+        "<a href='https://kernel.takeshi.dev/'>kernel.takeshi.dev</a>"
+    )
+
+    await _send_msg(update, context, text,
+        parse_mode=constants.ParseMode.HTML,
+        disable_web_page_preview=True
+    )
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _safe_delete_user_msg(update, context)
@@ -589,7 +630,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     gh: GitHubAPI = context.application.bot_data["gh"]
     
-    # Lấy thông tin run trực tiếp từ GitHub để luôn chính xác nhất
+    # Láº¥y thÃ´ng tin run trá»±c tiáº¿p tá»« GitHub Ä‘á»ƒ luÃ´n chÃ­nh xÃ¡c nháº¥t
     active_runs = []
     for status in ["in_progress", "queued"]:
         url = f"{gh.base}/repos/{config.GITHUB_OWNER}/{config.GKI_REPO}/actions/runs?status={status}&per_page=10"
@@ -600,14 +641,14 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 active_runs.append(r)
 
     if not active_runs:
-        m = await _send_msg(update, context, "ℹ️ Hiện không có tiến trình build nào đang chạy.")
+        m = await _send_msg(update, context, "â„¹ï¸ Hiá»‡n khÃ´ng cÃ³ tiáº¿n trÃ¬nh build nÃ o Ä‘ang cháº¡y.")
         if context.job_queue:
             context.job_queue.run_once(_del_msg_job, when=60, chat_id=m.chat_id, data=m.message_id)
             if update.message:
                 context.job_queue.run_once(_del_msg_job, when=60, chat_id=update.message.chat_id, data=update.message.message_id)
         return
 
-    # Lấy danh sách jobs local để map user_id nếu có
+    # Láº¥y danh sÃ¡ch jobs local Ä‘á»ƒ map user_id náº¿u cÃ³
     jobs = await storage.get_jobs()
     run_to_job = {j.get("run_id"): j for j in jobs if j.get("run_id")}
 
@@ -656,22 +697,22 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
             mention = "GitHub / Manual"
 
         if idx > 1:
-            lines.append("") # thêm dòng trống giữa các job
+            lines.append("") # thÃªm dÃ²ng trá»‘ng giá»¯a cÃ¡c job
             
-        lines.append(f"<b>{idx}. Task by {mention} ( #{run_id}) đang chạy</b>")
-        lines.append(f"┠ <b>Đã chạy</b> {elapsed_min}p - <b>Ước tính còn</b> {rem_m}p")
-        lines.append(f"┠ <b>Tình trạng:</b> {status} ({name[:20]})")
-        lines.append(f"┖ <b>Huỷ job</b> → /cancel_{run_id}")
+        lines.append(f"<b>{idx}. Task by {mention} ( #{run_id}) Ä‘ang cháº¡y</b>")
+        lines.append(f"â”  <b>ÄÃ£ cháº¡y</b> {elapsed_min}p - <b>Æ¯á»›c tÃ­nh cÃ²n</b> {rem_m}p")
+        lines.append(f"â”  <b>TÃ¬nh tráº¡ng:</b> {status} ({name[:20]})")
+        lines.append(f"â”– <b>Huá»· job</b> â†’ /cancel_{run_id}")
 
     msg_text = "\n".join(lines)
-    kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Đóng", callback_data=f"closemsg:{update.message.message_id}")]])
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("âŒ ÄÃ³ng", callback_data=f"closemsg:{update.message.message_id}")]])
     await _send_msg(update, context, msg_text, parse_mode=constants.ParseMode.HTML, reply_markup=kb)
 
 def _run_button_text(repo_label: str, run: dict) -> str:
     n = run.get("run_number")
     status = run.get("status")
     name = run.get("name") or run.get("display_title") or "workflow"
-    return f"{repo_label} • #{n} • {status} • {name[:24]}"
+    return f"{repo_label} â€¢ #{n} â€¢ {status} â€¢ {name[:24]}"
 
 async def show_list_page(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 1, message_to_edit=None, cmd_msg_id=0):
     gh: GitHubAPI = context.application.bot_data["gh"]
@@ -696,7 +737,7 @@ async def show_list_page(update: Update, context: ContextTypes.DEFAULT_TYPE, pag
     github_runs = [r for r in github_runs if _is_target_success_run(r)]
 
     if not github_runs:
-        text = "ℹ️ Hiện không có lịch sử build GKI nào thành công."
+        text = "â„¹ï¸ Hiá»‡n khÃ´ng cÃ³ lá»‹ch sá»­ build GKI nÃ o thÃ nh cÃ´ng."
         if message_to_edit:
             return await message_to_edit.edit_text(text)
         else:
@@ -718,11 +759,11 @@ async def show_list_page(update: Update, context: ContextTypes.DEFAULT_TYPE, pag
     run_to_job = {j.get("run_id"): j for j in jobs if j.get("run_id")}
 
     if message_to_edit:
-        await message_to_edit.edit_text("⏳ Đang tải thông tin trang...")
+        await message_to_edit.edit_text("â³ Äang táº£i thÃ´ng tin trang...")
     else:
-        message_to_edit = await _send_msg(update, context, "⏳ Đang tải thông tin trang...")
+        message_to_edit = await _send_msg(update, context, "â³ Äang táº£i thÃ´ng tin trang...")
 
-    text = f"🗂 <b>Danh sách các bản build GKI:</b>\n\n"
+    text = f"ðŸ—‚ <b>Danh sÃ¡ch cÃ¡c báº£n build GKI:</b>\n\n"
 
     # Render text for the 5 items
     for i, r in enumerate(current_builds):
@@ -739,10 +780,10 @@ async def show_list_page(update: Update, context: ContextTypes.DEFAULT_TYPE, pag
         repo_url = f"https://github.com/{config.GITHUB_OWNER}/{repo}"
         html_url = r.get("html_url", f"{repo_url}/actions/runs/{run_id}")
 
-        # Dùng nightly.link theo run_id để mở trang tải artifacts trực tiếp.
-        # Cách này tránh gọi artifacts API cho từng item nên list load nhanh hơn.
+        # DÃ¹ng nightly.link theo run_id Ä‘á»ƒ má»Ÿ trang táº£i artifacts trá»±c tiáº¿p.
+        # CÃ¡ch nÃ y trÃ¡nh gá»i artifacts API cho tá»«ng item nÃªn list load nhanh hÆ¡n.
         nightly_url = f"https://nightly.link/{config.GITHUB_OWNER}/{repo}/actions/runs/{run_id}"
-        artifact_str = f"📦 <a href='{nightly_url}'>Tải về</a>"
+        artifact_str = f"ðŸ“¦ <a href='{nightly_url}'>Táº£i vá»</a>"
 
         job = run_to_job.get(run_id)
         if job:
@@ -751,7 +792,7 @@ async def show_list_page(update: Update, context: ContextTypes.DEFAULT_TYPE, pag
             if not user_name:
                 user_name = str(user_id)
             if user_id == 0:
-                mention = "Hệ thống cũ"
+                mention = "Há»‡ thá»‘ng cÅ©"
             else:
                 mention = f'<a href="tg://user?id={user_id}">{user_name}</a>'
         else:
@@ -760,17 +801,17 @@ async def show_list_page(update: Update, context: ContextTypes.DEFAULT_TYPE, pag
 
         text += f"<b>{start_idx + i + 1}. Run #{run_id}</b> by {mention}\n"
         text += f"Time: {time_str}\n"
-        text += f"Xoá: /delete_{run_id}\n"
+        text += f"XoÃ¡: /delete_{run_id}\n"
         text += f"<blockquote><b>Xem : <a href='{html_url}'>Github</a> | <a href='{nightly_url}'>File</a> | <a href='https://kernel.takeshi.dev/'>Dashboard</a></b></blockquote>\n\n"
 
     kb = []
     if total_pages > 1:
         kb.append([
-            InlineKeyboardButton("⬅️ Trước", callback_data=f"listpage:{page-1}"),
+            InlineKeyboardButton("â¬…ï¸ TrÆ°á»›c", callback_data=f"listpage:{page-1}"),
             InlineKeyboardButton(f"{page}/{total_pages}", callback_data="none"),
-            InlineKeyboardButton("Sau ➡️", callback_data=f"listpage:{page+1}")
+            InlineKeyboardButton("Sau âž¡ï¸", callback_data=f"listpage:{page+1}")
         ])
-    kb.append([InlineKeyboardButton("❌ Đóng", callback_data=f"closemsg:{cmd_msg_id}")])
+    kb.append([InlineKeyboardButton("âŒ ÄÃ³ng", callback_data=f"closemsg:{cmd_msg_id}")])
     reply_markup = InlineKeyboardMarkup(kb)
     await message_to_edit.edit_text(text, parse_mode=constants.ParseMode.HTML, reply_markup=reply_markup, disable_web_page_preview=True)
 
@@ -813,7 +854,7 @@ def _format_build_lines(inputs: dict) -> list[str]:
         if inputs.get(tk):
             sl = sub_list if subs else SUB_LEVELS.get(tk, [])
             for s in sl:
-                lines.append(f"🌿 Build: {prefix}|{prefix_tk}.{s.strip()}")
+                lines.append(f"ðŸŒ¿ Build: {prefix}|{prefix_tk}.{s.strip()}")
                 
     return lines
 
@@ -828,7 +869,7 @@ async def cb_list_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
         page = int(page_str)
     except:
         page = 1
-    # Tìm cmd_msg_id từ nút Đóng trong reply_markup hiện tại
+    # TÃ¬m cmd_msg_id tá»« nÃºt ÄÃ³ng trong reply_markup hiá»‡n táº¡i
     cmd_msg_id = 0
     if q.message and q.message.reply_markup:
         for row in q.message.reply_markup.inline_keyboard:
@@ -853,12 +894,12 @@ async def cb_run_controls(update: Update, context: ContextTypes.DEFAULT_TYPE):
     repo = config.GKI_REPO
     view_url = f"https://github.com/{config.GITHUB_OWNER}/{repo}/actions/runs/{run_id}"
     kb = [
-        [InlineKeyboardButton("Hủy bỏ", callback_data=f"runctl:cancel:{repo_tag}:{run_id}"),
-         InlineKeyboardButton("Đóng", callback_data=f"runctl:close:{repo_tag}:{run_id}")],
+        [InlineKeyboardButton("Há»§y bá»", callback_data=f"runctl:cancel:{repo_tag}:{run_id}"),
+         InlineKeyboardButton("ÄÃ³ng", callback_data=f"runctl:close:{repo_tag}:{run_id}")],
         [InlineKeyboardButton("Xem", url=view_url)]
     ]
     await q.edit_message_text(
-        text=f"Run #{run_id} — GKI",
+        text=f"Run #{run_id} â€” GKI",
         reply_markup=InlineKeyboardMarkup(kb)
     )
 
@@ -880,19 +921,19 @@ async def cb_run_control_action(update: Update, context: ContextTypes.DEFAULT_TY
 
     repo = config.GKI_REPO
     if action == "cancel":
-        # 1. Hiển thị trạng thái đang hủy
-        await q.edit_message_text(f"⏳ Đang gửi lệnh hủy run #{run_id}...")
+        # 1. Hiá»ƒn thá»‹ tráº¡ng thÃ¡i Ä‘ang há»§y
+        await q.edit_message_text(f"â³ Äang gá»­i lá»‡nh há»§y run #{run_id}...")
         
-        # 2. Gửi lệnh hủy
+        # 2. Gá»­i lá»‡nh há»§y
         res = await gh.cancel_run(repo, run_id)
         if res["status"] not in (202, 204):
-            await q.edit_message_text(f"❌ Gửi lệnh hủy thất bại: HTTP {res['status']}")
+            await q.edit_message_text(f"âŒ Gá»­i lá»‡nh há»§y tháº¥t báº¡i: HTTP {res['status']}")
             return
         
-        # 3. Cập nhật trạng thái đang chờ
-        await q.edit_message_text(f"⏳ Đã gửi lệnh hủy run #{run_id}.\nĐang chờ xác nhận từ GitHub...")
+        # 3. Cáº­p nháº­t tráº¡ng thÃ¡i Ä‘ang chá»
+        await q.edit_message_text(f"â³ ÄÃ£ gá»­i lá»‡nh há»§y run #{run_id}.\nÄang chá» xÃ¡c nháº­n tá»« GitHub...")
         
-        # 4. Poll cho đến khi run thực sự cancelled (tối đa 60s)
+        # 4. Poll cho Ä‘áº¿n khi run thá»±c sá»± cancelled (tá»‘i Ä‘a 60s)
         import asyncio
         for i in range(20):  # 20 x 3s = 60s
             await asyncio.sleep(3)
@@ -903,47 +944,47 @@ async def cb_run_control_action(update: Update, context: ContextTypes.DEFAULT_TY
                 conclusion = run_data.get("conclusion", "")
                 if run_status == "completed":
                     if conclusion == "cancelled":
-                        # Tự động xoá job sau khi cancel
+                        # Tá»± Ä‘á»™ng xoÃ¡ job sau khi cancel
                         await gh.delete_run(repo, run_id)
                         await storage.delete_job_by_run_id(run_id)
                         await q.edit_message_text(
-                            f"✅ <b>Đã hủy và xoá thành công!</b>\n\n"
-                            f"Run #{run_id} đã được hủy và dọn dẹp.",
+                            f"âœ… <b>ÄÃ£ há»§y vÃ  xoÃ¡ thÃ nh cÃ´ng!</b>\n\n"
+                            f"Run #{run_id} Ä‘Ã£ Ä‘Æ°á»£c há»§y vÃ  dá»n dáº¹p.",
                             parse_mode="HTML"
                         )
                     else:
                         await q.edit_message_text(
-                            f"ℹ️ Run #{run_id} đã hoàn tất với kết quả: <b>{conclusion}</b>",
+                            f"â„¹ï¸ Run #{run_id} Ä‘Ã£ hoÃ n táº¥t vá»›i káº¿t quáº£: <b>{conclusion}</b>",
                             parse_mode="HTML"
                         )
-                    # Xóa tin nhắn lệnh gốc
+                    # XÃ³a tin nháº¯n lá»‡nh gá»‘c
                     if cmd_msg_id:
                         try:
                             await context.bot.delete_message(chat_id=q.message.chat_id, message_id=cmd_msg_id)
                         except Exception:
                             pass
-                    # Tự xóa sau 60s
+                    # Tá»± xÃ³a sau 60s
                     if context.job_queue:
                         context.job_queue.run_once(_del_msg_job, when=60, chat_id=q.message.chat_id, data=q.message.message_id)
                     return
         
-        # Timeout - vẫn chưa cancelled sau 60s
+        # Timeout - váº«n chÆ°a cancelled sau 60s
         await q.edit_message_text(
-            f"⚠️ Đã gửi lệnh hủy run #{run_id} nhưng chưa xác nhận được.\n"
-            f"Vui lòng kiểm tra trên GitHub.",
+            f"âš ï¸ ÄÃ£ gá»­i lá»‡nh há»§y run #{run_id} nhÆ°ng chÆ°a xÃ¡c nháº­n Ä‘Æ°á»£c.\n"
+            f"Vui lÃ²ng kiá»ƒm tra trÃªn GitHub.",
             parse_mode="HTML"
         )
         if context.job_queue:
             context.job_queue.run_once(_del_msg_job, when=60, chat_id=q.message.chat_id, data=q.message.message_id)
             
     elif action == "close":
-        # Xóa cả tin nhắn bot và lệnh gọi
+        # XÃ³a cáº£ tin nháº¯n bot vÃ  lá»‡nh gá»i
         chat_id = q.message.chat_id
         try:
             await q.delete_message()
         except Exception:
             pass
-        # cmd_msg_id có thể đc truyền từ callback
+        # cmd_msg_id cÃ³ thá»ƒ Ä‘c truyá»n tá»« callback
         if cmd_msg_id:
             try:
                 await context.bot.delete_message(chat_id=chat_id, message_id=cmd_msg_id)
@@ -969,7 +1010,7 @@ async def check_user_job_limit(update: Update, context: ContextTypes.DEFAULT_TYP
         elapsed = (datetime.now(timezone.utc) - job_created_at).total_seconds()
         if elapsed < 3600:
             remaining = int((3600 - elapsed) // 60) + 1
-            m = await update.message.reply_text(f"⚠️ Chỉ được 1 job/1h. Vui lòng đợi {remaining} phút.", quote=False)
+            m = await update.message.reply_text(f"âš ï¸ Chá»‰ Ä‘Æ°á»£c 1 job/1h. Vui lÃ²ng Ä‘á»£i {remaining} phÃºt.", quote=False)
             context.job_queue.run_once(_del_msg_job, when=60, chat_id=m.chat_id, data=m.message_id)
             return False
     return True
@@ -994,29 +1035,29 @@ async def send_saved_config(app, run_id, job, chat_id):
     if not inputs:
         return False
         
-    lines = [f"💾 <b>LƯU TRỮ CẤU HÌNH GKI BUILD #{run_id}</b>"]
+    lines = [f"ðŸ’¾ <b>LÆ¯U TRá»® Cáº¤U HÃŒNH GKI BUILD #{run_id}</b>"]
     # Get build date from job if available, else current time
     job_created_at = job.get("created_at")
     if job_created_at:
         try:
             dt = datetime.fromisoformat(job_created_at).replace(tzinfo=timezone.utc).astimezone(ZoneInfo("Asia/Ho_Chi_Minh"))
-            lines.append(f"🕒 <b>Ngày build</b>: <code>{dt.strftime('%H:%M %d/%m/%Y')}</code>\n")
+            lines.append(f"ðŸ•’ <b>NgÃ y build</b>: <code>{dt.strftime('%H:%M %d/%m/%Y')}</code>\n")
         except:
             pass
     else:
-        lines.append(f"🕒 <b>Ngày build</b>: <code>Chưa rõ</code>\n")
+        lines.append(f"ðŸ•’ <b>NgÃ y build</b>: <code>ChÆ°a rÃµ</code>\n")
 
-    lines.append(f"• <b>KernelSU Variant</b>: <code>{inputs.get('kernelsu_variant', 'None')}</code>")
-    lines.append(f"• <b>KernelSU Branch</b>: <code>{inputs.get('kernelsu_branch', 'None')}</code>")
+    lines.append(f"â€¢ <b>KernelSU Variant</b>: <code>{inputs.get('kernelsu_variant', 'None')}</code>")
+    lines.append(f"â€¢ <b>KernelSU Branch</b>: <code>{inputs.get('kernelsu_branch', 'None')}</code>")
     
     if inputs.get('version'):
-        lines.append(f"• <b>Version Custom</b>: <code>{inputs.get('version')}</code>")
+        lines.append(f"â€¢ <b>Version Custom</b>: <code>{inputs.get('version')}</code>")
 
-    lines.append(f"• <b>Compile BBG</b>: {'✅ Có' if inputs.get('use_bbg') else '❌ Không'}")
-    lines.append(f"• <b>Compile KPM</b>: {'✅ Có' if inputs.get('use_kpm') else '❌ Không'}")
-    lines.append(f"• <b>Dùng ZRAM</b>: {'✅ Có' if inputs.get('use_zram') else '❌ Không'}")
-    # Cancel SUSFS logic is inverted from 'Bật SUSFS', check 'cancel_susfs'
-    lines.append(f"• <b>Bật SUSFS</b>: {'❌ Không' if inputs.get('cancel_susfs') else '✅ Có'}")
+    lines.append(f"â€¢ <b>Compile BBG</b>: {'âœ… CÃ³' if inputs.get('use_bbg') else 'âŒ KhÃ´ng'}")
+    lines.append(f"â€¢ <b>Compile KPM</b>: {'âœ… CÃ³' if inputs.get('use_kpm') else 'âŒ KhÃ´ng'}")
+    lines.append(f"â€¢ <b>DÃ¹ng ZRAM</b>: {'âœ… CÃ³' if inputs.get('use_zram') else 'âŒ KhÃ´ng'}")
+    # Cancel SUSFS logic is inverted from 'Báº­t SUSFS', check 'cancel_susfs'
+    lines.append(f"â€¢ <b>Báº­t SUSFS</b>: {'âŒ KhÃ´ng' if inputs.get('cancel_susfs') else 'âœ… CÃ³'}")
     
     target_flags = []
     if inputs.get('build_a12_5_10'): target_flags.append('A12 (5.10)')
@@ -1025,21 +1066,21 @@ async def send_saved_config(app, run_id, job, chat_id):
     if inputs.get('build_a15_6_6'): target_flags.append('A15 (6.6)')
     
     if inputs.get('build_all'):
-        lines.append(f"• <b>Phiên bản Android</b>: <code>Tất cả (A12-A15)</code>")
+        lines.append(f"â€¢ <b>PhiÃªn báº£n Android</b>: <code>Táº¥t cáº£ (A12-A15)</code>")
     elif target_flags:
-        lines.append(f"• <b>Phiên bản Android</b>: <code>{', '.join(target_flags)}</code>")
+        lines.append(f"â€¢ <b>PhiÃªn báº£n Android</b>: <code>{', '.join(target_flags)}</code>")
         
     sub_levels = inputs.get('sub_levels')
     if sub_levels:
-        lines.append(f"• <b>Sub-versions (chỉ định)</b>: <code>{sub_levels.replace(',', ', ')}</code>")
+        lines.append(f"â€¢ <b>Sub-versions (chá»‰ Ä‘á»‹nh)</b>: <code>{sub_levels.replace(',', ', ')}</code>")
     else:
-        lines.append(f"• <b>Sub-versions</b>: <code>Tất cả các bản cập nhật phụ</code>")
+        lines.append(f"â€¢ <b>Sub-versions</b>: <code>Táº¥t cáº£ cÃ¡c báº£n cáº­p nháº­t phá»¥</code>")
         
-    # Tạo Inline Keyboard cho tin nhắn lưu cấu hình
+    # Táº¡o Inline Keyboard cho tin nháº¯n lÆ°u cáº¥u hÃ¬nh
     save_kb = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🌐 Xem trên GitHub", url=f"https://github.com/{config.GITHUB_OWNER}/{config.GKI_REPO}/actions/runs/{run_id}"),
-            InlineKeyboardButton("📦 Tải file", url=f"https://nightly.link/{config.GITHUB_OWNER}/{config.GKI_REPO}/actions/runs/{run_id}")
+            InlineKeyboardButton("ðŸŒ Xem trÃªn GitHub", url=f"https://github.com/{config.GITHUB_OWNER}/{config.GKI_REPO}/actions/runs/{run_id}"),
+            InlineKeyboardButton("ðŸ“¦ Táº£i file", url=f"https://nightly.link/{config.GITHUB_OWNER}/{config.GKI_REPO}/actions/runs/{run_id}")
         ]
     ])
     
@@ -1062,21 +1103,21 @@ async def cb_save_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _, run_id_str = q.data.split(":")
         run_id = int(run_id_str)
     except:
-        return await q.answer("Lỗi ID", show_alert=True)
+        return await q.answer("Lá»—i ID", show_alert=True)
         
     job = await storage.get_job_by_run_id(run_id)
     if not job:
-        return await q.answer("Không tìm thấy dữ liệu build này trong hệ thống.", show_alert=True)
+        return await q.answer("KhÃ´ng tÃ¬m tháº¥y dá»¯ liá»‡u build nÃ y trong há»‡ thá»‘ng.", show_alert=True)
         
     try:
         if await send_saved_config(context.application, run_id, job, q.from_user.id):
-            await q.answer("Đã gửi tin nhắn cấu hình vào chat riêng của bạn! 📩", show_alert=True)
+            await q.answer("ÄÃ£ gá»­i tin nháº¯n cáº¥u hÃ¬nh vÃ o chat riÃªng cá»§a báº¡n! ðŸ“©", show_alert=True)
         else:
-            await q.answer("Không có thông tin cấu hình cho build này.", show_alert=True)
+            await q.answer("KhÃ´ng cÃ³ thÃ´ng tin cáº¥u hÃ¬nh cho build nÃ y.", show_alert=True)
     except Exception as e:
         logger.error("Failed to PM user: %s", e)
-        # Nút "Lưu" có thể được bấm trong nhóm. Nếu user chưa start bot, sẽ ném lỗi Forbidden
-        await q.answer("❌ Lỗi: Bạn cần nhắn tin cho Bot trước (nhấn START) để nhận tin nhắn riêng.", show_alert=True)
+        # NÃºt "LÆ°u" cÃ³ thá»ƒ Ä‘Æ°á»£c báº¥m trong nhÃ³m. Náº¿u user chÆ°a start bot, sáº½ nÃ©m lá»—i Forbidden
+        await q.answer("âŒ Lá»—i: Báº¡n cáº§n nháº¯n tin cho Bot trÆ°á»›c (nháº¥n START) Ä‘á»ƒ nháº­n tin nháº¯n riÃªng.", show_alert=True)
 
 async def cmd_cancel_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _safe_delete_user_msg(update, context)
@@ -1091,10 +1132,10 @@ async def cmd_cancel_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
         run_id_str = raw_cmd.split("_")[1].split("@")[0]
         run_id = int(run_id_str)
     except:
-        return await _send_msg(update, context, "❌ ID không hợp lệ.")
+        return await _send_msg(update, context, "âŒ ID khÃ´ng há»£p lá»‡.")
         
     gh: GitHubAPI = context.application.bot_data["gh"]
-    msg = await _send_msg(update, context, f"⏳ Đang gửi lệnh hủy Run #{run_id} lên GitHub...")
+    msg = await _send_msg(update, context, f"â³ Äang gá»­i lá»‡nh há»§y Run #{run_id} lÃªn GitHub...")
     res = await gh.cancel_run(config.GKI_REPO, run_id)
     if res["status"] in (202, 204):
         for _ in range(10):
@@ -1105,11 +1146,11 @@ async def cmd_cancel_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
         del_res = await gh.delete_run(config.GKI_REPO, run_id)
         if del_res["status"] == 204:
             await storage.delete_job_by_run_id(run_id)
-            await msg.edit_text(f"✅ Đã hủy và dọn dẹp thành công Run #{run_id}.")
+            await msg.edit_text(f"âœ… ÄÃ£ há»§y vÃ  dá»n dáº¹p thÃ nh cÃ´ng Run #{run_id}.")
         else:
-            await msg.edit_text(f"⚠️ Hủy thành công nhưng xóa thất bại (HTTP {del_res['status']}).")
+            await msg.edit_text(f"âš ï¸ Há»§y thÃ nh cÃ´ng nhÆ°ng xÃ³a tháº¥t báº¡i (HTTP {del_res['status']}).")
     else:
-        await msg.edit_text(f"❌ Lỗi hủy: {res['status']} {res.get('json', '')}")
+        await msg.edit_text(f"âŒ Lá»—i há»§y: {res['status']} {res.get('json', '')}")
         
     if context.job_queue:
         context.job_queue.run_once(_del_msg_job, when=10, chat_id=msg.chat_id, data=msg.message_id)
@@ -1129,31 +1170,31 @@ async def cmd_delete_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
         run_id_str = raw_cmd.split("_")[1].split("@")[0]
         run_id = int(run_id_str)
     except:
-        return await _send_msg(update, context, "❌ ID không hợp lệ.")
+        return await _send_msg(update, context, "âŒ ID khÃ´ng há»£p lá»‡.")
         
     gh: GitHubAPI = context.application.bot_data["gh"]
     
-    msg = await _send_msg(update, context, f"⏳ Đang gửi lệnh xoá Run #{run_id} lên GitHub...")
+    msg = await _send_msg(update, context, f"â³ Äang gá»­i lá»‡nh xoÃ¡ Run #{run_id} lÃªn GitHub...")
     res = await gh.delete_run(config.GKI_REPO, run_id)
     
     if res["status"] in (202, 204):
-        await msg.edit_text(f"✅ Đã yêu cầu xoá thành công Run #{run_id}.")
+        await msg.edit_text(f"âœ… ÄÃ£ yÃªu cáº§u xoÃ¡ thÃ nh cÃ´ng Run #{run_id}.")
         await storage.delete_job_by_run_id(run_id)
     else:
         if res["status"] in (404,):
             await storage.delete_job_by_run_id(run_id)
-            await msg.edit_text(f"✅ Run #{run_id} không tồn tại trên GitHub. Đã xoá khỏi dữ liệu nội bộ.")
+            await msg.edit_text(f"âœ… Run #{run_id} khÃ´ng tá»“n táº¡i trÃªn GitHub. ÄÃ£ xoÃ¡ khá»i dá»¯ liá»‡u ná»™i bá»™.")
         else:
-            await msg.edit_text(f"❌ Lỗi xoá: {res['status']} {res.get('json', '')}")
+            await msg.edit_text(f"âŒ Lá»—i xoÃ¡: {res['status']} {res.get('json', '')}")
             
-    # Xoá tin nhắn sau 10s
+    # XoÃ¡ tin nháº¯n sau 10s
     if context.job_queue:
         context.job_queue.run_once(_del_msg_job, when=10, chat_id=msg.chat_id, data=msg.message_id)
         if update.message:
             context.job_queue.run_once(_del_msg_job, when=10, chat_id=update.message.chat_id, data=update.message.message_id)
 
 async def start_web_server(app_bot):
-    """Khởi chạy API Web Server cục bộ phục vụ Dashboard Realtime"""
+    """Khá»Ÿi cháº¡y API Web Server cá»¥c bá»™ phá»¥c vá»¥ Dashboard Realtime"""
     app = aiohttp_web.Application()
     
     async def api_data(request):
@@ -1181,7 +1222,7 @@ async def start_web_server(app_bot):
     port = int(os.getenv("WEB_PORT", 5000))
     site = aiohttp_web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
-    logger.info(f"✅ Real-time Web Dashboard started natively on 0.0.0.0:{port}")
+    logger.info(f"âœ… Real-time Web Dashboard started natively on 0.0.0.0:{port}")
 
 
 def main():
@@ -1204,7 +1245,7 @@ def main():
     app.bot_data["gh"] = gh
     app.bot_data["telegraph"] = telegraph
 
-    # Background tasks sẽ được chạy trong _post_init
+    # Background tasks sáº½ Ä‘Æ°á»£c cháº¡y trong _post_init
 
     # Owner-only commands
     app.add_handler(CommandHandler("start", cmd_start))
@@ -1216,6 +1257,7 @@ def main():
     app.add_handler(CommandHandler("st", cmd_status))
     app.add_handler(CommandHandler("list", cmd_list))
     app.add_handler(CommandHandler("ping", cmd_ping))
+    app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("chat", cmd_broadcast))
     app.add_handler(CallbackQueryHandler(cb_list_page, pattern=r"^listpage:\d+$"))
     app.add_handler(CallbackQueryHandler(cb_close_msg, pattern=r"^closemsg"))
@@ -1242,14 +1284,14 @@ def main():
         fallbacks=gki_conv.fallbacks,
         per_user=True,
         per_chat=False,
-        conversation_timeout=300  # 5 phút timeout tránh conversation treo
+        conversation_timeout=300  # 5 phÃºt timeout trÃ¡nh conversation treo
     ))
 
     # OKI conversation
     app.add_handler(build_oki_conversation(gh, storage, config))
 
     async def _post_init(app_):
-        # Seed dm_users từ lịch sử jobs cũ
+        # Seed dm_users tá»« lá»‹ch sá»­ jobs cÅ©
         seeded = await app_.bot_data["storage"].seed_dm_users_from_jobs()
         if seeded:
             logger.warning("Seeded %d DM users from job history", seeded)
