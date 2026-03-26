@@ -1,4 +1,4 @@
-﻿import os
+import os
 # XÃ³a proxy Ä‘á»ƒ trÃ¡nh lá»—i káº¿t ná»‘i trÃªn mÃ´i trÆ°á»ng Termux/VPS cÃ³ proxy há»‡ thá»‘ng
 os.environ.pop("HTTPS_PROXY", None)
 os.environ.pop("HTTP_PROXY", None)
@@ -485,29 +485,6 @@ async def cmd_keys(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _send_msg(update, context, "\n".join(lines), parse_mode=constants.ParseMode.HTML, reply_markup=kb)
 
 async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await _safe_delete_user_msg(update, context)
-    m = await _send_msg(update, context, "ðŸ“ Pong! Bot Ä‘ang hoáº¡t Ä‘á»™ng bÃ¬nh thÆ°á»ng.")
-    if context.job_queue:
-        context.job_queue.run_once(_del_msg_job, when=60, chat_id=m.chat_id, data=m.message_id)
-        if update.message:
-            context.job_queue.run_once(_del_msg_job, when=60, chat_id=update.message.chat_id, data=update.message.message_id)
-
-
-async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await _safe_delete_user_msg(update, context)
-    storage: HybridStorage = context.application.bot_data["storage"]
-    user = update.effective_user
-    chat = update.effective_chat
-    # Track DM user
-    if chat and chat.type == "private" and user:
-        await storage.track_dm_user(user.id, chat.id)
-    msg = (
-        "ðŸ‘‹ Xin chÃ o! MÃ¬nh lÃ  Bot Build Kernel GKI.\n\n"
-        "ðŸ¤– MÃ¬nh giÃºp tá»± Ä‘á»™ng hÃ³a quÃ¡ trÃ¬nh cáº¥u hÃ¬nh vÃ  biÃªn dá»‹ch (build) Kernel Android (GKI) qua GitHub Actions.\n\n"
-        "ðŸ“Œ <b>CÃ¡c lá»‡nh cÆ¡ báº£n:</b>\n"
-        "â€¢ /gki - Báº¯t Ä‘áº§u quÃ¡ trÃ¬nh chá»n vÃ  build Kernel\n"
-        "â€¢ /ping - Kiá»ƒm tra tÃ¬nh tráº¡ng hoáº¡t Ä‘á»™ng cá»§a Bot\n\n"
-        "<i>Ghi chÃº: Báº¡n cáº§n cÃ³ cáº¥u hÃ¬nh há»£p lá»‡ hoáº·c Ä‘Æ°á»£c Admin cáº¥p quyá»n Ä‘á»ƒ sá»­ dá»¥ng tÃ­nh nÄƒng build.</i>"
     )
     if update.message:
         await _send_msg(update, context, msg, parse_mode=constants.ParseMode.HTML)
