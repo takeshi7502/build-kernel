@@ -34,19 +34,13 @@ class HybridStorage:
         if not os.path.exists(self.path):
             self._save_local({"keys": {}, "jobs": [], "messages": {}, "admins": [], "auth_chats": [], "waiters": [], "successful_builds": []})
             
-        logger.warning("[DIAG] HybridStorage init: path=%s, mongo_uri=%s, sync_mode=%s, writer_hostname=%s, hostname=%s, AsyncIOMotorClient=%s",
-                       self.path, bool(self.mongo_uri), self.sync_mode, self.writer_hostname, self.hostname, AsyncIOMotorClient is not None)
-        logger.warning("[DIAG] data.json exists=%s, file size=%s", os.path.exists(self.path), os.path.getsize(self.path) if os.path.exists(self.path) else 0)
         if self.mongo_uri and AsyncIOMotorClient:
             try:
                 self.client = AsyncIOMotorClient(self.mongo_uri, serverSelectionTimeoutMS=5000)
                 self.db = self.client["kernel_bot_db"]
                 self.collection = self.db["storage_data"]
-                logger.warning("[DIAG] MongoDB client created OK, collection=%s", self.collection is not None)
             except Exception as e:
-                logger.error("[DIAG] MongoDB connection failed: %s", e)
-        else:
-            logger.warning("[DIAG] MongoDB SKIPPED: mongo_uri=%s, AsyncIOMotorClient=%s", bool(self.mongo_uri), AsyncIOMotorClient is not None)
+                logger.error("MongoDB connection failed: %s", e)
 
     def _resolved_sync_mode(self) -> str:
         mode = self.sync_mode
@@ -68,46 +62,34 @@ class HybridStorage:
 
     async def _push_cloud(self, data: Dict[str, Any]):
         if self.collection is None:
-            logger.warning("[DIAG] _push_cloud: SKIPPED (collection is None)")
             return
         try:
             payload = {"_id": "master_data", **data}
-            logger.warning("[DIAG] _push_cloud: sending %d keys to Atlas...", len(data))
-            result = await self.collection.replace_one(
+            await self.collection.replace_one(
                 {"_id": "master_data"},
                 payload,
                 upsert=True
             )
-            logger.warning("[DIAG] _push_cloud: SUCCESS matched=%s modified=%s upserted_id=%s",
-                           result.matched_count, result.modified_count, result.upserted_id)
         except Exception as e:
-            logger.error("[DIAG] _push_cloud: FAILED: %s", e)
+            logger.error("MongoDB push error: %s", e)
 
     async def _sync_with_cloud(self):
-        logger.warning("[DIAG] _sync_with_cloud: START collection=%s, can_push=%s, can_pull=%s, resolved_mode=%s",
-                       self.collection is not None, self._can_push(), self._can_pull(), self._resolved_sync_mode())
         if self.collection is None:
-            logger.warning("[DIAG] _sync_with_cloud: ABORT (collection is None)")
             return
         try:
             cloud_doc = await self.collection.find_one({"_id": "master_data"})
             local_data = self._load()
-            logger.warning("[DIAG] _sync_with_cloud: cloud_doc=%s, local_keys=%d, local_jobs=%d",
-                           cloud_doc is not None, len(local_data.get("keys", {})), len(local_data.get("jobs", [])))
             
             # If fresh local (no keys and no jobs) but cloud has data -> Restore
             if self._can_pull() and cloud_doc and not local_data.get("keys") and not local_data.get("jobs"):
                 cloud_doc.pop("_id", None)
                 async with self._lock:
                     self._save_local(cloud_doc)
-                logger.warning("[DIAG] _sync_with_cloud: RESTORED from cloud!")
+                logger.warning("Restored local data.json from MongoDB Atlas!")
             elif self._can_push():
-                logger.warning("[DIAG] _sync_with_cloud: PUSHING local to cloud...")
                 await self._push_cloud(local_data)
-            else:
-                logger.warning("[DIAG] _sync_with_cloud: NO ACTION TAKEN")
         except Exception as e:
-            logger.error("[DIAG] _sync_with_cloud: ERROR: %s", e)
+            logger.error("MongoDB Sync Error: %s", e)
 
     def _load(self) -> Dict[str, Any]:
         if not os.path.exists(self.path):
