@@ -81,9 +81,14 @@ async def send_admin_notification(bot_token: str, owner_id: int, mention: str, v
         "disable_web_page_preview": True
     }
     
+    logger.warning("[ADMIN_NOTIFY] Sending to owner_id=%s, job_type=%s, mention=%s", owner_id, job_type, mention)
     try:
         async with aiohttp.ClientSession() as sess:
-            async with sess.post(url, json=payload):
-                pass
+            async with sess.post(url, json=payload) as resp:
+                body = await resp.text()
+                if resp.status == 200:
+                    logger.warning("[ADMIN_NOTIFY] SUCCESS: sent to %s", owner_id)
+                else:
+                    logger.error("[ADMIN_NOTIFY] FAILED: HTTP %s - %s", resp.status, body)
     except Exception as e:
-        logger.error("Failed to notify admin: %s", e)
+        logger.error("[ADMIN_NOTIFY] EXCEPTION: %s", e)
