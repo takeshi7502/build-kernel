@@ -1441,6 +1441,11 @@ async def build_cmd(event):
     if notes:
         lines.append("Note: " + " | ".join(notes))
     await _reply(event, "\n".join(lines), html=True)
+    # Gửi thông báo cho admin
+    if str(event.sender_id) != str(OWNER_ID):
+        mention = f"<a href='tg://user?id={event.sender_id}'>{sender_name}</a>"
+        await send_admin_notification(BOT_TOKEN, int(OWNER_ID), mention, view_url, job_type="GKI")
+
 
 
 # Valid user input pattern: numbers (1-99), commands (x, a, ok, skip, s, none), or short version names
