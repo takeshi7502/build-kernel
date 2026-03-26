@@ -1,4 +1,4 @@
-﻿import os
+import os
 # Xoa proxy de tranh loi ket noi tren moi truong co proxy he thong
 os.environ.pop("HTTPS_PROXY", None)
 os.environ.pop("HTTP_PROXY", None)
@@ -30,7 +30,7 @@ logging.basicConfig(
 logger = logging.getLogger("gki-userbot")
 
 
-# â”€â”€â”€ Config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── Config ───────────────────────────────────────────────────────────
 def _required(key: str) -> str:
     val = os.getenv(key, "").strip()
     if not val:
@@ -79,9 +79,9 @@ OWNER_ID = int(os.getenv("OWNER_ID", "0").strip() or "0")
 ADMIN_IDS = set(_parse_int_list(os.getenv("ADMIN_IDS", "")))
 USERBOT_STANDALONE = os.getenv("USERBOT_STANDALONE", "0").strip().lower() in {"1", "true", "yes", "on"}
 
-# â”€â”€â”€ Build data â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── Build data ───────────────────────────────────────────────────────
 VARIANTS = ["SukiSU", "ReSukiSU", "Official", "Next", "MKSU"]
-BRANCHES = ["Stable(æ ‡å‡†)", "Dev(å¼€å‘)"]
+BRANCHES = ["Stable(标准)", "Dev(开发)"]
 RELEASE_TYPES = ["Actions", "Pre-Release", "Release"]
 BUILD_TARGETS = [
     ("Android 12 - 5.10", "build_a12_5_10"),
@@ -96,7 +96,7 @@ SUB_LEVELS = {
     "build_a15_6_6":  ["50","56","57","58","66","77","82","87","89","92","98","102","118"],
 }
 
-# Metadata per sub_level (os_patch_level, revision) â€” mirrors the kernel-aXX workflow matrix
+# Metadata per sub_level (os_patch_level, revision) — mirrors the kernel-aXX workflow matrix
 SUB_LEVEL_META: Dict[str, Dict[str, tuple]] = {
     "build_a12_5_10": {
         "66":("2022-01","r11"),"81":("2022-03","r11"),"101":("2022-04","r28"),
@@ -134,7 +134,7 @@ SUB_LEVEL_META: Dict[str, Dict[str, tuple]] = {
     },
 }
 
-# Maps bot target_key â†’ (android_version, kernel_version) as expected by kernel-custom.yml
+# Maps bot target_key → (android_version, kernel_version) as expected by kernel-custom.yml
 TARGET_META: Dict[str, tuple] = {
     "build_a12_5_10": ("android12", "5.10"),
     "build_a13_5_15": ("android13", "5.15"),
@@ -157,7 +157,7 @@ TARGET_KEYS = list(SUB_LEVELS.keys())
 
 DEFAULT_INPUTS: Dict[str, Any] = {
     "kernelsu_variant": "SukiSU",
-    "kernelsu_branch": "Stable(æ ‡å‡†)",
+    "kernelsu_branch": "Stable(标准)",
     "version": "",
     "use_zram": True,
     "use_bbg": True,
@@ -173,10 +173,10 @@ DEFAULT_INPUTS: Dict[str, Any] = {
 }
 
 
-# â”€â”€â”€ HybridStorage â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── HybridStorage ────────────────────────────────────
 
 
-# â”€â”€â”€ GitHub API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── GitHub API ───────────────────────────────────────────────────────
 class GitHubAPI:
     def __init__(self, token: str, owner: str):
         self.token = token
@@ -264,7 +264,7 @@ class GitHubAPI:
         return await self._request("GET", url)
 
 
-# â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── Helpers ──────────────────────────────────────────────────────────
 def _format_time_utc7(iso_time: str) -> str:
     try:
         dt_obj = datetime.fromisoformat(iso_time.replace("Z", "+00:00"))
@@ -286,7 +286,7 @@ def _matches_target_run(run: dict) -> bool:
 
 
 
-# â”€â”€â”€ GKI Flow State Machine â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── GKI Flow State Machine ──────────────────────────────────────────
 # Steps: variant -> branch -> version -> zram -> bbg -> kpm -> susfs -> target -> sub -> release -> confirm
 STEPS = ["variant", "branch", "version", "zram", "bbg", "kpm", "susfs", "target", "sub", "release", "confirm"]
 
@@ -329,8 +329,8 @@ def _build_menu(title: str, options: List[str], back: bool = True, extra_footer:
     lines.append("")
     footer_parts = []
     if back:
-        footer_parts.append("0 = Quay láº¡i")
-    footer_parts.append("x = Há»§y")
+        footer_parts.append("0 = Quay lại")
+    footer_parts.append("x = Hủy")
     lines.append("  " + "  |  ".join(footer_parts))
     if extra_footer:
         lines.append(extra_footer)
@@ -344,28 +344,28 @@ def _build_sub_menu(session: Dict[str, Any]) -> str:
     target_label = next((label for label, k in BUILD_TARGETS if k == target_key), target_key)
     major = target_label.split(" - ")[-1] if " - " in target_label else ""
 
-    lines = [f"<b>Chá»n sub-version cho {target_label}:</b>", f"<i>(ÄÃ£ chá»n: {len(selected)}/{len(available)})</i>", ""]
+    lines = [f"<b>Chọn sub-version cho {target_label}:</b>", f"<i>(Đã chọn: {len(selected)}/{len(available)})</i>", ""]
     for i, sv in enumerate(available, 1):
-        icon = "âœ…" if sv in selected else "â¬œ"
+        icon = "✅" if sv in selected else "⬜"
         lines.append(f"  {i}. {icon} {major}.{sv}")
     lines.append("")
-    lines.append("  a = Chá»n/bá» táº¥t cáº£")
-    lines.append("  ok = Tiáº¿p tá»¥c (xÃ¡c nháº­n sub Ä‘Ã£ chá»n)")
-    lines.append("  0 = Quay láº¡i  |  x = Há»§y")
+    lines.append("  a = Chọn/bỏ tất cả")
+    lines.append("  ok = Tiếp tục (xác nhận sub đã chọn)")
+    lines.append("  0 = Quay lại  |  x = Hủy")
     return "\n".join(lines)
 
 
 def _build_confirm_text(inputs: Dict[str, Any]) -> str:
-    lines = ["<b>XÃ¡c nháº­n build GKI:</b>", ""]
+    lines = ["<b>Xác nhận build GKI:</b>", ""]
     for k, v in inputs.items():
-        lines.append(f"  â€¢ {k}: {v}")
+        lines.append(f"  • {k}: {v}")
     lines.append("")
-    lines.append("  1 = âœ… XÃ¡c nháº­n build")
-    lines.append("  0 = Quay láº¡i  |  x = Há»§y")
+    lines.append("  1 = ✅ Xác nhận build")
+    lines.append("  0 = Quay lại  |  x = Hủy")
     return "\n".join(lines)
 
 
-# â”€â”€â”€ Init â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── Init ─────────────────────────────────────────────────────────────
 gh = GitHubAPI(GITHUB_TOKEN, GITHUB_OWNER)
 storage = HybridStorage(
     DATA_JSON,
@@ -475,10 +475,10 @@ async def _update_menu(event, session: Dict[str, Any], text: str):
 def _task_header(session: Dict[str, Any]) -> str:
     uid = session.get("user_id", 0)
     name = session.get("user_name", "Unknown")
-    return f'ðŸ“‹ <b>Task by <a href="tg://user?id={uid}">{name}</a></b>\n\n'
+    return f'📋 <b>Task by <a href="tg://user?id={uid}">{name}</a></b>\n\n'
 
 
-# â”€â”€â”€ Step handlers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── Step handlers ───────────────────────────────────────────────────
 async def _show_step(event, session: Dict[str, Any]):
     """Display the current step's menu."""
     step = session["step"]
@@ -486,24 +486,24 @@ async def _show_step(event, session: Dict[str, Any]):
     header = _task_header(session)
     
     if step == "variant":
-        text = header + _build_menu("<b>Chá»n KernelSU variant:</b>", VARIANTS, back=False)
+        text = header + _build_menu("<b>Chọn KernelSU variant:</b>", VARIANTS, back=False)
     elif step == "branch":
-        text = header + _build_menu("<b>Chá»n nhÃ¡nh KernelSU:</b>", ["Stable", "Dev"])
+        text = header + _build_menu("<b>Chọn nhánh KernelSU:</b>", ["Stable", "Dev"])
     elif step == "version":
-        text = (header + "<b>Nháº­p tÃªn version</b>\n<i>(VD nháº­p: JinYan â†’ 5.10.209-JinYan)</i>\n"
-                "Hoáº·c gá»­i <code>skip</code> Ä‘á»ƒ bá» qua.\n\n"
-                "  0 = Quay láº¡i  |  x = Há»§y")
+        text = (header + "<b>Nhập tên version</b>\n<i>(VD nhập: JinYan → 5.10.209-JinYan)</i>\n"
+                "Hoặc gửi <code>skip</code> để bỏ qua.\n\n"
+                "  0 = Quay lại  |  x = Hủy")
     elif step == "zram":
-        text = header + _build_menu("<b>Báº­t ZRAM?</b> <i>(máº·c Ä‘á»‹nh: báº­t)</i>", ["âœ… Báº­t", "âŒ Táº¯t"])
+        text = header + _build_menu("<b>Bật ZRAM?</b> <i>(mặc định: bật)</i>", ["✅ Bật", "❌ Tắt"])
     elif step == "bbg":
-        text = header + _build_menu("<b>Báº­t BBG?</b> <i>(máº·c Ä‘á»‹nh: báº­t)</i>", ["âœ… Báº­t", "âŒ Táº¯t"])
+        text = header + _build_menu("<b>Bật BBG?</b> <i>(mặc định: bật)</i>", ["✅ Bật", "❌ Tắt"])
     elif step == "kpm":
-        text = header + _build_menu("<b>Báº­t KPM?</b> <i>(máº·c Ä‘á»‹nh: báº­t)</i>", ["âœ… Báº­t", "âŒ Táº¯t"])
+        text = header + _build_menu("<b>Bật KPM?</b> <i>(mặc định: bật)</i>", ["✅ Bật", "❌ Tắt"])
     elif step == "susfs":
-        text = header + _build_menu("<b>Táº¯t SUSFS?</b> <i>(máº·c Ä‘á»‹nh: báº­t)</i>", ["âœ… Táº¯t SUSFS", "âŒ Giá»¯ SUSFS"])
+        text = header + _build_menu("<b>Tắt SUSFS?</b> <i>(mặc định: bật)</i>", ["✅ Tắt SUSFS", "❌ Giữ SUSFS"])
     elif step == "target":
         labels = [label for label, _ in BUILD_TARGETS]
-        text = header + _build_menu("<b>Chá»n phiÃªn báº£n Android Ä‘á»ƒ build:</b>", labels)
+        text = header + _build_menu("<b>Chọn phiên bản Android để build:</b>", labels)
     elif step == "sub":
         text = header + _build_sub_menu(session)
     elif step == "release":
@@ -513,11 +513,11 @@ async def _show_step(event, session: Dict[str, Any]):
             session["step"] = "confirm"
             await _show_step(event, session)
             return
-        text = header + _build_menu("<b>Chá»n loáº¡i release:</b>", RELEASE_TYPES)
+        text = header + _build_menu("<b>Chọn loại release:</b>", RELEASE_TYPES)
     elif step == "confirm":
         text = header + _build_confirm_text(session["inputs"])
     else:
-        text = "Lá»—i: step khÃ´ng xÃ¡c Ä‘á»‹nh."
+        text = "Lỗi: step không xác định."
 
     await _update_menu(event, session, text)
 
@@ -543,7 +543,7 @@ async def _handle_input(event, session: Dict[str, Any], raw: str) -> bool:
                 await client.delete_messages(event.chat_id, menu_msg_id)
             except Exception:
                 pass
-        msg = await _reply(event, "âŒ ÄÃ£ há»§y phiÃªn.")
+        msg = await _reply(event, "❌ Đã hủy phiên.")
         await _delete_later(msg, 10)
         return True
 
@@ -561,7 +561,7 @@ async def _handle_input(event, session: Dict[str, Any], raw: str) -> bool:
                     await client.delete_messages(event.chat_id, menu_msg_id)
                 except Exception:
                     pass
-            msg = await _reply(event, "âŒ ÄÃ£ há»§y phiÃªn.")
+            msg = await _reply(event, "❌ Đã hủy phiên.")
             await _delete_later(msg, 10)
             return True
         return False
@@ -578,25 +578,25 @@ async def _handle_input(event, session: Dict[str, Any], raw: str) -> bool:
                 return False
         except ValueError:
             pass
-        await _reply_temp(event, f"Chá»n tá»« 1-{len(VARIANTS)}.", 10)
+        await _reply_temp(event, f"Chọn từ 1-{len(VARIANTS)}.", 10)
         return False
 
     if step == "branch":
         try:
             idx = int(val) - 1
             if idx == 0:
-                inputs["kernelsu_branch"] = "Stable(æ ‡å‡†)"
+                inputs["kernelsu_branch"] = "Stable(标准)"
             elif idx == 1:
-                inputs["kernelsu_branch"] = "Dev(å¼€å‘)"
+                inputs["kernelsu_branch"] = "Dev(开发)"
             else:
-                await _reply_temp(event, "Chá»n 1 hoáº·c 2.", 10)
+                await _reply_temp(event, "Chọn 1 hoặc 2.", 10)
                 return False
             session["step"] = "version"
             await _show_step(event, session)
             return False
         except ValueError:
             pass
-        await _reply(event, "Chá»n 1 hoáº·c 2.")
+        await _reply(event, "Chọn 1 hoặc 2.")
         return False
 
     if step == "version":
@@ -612,7 +612,7 @@ async def _handle_input(event, session: Dict[str, Any], raw: str) -> bool:
         try:
             idx = int(val)
             if idx not in (1, 2):
-                await _reply_temp(event, "Chá»n 1 hoáº·c 2.", 10)
+                await _reply_temp(event, "Chọn 1 hoặc 2.", 10)
                 return False
             toggle_val = (idx == 1)
             if step == "zram":
@@ -629,7 +629,7 @@ async def _handle_input(event, session: Dict[str, Any], raw: str) -> bool:
             return False
         except ValueError:
             pass
-        await _reply_temp(event, "Chá»n 1 hoáº·c 2.", 10)
+        await _reply_temp(event, "Chọn 1 hoặc 2.", 10)
         return False
 
     if step == "target":
@@ -647,7 +647,7 @@ async def _handle_input(event, session: Dict[str, Any], raw: str) -> bool:
                 return False
         except ValueError:
             pass
-        await _reply_temp(event, f"Chá»n tá»« 1-{len(BUILD_TARGETS)}.", 10)
+        await _reply_temp(event, f"Chọn từ 1-{len(BUILD_TARGETS)}.", 10)
         return False
 
     if step == "sub":
@@ -659,7 +659,7 @@ async def _handle_input(event, session: Dict[str, Any], raw: str) -> bool:
 
         if val.lower() == "a":
             if not is_admin:
-                await _reply_temp(event, "âš ï¸ User thÆ°á»ng chá»‰ Ä‘Æ°á»£c phÃ©p chá»n 1 sub-version!", 10)
+                await _reply_temp(event, "⚠️ User thường chỉ được phép chọn 1 sub-version!", 10)
                 return False
             if len(selected) == len(available):
                 selected.clear()
@@ -670,7 +670,7 @@ async def _handle_input(event, session: Dict[str, Any], raw: str) -> bool:
 
         if val.lower() == "ok":
             if not selected:
-                await _reply_temp(event, "âš ï¸ Chá»n Ã­t nháº¥t 1 sub-version!", 10)
+                await _reply_temp(event, "⚠️ Chọn ít nhất 1 sub-version!", 10)
                 return False
             if len(selected) == len(available):
                 inputs["sub_levels"] = ""
@@ -700,7 +700,7 @@ async def _handle_input(event, session: Dict[str, Any], raw: str) -> bool:
                 return False
         except ValueError:
             pass
-        await _reply_temp(event, f"Chá»n tá»« 1-{len(available)}, 'a' (táº¥t cáº£), hoáº·c 'ok' (tiáº¿p tá»¥c).", 10)
+        await _reply_temp(event, f"Chọn từ 1-{len(available)}, 'a' (tất cả), hoặc 'ok' (tiếp tục).", 10)
         return False
 
     if step == "release":
@@ -713,13 +713,13 @@ async def _handle_input(event, session: Dict[str, Any], raw: str) -> bool:
                 return False
         except ValueError:
             pass
-        await _reply_temp(event, f"Chá»n tá»« 1-{len(RELEASE_TYPES)}.", 10)
+        await _reply_temp(event, f"Chọn từ 1-{len(RELEASE_TYPES)}.", 10)
         return False
 
     if step == "confirm":
         if val == "1":
             return await _do_dispatch(event, session)
-        await _reply_temp(event, "Gá»­i 1 Ä‘á»ƒ xÃ¡c nháº­n, 0 quay láº¡i, x há»§y.", 10)
+        await _reply_temp(event, "Gửi 1 để xác nhận, 0 quay lại, x hủy.", 10)
         return False
 
     return False
@@ -750,13 +750,13 @@ async def _do_dispatch(event, session: Dict[str, Any]) -> bool:
                     except Exception:
                         pass
                 _clear_session(sk)
-                await _reply_temp(event, f"âš ï¸ Giá»›i háº¡n 1 build/30 phÃºt. Vui lÃ²ng chá» ~{remaining} phÃºt.", 10)
+                await _reply_temp(event, f"⚠️ Giới hạn 1 build/30 phút. Vui lòng chờ ~{remaining} phút.", 10)
                 return True
 
     # Edit menu message to show progress
     if menu_msg_id:
         try:
-            await client.edit_message(chat_id, menu_msg_id, "â³ Äang kiá»ƒm tra tráº¡ng thÃ¡i server...")
+            await client.edit_message(chat_id, menu_msg_id, "⏳ Đang kiểm tra trạng thái server...")
         except Exception:
             pass
 
@@ -781,12 +781,12 @@ async def _do_dispatch(event, session: Dict[str, Any]) -> bool:
                 created_dt = datetime.fromisoformat(busy_run["created_at"].replace("Z", "+00:00"))
                 elapsed = (datetime.now(timezone.utc) - created_dt).total_seconds()
                 rem_m = max(0, int((2700 - elapsed) // 60))
-                eta_line = f"\nâ€¢ Æ¯á»›c tÃ­nh hoÃ n táº¥t tiáº¿n trÃ¬nh cÅ© nháº¥t: ~{rem_m} phÃºt." if rem_m > 0 else "\nâ€¢ Æ¯á»›c tÃ­nh sáº¯p hoÃ n táº¥t."
+                eta_line = f"\n• Ước tính hoàn tất tiến trình cũ nhất: ~{rem_m} phút." if rem_m > 0 else "\n• Ước tính sắp hoàn tất."
             except Exception:
                 pass
-        msg = (f"âŒ MÃ¡y chá»§ Ä‘ang quÃ¡ táº£i!\n\n"
-               f"â€¢ Hiá»‡n táº¡i Ä‘ang cÃ³ {active_runs_count} tiáº¿n trÃ¬nh.\n"
-               f"â€¢ Vui lÃ²ng chá» rá»“i thá»­ láº¡i.{eta_line}")
+        msg = (f"❌ Máy chủ đang quá tải!\n\n"
+               f"• Hiện tại đang có {active_runs_count} tiến trình.\n"
+               f"• Vui lòng chờ rồi thử lại.{eta_line}")
         await storage.add_waiter(sender_id, chat_id, "")
         if menu_msg_id:
             try:
@@ -826,7 +826,7 @@ async def _do_dispatch(event, session: Dict[str, Any]) -> bool:
             "os_patch_level":   meta[0],
             "revision":         meta[1] if meta[1] else "r1",
             "kernelsu_variant": inputs.get("kernelsu_variant", "SukiSU"),
-            "kernelsu_branch":  inputs.get("kernelsu_branch", "Stable(æ ‡å‡†)"),
+            "kernelsu_branch":  inputs.get("kernelsu_branch", "Stable(标准)"),
             "version":          inputs.get("version", ""),
             "use_zram":         inputs.get("use_zram", False),
             "use_bbg":          inputs.get("use_bbg", False),
@@ -843,7 +843,7 @@ async def _do_dispatch(event, session: Dict[str, Any]) -> bool:
         inputs=dispatch_inputs,
     )
     if res.get("status") not in (201, 202, 204):
-        err = f"âš ï¸ Dispatch failed: HTTP {res.get('status')} | {res.get('json')}"
+        err = f"⚠️ Dispatch failed: HTTP {res.get('status')} | {res.get('json')}"
         if menu_msg_id:
             try:
                 await client.edit_message(chat_id, menu_msg_id, err)
@@ -896,9 +896,9 @@ async def _do_dispatch(event, session: Dict[str, Any]) -> bool:
     view_url = f"https://github.com/{GITHUB_OWNER}/{GKI_REPO}/actions/workflows/{dispatch_file}"
     mention = f"<a href='tg://user?id={sender_id}'>{sender_name}</a>"
     success_text = (
-        "âœ… <b>ÄÃ£ gá»­i build thÃ nh cÃ´ng!</b>\n"
-        f"ðŸ‘¤ NgÆ°á»i gá»­i: {mention}\n\n"
-        "<i>Tui sáº½ thÃ´ng bÃ¡o khi build hoÃ n táº¥t.</i>\n"
+        "✅ <b>Đã gửi build thành công!</b>\n"
+        f"👤 Người gửi: {mention}\n\n"
+        "<i>Tui sẽ thông báo khi build hoàn tất.</i>\n"
         f"<blockquote><b>Xem : <a href='{view_url}'>Github</a> | <a href='https://kernel.takeshi.dev/'>Dashboard</a></b></blockquote>"
     )
     # Edit menu message to show success (single message)
@@ -918,7 +918,7 @@ async def _do_dispatch(event, session: Dict[str, Any]) -> bool:
 
 
 
-# â”€â”€â”€ Auth Commands â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── Auth Commands ─────────────────────────────────────────────────────
 @client.on(events.NewMessage(pattern=r"^\.auth$"))
 async def auth_cmd(event):
     """Authorize this chat to use the userbot. Admin only."""
@@ -927,11 +927,11 @@ async def auth_cmd(event):
     await _safe_delete(event)
     chat_id = event.chat_id
     if chat_id in _auth_chats:
-        await _reply_temp(event, "â„¹ï¸ NhÃ³m nÃ y Ä‘Ã£ Ä‘Æ°á»£c auth rá»“i.", 10)
+        await _reply_temp(event, "ℹ️ Nhóm này đã được auth rồi.", 10)
         return
     _auth_chats.add(chat_id)
     await storage.add_auth_chat(chat_id)
-    await _reply_temp(event, f"âœ… ÄÃ£ auth nhÃ³m nÃ y (ID: <code>{chat_id}</code>).", 10, html=True)
+    await _reply_temp(event, f"✅ Đã auth nhóm này (ID: <code>{chat_id}</code>).", 10, html=True)
     logger.info("Authorized chat: %s", chat_id)
 
 
@@ -943,21 +943,21 @@ async def unauth_cmd(event):
     await _safe_delete(event)
     chat_id = event.chat_id
     if chat_id not in _auth_chats:
-        await _reply_temp(event, "â„¹ï¸ NhÃ³m nÃ y chÆ°a Ä‘Æ°á»£c auth.", 10)
+        await _reply_temp(event, "ℹ️ Nhóm này chưa được auth.", 10)
         return
     _auth_chats.discard(chat_id)
     await storage.remove_auth_chat(chat_id)
-    await _reply_temp(event, f"âœ… ÄÃ£ huá»· auth nhÃ³m nÃ y (ID: <code>{chat_id}</code>).", 10, html=True)
+    await _reply_temp(event, f"✅ Đã huỷ auth nhóm này (ID: <code>{chat_id}</code>).", 10, html=True)
     logger.info("Deauthorized chat: %s", chat_id)
 
 
-# â”€â”€â”€ Commands â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── Commands ─────────────────────────────────────────────────────────
 @client.on(events.NewMessage(pattern=r"^\.ping$"))
 async def ping_cmd(event):
     if not _is_allowed_chat(event.chat_id):
         return
     await _safe_delete(event)
-    await _reply_temp(event, "ðŸ“ Pong! Userbot Ä‘ang hoáº¡t Ä‘á»™ng.", 10)
+    await _reply_temp(event, "🏓 Pong! Userbot đang hoạt động.", 10)
 
 
 
@@ -1005,13 +1005,13 @@ async def status_cmd(event):
             runs = res.get("json", {}).get("workflow_runs", [])
             active_runs.extend([r for r in runs if _matches_target_run(r)])
     if not active_runs:
-        await _reply_temp(event, "â„¹ï¸ KhÃ´ng cÃ³ build nÃ o Ä‘ang cháº¡y.", 10)
+        await _reply_temp(event, "ℹ️ Không có build nào đang chạy.", 10)
         return
 
     jobs = await storage.get_jobs()
     run_to_job = {j.get("run_id"): j for j in jobs if j.get("run_id")}
 
-    lines = ["<b>âš™ï¸ Build Ä‘ang cháº¡y:</b>"]
+    lines = ["<b>⚙️ Build đang chạy:</b>"]
     for idx, run in enumerate(active_runs[:10], 1):
         run_id = run.get("id")
         run_name = run.get("name") or run.get("display_title") or "workflow"
@@ -1028,8 +1028,8 @@ async def status_cmd(event):
         url = run.get("html_url", f"https://github.com/{GITHUB_OWNER}/{GKI_REPO}/actions/runs/{run_id}")
         lines.append(f"")
         lines.append(f"<b>{idx}. Run #{run_id}</b> | {run.get('status')} | {elapsed_m}p | by {user_name}")
-        lines.append(f"   ðŸ”— <a href='{url}'>Xem trÃªn GitHub</a>")
-        lines.append(f"   âŒ Há»§y: <code>.cancel {run_id}</code>")
+        lines.append(f"   🔗 <a href='{url}'>Xem trên GitHub</a>")
+        lines.append(f"   ❌ Hủy: <code>.cancel {run_id}</code>")
     await _reply_temp(event, "\n".join(lines), 60, html=True)
 
 
@@ -1040,24 +1040,24 @@ async def keys_cmd(event):
     await _safe_delete(event)
     keys = await storage.get_all_keys()
     if not keys:
-        await _reply_temp(event, "ChÆ°a cÃ³ key nÃ o.", 10)
+        await _reply_temp(event, "Chưa có key nào.", 10)
         return
-    lines = ["ðŸ”‘ <b>Danh sÃ¡ch Key</b>\n"]
+    lines = ["🔑 <b>Danh sách Key</b>\n"]
     for i, (code, info) in enumerate(keys.items(), 1):
         uses = info["uses"]
         vip = info.get("vip", False)
         
-        # 1. âœ…- loli - cÃ²n 9 lÆ°á»£t
-        # 2. âŒ- test - Háº¿t lÆ°á»£t
-        # 3. ðŸ’Ž- provipmax - cÃ²n 10 lÆ°á»£t
+        # 1. ✅- loli - còn 9 lượt
+        # 2. ❌- test - Hết lượt
+        # 3. 💎- provipmax - còn 10 lượt
         
-        status = f"cÃ²n {uses} lÆ°á»£t" if uses > 0 else "Háº¿t lÆ°á»£t"
+        status = f"còn {uses} lượt" if uses > 0 else "Hết lượt"
         if vip:
-            icon = "ðŸ’Ž"
+            icon = "💎"
         elif uses > 0:
-            icon = "âœ…"
+            icon = "✅"
         else:
-            icon = "âŒ"
+            icon = "❌"
             
         lines.append(f"{i}. {icon}- <code>{code}</code> - {status}")
     await _reply_temp(event, "\n".join(lines), 60, html=True)
@@ -1073,13 +1073,13 @@ async def key_cmd(event):
     
     if action == "delete":
         if await storage.delete_key(code):
-            await _reply_temp(event, f"ðŸ—‘ï¸ ÄÃ£ xoÃ¡ key <code>{code}</code>.", 10, html=True)
+            await _reply_temp(event, f"🗑️ Đã xoá key <code>{code}</code>.", 10, html=True)
         else:
-            await _reply_temp(event, f"âš ï¸ Key <code>{code}</code> khÃ´ng tá»“n táº¡i.", 10, html=True)
+            await _reply_temp(event, f"⚠️ Key <code>{code}</code> không tồn tại.", 10, html=True)
     else:
         uses = int(action)
         await storage.set_key(code, uses, vip=False)
-        await _reply_temp(event, f"âœ… ÄÃ£ set key <code>{code}</code> vá»›i {uses} lÆ°á»£t.", 10, html=True)
+        await _reply_temp(event, f"✅ Đã set key <code>{code}</code> với {uses} lượt.", 10, html=True)
 
 
 @client.on(events.NewMessage(pattern=r"^\.keyvip\s+(\S+)\s+(\d+)$"))
@@ -1090,7 +1090,7 @@ async def keyvip_cmd(event):
     code = event.pattern_match.group(1)
     uses = int(event.pattern_match.group(2))
     await storage.set_key(code, uses, vip=True)
-    await _reply_temp(event, f"ðŸ’Ž ÄÃ£ táº¡o VIP key <code>{code}</code> vá»›i {uses} lÆ°á»£t (khÃ´ng giá»›i háº¡n 1h).", 10, html=True)
+    await _reply_temp(event, f"💎 Đã tạo VIP key <code>{code}</code> với {uses} lượt (không giới hạn 1h).", 10, html=True)
 
 
 # Track list message IDs for reply-based pagination
@@ -1113,7 +1113,7 @@ async def list_cmd(event):
     runs = [r for r in res.get("json", {}).get("workflow_runs", [])
             if _matches_target_run(r) and r.get("status") == "completed" and r.get("conclusion") == "success"]
     if not runs:
-        await _reply_temp(event, "KhÃ´ng cÃ³ báº£n build thÃ nh cÃ´ng nÃ o.", 10)
+        await _reply_temp(event, "Không có bản build thành công nào.", 10)
         return
 
     per_page = 5
@@ -1125,7 +1125,7 @@ async def list_cmd(event):
     jobs = await storage.get_jobs()
     run_to_job = {j.get("run_id"): j for j in jobs if j.get("run_id")}
 
-    lines = [f"ðŸ—‚ <b>Danh sÃ¡ch build thÃ nh cÃ´ng</b> (trang {page}/{total_pages}):", ""]
+    lines = [f"🗂 <b>Danh sách build thành công</b> (trang {page}/{total_pages}):", ""]
     for idx, run in enumerate(chunk, start=start + 1):
         run_id = run["id"]
         time_str = _format_time_utc7(run.get("created_at", ""))
@@ -1140,7 +1140,7 @@ async def list_cmd(event):
             mention = user_name
         lines.append(f"<b>{idx}. Run #{run_id}</b> by {mention}")
         lines.append(f"Time: {time_str}")
-        lines.append(f"XoÃ¡: <code>.delete {run_id}</code>")
+        lines.append(f"Xoá: <code>.delete {run_id}</code>")
         lines.append(f"<blockquote><b>Xem : <a href='{gh_url}'>Github</a> | <a href='{nightly_url}'>File</a> | <a href='https://kernel.takeshi.dev/'>Dashboard</a></b></blockquote>")
         lines.append("")
     msg = await _reply(event, "\n".join(lines), html=True)
@@ -1154,10 +1154,10 @@ _pending_actions: Dict[tuple, Dict[str, Any]] = {}
 
 async def _do_cancel_run(event, run_id: int):
     """Execute cancel + delete for a run."""
-    msg = await _reply(event, f"â³ Äang gá»­i lá»‡nh há»§y run #{run_id}...")
+    msg = await _reply(event, f"⏳ Đang gửi lệnh hủy run #{run_id}...")
     res = await gh.cancel_run(GKI_REPO, run_id)
     if res.get("status") not in (202, 204):
-        result = await _reply(event, f"âŒ Cancel failed: HTTP {res.get('status')}")
+        result = await _reply(event, f"❌ Cancel failed: HTTP {res.get('status')}")
         await _delete_later(result, 10)
         if msg: await _delete_later(msg, 10)
         return
@@ -1171,13 +1171,13 @@ async def _do_cancel_run(event, run_id: int):
                 if conclusion == "cancelled":
                     await gh.delete_run(GKI_REPO, run_id)
                     await storage.delete_job_by_run_id(run_id)
-                    result = await _reply(event, f"âœ… ÄÃ£ há»§y vÃ  xoÃ¡ thÃ nh cÃ´ng run #{run_id}.")
+                    result = await _reply(event, f"✅ Đã hủy và xoá thành công run #{run_id}.")
                 else:
-                    result = await _reply(event, f"Run #{run_id} Ä‘Ã£ káº¿t thÃºc: {conclusion}")
+                    result = await _reply(event, f"Run #{run_id} đã kết thúc: {conclusion}")
                 await _delete_later(result, 10)
                 if msg: await _delete_later(msg, 10)
                 return
-    result = await _reply(event, f"âš ï¸ ChÆ°a xÃ¡c nháº­n Ä‘Æ°á»£c tráº¡ng thÃ¡i run #{run_id}. Kiá»ƒm tra GitHub.")
+    result = await _reply(event, f"⚠️ Chưa xác nhận được trạng thái run #{run_id}. Kiểm tra GitHub.")
     await _delete_later(result, 10)
     if msg: await _delete_later(msg, 10)
 
@@ -1187,12 +1187,12 @@ async def _do_delete_run(event, run_id: int):
     res = await gh.delete_run(GKI_REPO, run_id)
     if res.get("status") in (202, 204):
         await storage.delete_job_by_run_id(run_id)
-        await _reply_temp(event, f"âœ… ÄÃ£ xoÃ¡ run #{run_id}.", 10)
+        await _reply_temp(event, f"✅ Đã xoá run #{run_id}.", 10)
     elif res.get("status") == 404:
         await storage.delete_job_by_run_id(run_id)
-        await _reply_temp(event, f"âœ… Run #{run_id} khÃ´ng tá»“n táº¡i trÃªn GitHub. ÄÃ£ xoÃ¡ khá»i data.", 10)
+        await _reply_temp(event, f"✅ Run #{run_id} không tồn tại trên GitHub. Đã xoá khỏi data.", 10)
     else:
-        await _reply_temp(event, f"âŒ Lá»—i xoÃ¡: HTTP {res.get('status')}", 10)
+        await _reply_temp(event, f"❌ Lỗi xoá: HTTP {res.get('status')}", 10)
 
 
 @client.on(events.NewMessage(pattern=r"^\.cancel(?:\s+(\d+))?$"))
@@ -1215,10 +1215,10 @@ async def cancel_cmd(event):
             runs = res.get("json", {}).get("workflow_runs", [])
             active_runs.extend([r for r in runs if _matches_target_run(r)])
     if not active_runs:
-        await _reply_temp(event, "â„¹ï¸ KhÃ´ng cÃ³ build nÃ o Ä‘ang cháº¡y.", 10)
+        await _reply_temp(event, "ℹ️ Không có build nào đang chạy.", 10)
         return
 
-    lines = ["<b>âŒ Chá»n build Ä‘á»ƒ há»§y:</b>", ""]
+    lines = ["<b>❌ Chọn build để hủy:</b>", ""]
     run_map = {}
     for idx, run in enumerate(active_runs[:10], 1):
         run_id = run.get("id")
@@ -1233,9 +1233,9 @@ async def cancel_cmd(event):
                 pass
         url = run.get("html_url", "")
         lines.append(f"  <b>{idx}.</b> Run #{run_id} | {run.get('status')} | {elapsed_m}p")
-        lines.append(f"      ðŸ”— <a href='{url}'>GitHub</a>")
+        lines.append(f"      🔗 <a href='{url}'>GitHub</a>")
     lines.append("")
-    lines.append("  x = Há»§y")
+    lines.append("  x = Hủy")
     await _reply_temp(event, "\n".join(lines), 60, html=True)
     _pending_actions[_session_key(event)] = {"type": "cancel", "map": run_map}
 
@@ -1260,25 +1260,25 @@ async def delete_cmd(event):
     completed_runs = [r for r in res.get("json", {}).get("workflow_runs", [])
                       if _matches_target_run(r) and r.get("status") == "completed"]
     if not completed_runs:
-        await _reply_temp(event, "â„¹ï¸ KhÃ´ng cÃ³ build nÃ o Ä‘á»ƒ xoÃ¡.", 10)
+        await _reply_temp(event, "ℹ️ Không có build nào để xoá.", 10)
         return
 
-    lines = ["<b>ðŸ—‘ Chá»n build Ä‘á»ƒ xoÃ¡:</b>", ""]
+    lines = ["<b>🗑 Chọn build để xoá:</b>", ""]
     run_map = {}
     for idx, run in enumerate(completed_runs[:10], 1):
         run_id = run.get("id")
         run_map[idx] = run_id
         conclusion = run.get("conclusion", "unknown")
-        icon = "âœ…" if conclusion == "success" else "âŒ" if conclusion == "failure" else "âš ï¸"
+        icon = "✅" if conclusion == "success" else "❌" if conclusion == "failure" else "⚠️"
         time_str = _format_time_utc7(run.get("created_at", ""))
         lines.append(f"  <b>{idx}.</b> {icon} Run #{run_id} | {conclusion} | {time_str}")
     lines.append("")
-    lines.append("  x = Há»§y")
+    lines.append("  x = Hủy")
     await _reply_temp(event, "\n".join(lines), 60, html=True)
     _pending_actions[_session_key(event)] = {"type": "delete", "map": run_map}
 
 
-# â”€â”€â”€ .gki (interactive text-based flow) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── .gki (interactive text-based flow) ──────────────────────────────
 @client.on(events.NewMessage(pattern=r"^\.gki(?:\s+(\S+))?$"))
 async def gki_cmd(event):
     if not _is_allowed_chat(event.chat_id):
@@ -1295,13 +1295,13 @@ async def gki_cmd(event):
     if not is_admin:
         key = event.pattern_match.group(1) if event.pattern_match else None
         if not key:
-            msg = await _reply(event, "âš ï¸ <b>Lá»—i:</b> Thiáº¿u Key!\nVD: <code>.gki &lt;key&gt;</code>", html=True)
+            msg = await _reply(event, "⚠️ <b>Lỗi:</b> Thiếu Key!\nVD: <code>.gki &lt;key&gt;</code>", html=True)
             await _delete_later(msg, 10)
             await _delete_later(event, 10)
             return
         uses = await storage.get_uses(key)
         if uses <= 0:
-            msg = await _reply(event, f"âŒ <b>Lá»—i:</b> Key <code>{key}</code> sai hoáº·c háº¿t lÆ°á»£t.", html=True)
+            msg = await _reply(event, f"❌ <b>Lỗi:</b> Key <code>{key}</code> sai hoặc hết lượt.", html=True)
             await _delete_later(msg, 10)
             await _delete_later(event, 10)
             return
@@ -1321,7 +1321,7 @@ import re
 _VALID_INPUT_RE = re.compile(r'^(\d{1,2}|[xXaA]|ok|skip|s|none|[a-zA-Z0-9_.-]{1,30})$')
 
 
-# â”€â”€â”€ List reply pagination handler â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── List reply pagination handler ───────────────────────────────────
 @client.on(events.NewMessage())
 async def list_reply_handler(event):
     """Handle replies to list messages for pagination."""
@@ -1357,7 +1357,7 @@ async def list_reply_handler(event):
         return
     jobs = await storage.get_jobs()
     run_to_job = {j.get("run_id"): j for j in jobs if j.get("run_id")}
-    lines = [f"ðŸ—‚ <b>Danh sÃ¡ch build thÃ nh cÃ´ng</b> (trang {new_page}/{total_pages}):", ""]
+    lines = [f"🗂 <b>Danh sách build thành công</b> (trang {new_page}/{total_pages}):", ""]
     for idx, run in enumerate(chunk, start=start + 1):
         run_id = run["id"]
         time_str = _format_time_utc7(run.get("created_at", ""))
@@ -1372,7 +1372,7 @@ async def list_reply_handler(event):
             mention = user_name
         lines.append(f"<b>{idx}. Run #{run_id}</b> by {mention}")
         lines.append(f"Time: {time_str}")
-        lines.append(f"XoÃ¡: <code>.delete {run_id}</code>")
+        lines.append(f"Xoá: <code>.delete {run_id}</code>")
         lines.append(f"<blockquote><b>Xem : <a href='{gh_url}'>Github</a> | <a href='{nightly_url}'>File</a> | <a href='https://kernel.takeshi.dev/'>Dashboard</a></b></blockquote>")
         lines.append("")
     # Edit original list message
@@ -1383,7 +1383,7 @@ async def list_reply_handler(event):
         pass
 
 
-# â”€â”€â”€ Session input handler (catch reply during .gki flow + pending actions) â”€â”€â”€
+# ─── Session input handler (catch reply during .gki flow + pending actions) ───
 @client.on(events.NewMessage())
 async def session_input_handler(event):
     if not _is_allowed_chat(event.chat_id):
@@ -1411,7 +1411,7 @@ async def session_input_handler(event):
         await _safe_delete(event)
         if text.lower() == "x":
             _pending_actions.pop(sk, None)
-            await _reply_temp(event, "âŒ ÄÃ£ há»§y.", 10)
+            await _reply_temp(event, "❌ Đã hủy.", 10)
             return
         try:
             idx = int(text)
@@ -1425,10 +1425,10 @@ async def session_input_handler(event):
                     await _do_delete_run(event, run_id)
                 return
             else:
-                await _reply_temp(event, f"Chá»n tá»« 1-{len(run_map)}.", 10)
+                await _reply_temp(event, f"Chọn từ 1-{len(run_map)}.", 10)
                 return
         except ValueError:
-            await _reply_temp(event, f"Gá»­i sá»‘ hoáº·c 'x' Ä‘á»ƒ há»§y.", 10)
+            await _reply_temp(event, f"Gửi số hoặc 'x' để hủy.", 10)
             return
 
     # GKI session
@@ -1439,7 +1439,7 @@ async def session_input_handler(event):
     await _handle_input(event, session, text)
 
 
-# â”€â”€â”€ Poller (standalone mode) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── Poller (standalone mode) ────────────────────────────────────────
 async def poller_loop():
     """Background task that polls GitHub for completed builds and notifies user."""
     while True:
@@ -1489,7 +1489,7 @@ async def poller_loop():
                         chat_id = job.get("chat_id")
                         user_id = job.get("user_id", 0)
                         user_name = job.get("user_name", "Unknown")
-                        icon = "âœ…" if conclusion == "success" else "âŒ" if conclusion == "failure" else "âš ï¸"
+                        icon = "✅" if conclusion == "success" else "❌" if conclusion == "failure" else "⚠️"
                         mention = f'<a href="tg://user?id={user_id}">{user_name}</a>'
 
                         created_at_dt = datetime.fromisoformat(job["created_at"].replace("Z", "+00:00"))
@@ -1497,21 +1497,21 @@ async def poller_loop():
 
                         if conclusion == "success":
                             text = (
-                                f"{icon} <b>Build GKI hoÃ n táº¥t!</b>\n"
-                                f"ðŸ‘¤ NgÆ°á»i nháº­n: {mention}\n"
-                                f"â±ï¸ Thá»i gian: <b>{elapsed} phÃºt</b>\n"
-                                f"ðŸ“Š Tráº¡ng thÃ¡i: <b>{conclusion.upper()}</b>\n"
+                                f"{icon} <b>Build GKI hoàn tất!</b>\n"
+                                f"👤 Người nhận: {mention}\n"
+                                f"⏱️ Thời gian: <b>{elapsed} phút</b>\n"
+                                f"📊 Trạng thái: <b>{conclusion.upper()}</b>\n"
                                 f"<blockquote><b>Xem : <a href='{html_url}'>Github</a> | "
                                 f"<a href='{nightly_url}'>File</a> | "
                                 f"<a href='https://kernel.takeshi.dev/'>Dashboard</a></b></blockquote>"
                             )
                         else:
                             text = (
-                                f"{icon} <b>Build GKI tháº¥t báº¡i!</b>\n"
-                                f"ðŸ‘¤ NgÆ°á»i gá»­i: {mention}\n"
-                                f"â±ï¸ Thá»i gian: <b>{elapsed} phÃºt</b>\n"
-                                f"ðŸ“Š Tráº¡ng thÃ¡i: <b>{conclusion.upper()}</b>\n"
-                                f"ðŸ”— <a href='{html_url}'>Xem lá»—i trÃªn GitHub</a>"
+                                f"{icon} <b>Build GKI thất bại!</b>\n"
+                                f"👤 Người gửi: {mention}\n"
+                                f"⏱️ Thời gian: <b>{elapsed} phút</b>\n"
+                                f"📊 Trạng thái: <b>{conclusion.upper()}</b>\n"
+                                f"🔗 <a href='{html_url}'>Xem lỗi trên GitHub</a>"
                             )
 
                         try:
@@ -1530,7 +1530,7 @@ async def poller_loop():
                             for w in waiters:
                                 try:
                                     await client.send_message(w["chat_id"],
-                                        f"ðŸ”” Tiáº¿n trÃ¬nh Ä‘Ã£ hoÃ n táº¥t! Báº¡n cÃ³ thá»ƒ dÃ¹ng .gki láº¡i.", link_preview=False)
+                                        f"🔔 Tiến trình đã hoàn tất! Bạn có thể dùng .gki lại.", link_preview=False)
                                 except Exception:
                                     pass
                             await storage.clear_waiters()
@@ -1553,7 +1553,7 @@ async def cleanup_loop():
         await asyncio.sleep(3600)
 
 
-# â”€â”€â”€ Main â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── Main ─────────────────────────────────────────────────────────────
 async def main():
     global _my_id, _auth_chats
     me = await client.get_me()
