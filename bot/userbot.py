@@ -961,6 +961,38 @@ async def ping_cmd(event):
 
 
 
+@client.on(events.NewMessage(pattern=r"^\.help$"))
+async def help_cmd(event):
+    if not _is_allowed_chat(event.chat_id):
+        return
+    await _safe_delete(event)
+    is_admin = _is_admin(event)
+
+    text = (
+        "📖 <b>Danh sách lệnh Userbot (.help)</b>\n\n"
+        "📌 <b>Ai cũng dùng được:</b>\n"
+        ".gki &lt;key&gt; — Build GKI Kernel (cần key hợp lệ)\n"
+        ".ping — Kiểm tra userbot hoạt động\n"
+        ".help — Hiện hướng dẫn này\n"
+    )
+
+    if is_admin:
+        text += (
+            "\n🔒 <b>Chỉ Admin:</b>\n"
+            ".gki — Build trực tiếp không cần key\n"
+            ".st — Xem build đang chạy\n"
+            ".list — Lịch sử build thành công\n"
+            ".cancel &lt;run_id&gt; — Hủy build\n"
+            ".delete &lt;run_id&gt; — Xóa run\n"
+            ".key &lt;code&gt; &lt;uses&gt; — Tạo/sửa key\n"
+            ".keyvip &lt;code&gt; &lt;uses&gt; — Tạo VIP key\n"
+            ".keys — Xem danh sách key\n"
+            ".auth — Cho phép bot hoạt động trong group này\n"
+            ".ua — Xóa quyền hoạt động trong group khỏi bot\n"
+        )
+
+    await _reply_temp(event, text, 60, html=True)
+
 @client.on(events.NewMessage(pattern=r"^\.st$"))
 async def status_cmd(event):
     if not _is_admin(event) or not _is_allowed_chat(event.chat_id):
