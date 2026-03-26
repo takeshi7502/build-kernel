@@ -969,27 +969,33 @@ async def help_cmd(event):
     is_admin = _is_admin(event)
 
     text = (
-        "📖 <b>Danh sách lệnh Userbot (.help)</b>\n\n"
+        "📖 <b>Danh sách lệnh (.help)</b>\n\n"
         "📌 <b>Ai cũng dùng được:</b>\n"
-        ".gki &lt;key&gt; — Build GKI Kernel (cần key hợp lệ)\n"
-        ".ping — Kiểm tra userbot hoạt động\n"
-        ".help — Hiện hướng dẫn này\n"
+        "<blockquote>"
+        "<b>.gki</b> <code>&lt;key&gt;</code> — Build GKI Kernel (cần key hợp lệ)\n"
+        "<b>.ping</b> — Kiểm tra userbot hoạt động\n"
+        "<b>.help</b> — Hiện hướng dẫn này\n"
+        "</blockquote>"
     )
 
     if is_admin:
         text += (
-            "\n🔒 <b>Chỉ Admin:</b>\n"
-            ".gki — Build trực tiếp không cần key\n"
-            ".st — Xem build đang chạy\n"
-            ".list — Lịch sử build thành công\n"
-            ".cancel &lt;run_id&gt; — Hủy build\n"
-            ".delete &lt;run_id&gt; — Xóa run\n"
-            ".key &lt;code&gt; &lt;uses&gt; — Tạo/sửa key\n"
-            ".keyvip &lt;code&gt; &lt;uses&gt; — Tạo VIP key\n"
-            ".keys — Xem danh sách key\n"
-            ".auth — Cho phép bot hoạt động trong group này\n"
-            ".ua — Xóa quyền hoạt động trong group khỏi bot\n"
+            "\n🔒 <b>Admin:</b>\n"
+            "<blockquote>"
+            "<b>.st</b> — Xem build đang chạy\n"
+            "<b>.list</b> — Lịch sử build thành công\n"
+            "<b>.key</b> <code>&lt;code&gt; &lt;uses&gt;</code> — Tạo/sửa key\n"
+            "<b>.keyvip</b> <code>&lt;code&gt; &lt;uses&gt;</code> — Tạo VIP key\n"
+            "<b>.keys</b> — Xem danh sách key\n"
+            "<b>.auth</b> — Cho phép bot hoạt động trong group này\n"
+            "<b>.ua</b> — Xóa quyền hoạt động trong group khỏi bot\n"
+            "</blockquote>"
         )
+        
+    text += (
+        "\n🌐 <b>Dashboard:</b> "
+        "<a href='https://kernel.takeshi.dev/'>kernel.takeshi.dev</a>"
+    )        
 
     await _reply_temp(event, text, 60, html=True)
 

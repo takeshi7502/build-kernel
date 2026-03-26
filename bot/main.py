@@ -571,24 +571,25 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         "📖 <b>Danh sách lệnh Bot</b>\n\n"
         "📌 <b>Ai cũng dùng được:</b>\n"
-        "/start — Bắt đầu sử dụng bot\n"
-        "/gki — Build GKI Kernel (cần key nếu không phải admin)\n"
-        "/oki — Build OKI Kernel\n"
-        "/ping — Kiểm tra bot hoạt động\n"
-        "/st — Xem build đang chạy\n"
-        "/list — Lịch sử build thành công\n"
-        "/help — Hiện hướng dẫn này\n"
+        "<blockquote>"
+        "<b>/gki</b> <code>&lt;key&gt;</code> — Build GKI Kernel\n"
+        "<b>/oki</b> <code>&lt;key&gt;</code> — Build OKI Kernel\n"
+        "<b>/ping</b> — Kiểm tra bot hoạt động\n"
+        "<b>/help</b> — Hiện hướng dẫn này\n"
+        "</blockquote>"
     )
 
     if admin:
         text += (
-            "\n🔒 <b>Chỉ Admin:</b>\n"
-            "/key <code>&lt;code&gt; &lt;uses&gt;</code> — Tạo/sửa key\n"
-            "/keyvip <code>&lt;code&gt; &lt;uses&gt;</code> — Tạo VIP key\n"
-            "/keys — Xem danh sách key\n"
-            "/chat <code>&lt;nội dung&gt;</code> — Broadcast cho all user\n"
-            "/cancel_<code>&lt;run_id&gt;</code> — Hủy build\n"
-            "/delete_<code>&lt;run_id&gt;</code> — Xóa run\n"
+            "\n🔒 <b>Admin:</b>\n"
+            "<blockquote>"
+            "<b>/key</b> <code>&lt;code&gt; &lt;uses&gt;</code> — Tạo/sửa key\n"
+            "<b>/keyvip</b> <code>&lt;code&gt; &lt;uses&gt;</code> — Tạo VIP key\n"
+            "<b>/keys</b> — Xem danh sách key\n"
+            "<b>/st</b> — Xem build đang chạy\n"
+            "<b>/list</b> — Lịch sử build thành công\n"
+            "<b>/chat</b> <code>&lt;nội dung&gt;</code> — Broadcast cho all user\n"
+            "</blockquote>"
         )
 
     text += (
