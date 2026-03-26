@@ -495,6 +495,12 @@ async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _safe_delete_user_msg(update, context)
+    storage: HybridStorage = context.application.bot_data["storage"]
+    user = update.effective_user
+    chat = update.effective_chat
+    # Track DM user
+    if chat and chat.type == "private" and user:
+        await storage.track_dm_user(user.id, chat.id)
     msg = (
         "👋 Xin chào! Mình là Bot Build Kernel GKI.\n\n"
         "🤖 Mình giúp tự động hóa quá trình cấu hình và biên dịch (build) Kernel Android (GKI) qua GitHub Actions.\n\n"
@@ -505,6 +511,72 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     if update.message:
         await _send_msg(update, context, msg, parse_mode=constants.ParseMode.HTML)
+
+
+async def dm_tracker(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Catch-all: tự động lưu chat_id của mọi user DM bot."""
+    chat = update.effective_chat
+    user = update.effective_user
+    if chat and chat.type == "private" and user:
+        storage: HybridStorage = context.application.bot_data["storage"]
+        await storage.track_dm_user(user.id, chat.id)
+
+
+async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin gửi thông báo đến tất cả user đã từng DM bot."""
+    user = update.effective_user
+    storage: HybridStorage = context.application.bot_data["storage"]
+    if not await is_admin(user.id, storage):
+        return
+
+    # Lấy danh sách admin để loại trừ
+    admin_ids = set()
+    admin_ids.add(config.OWNER_ID)
+    admin_ids.update(config.ADMIN_IDS)
+    dynamic_admins = await storage.get_admin_ids()
+    admin_ids.update(dynamic_admins)
+
+    dm_users = await storage.get_dm_users()
+    targets = [u for u in dm_users if u.get("user_id") not in admin_ids]
+
+    if not targets:
+        await _send_msg(update, context, "⚠️ Chưa có user nào trong danh sách để gửi.")
+        return
+
+    replied = update.message.reply_to_message if update.message else None
+    text_body = " ".join(context.args) if context.args else ""
+
+    if not replied and not text_body:
+        await _send_msg(update, context,
+            "📌 <b>Cách dùng:</b>\n"
+            "• <code>/chat Nội dung thông báo</code>\n"
+            "• Reply một tin nhắn + gõ <code>/chat</code>",
+            parse_mode=constants.ParseMode.HTML
+        )
+        return
+
+    success = 0
+    fail = 0
+    for u in targets:
+        cid = u.get("chat_id")
+        try:
+            if replied:
+                # Forward tin nhắn gốc
+                await context.bot.forward_message(
+                    chat_id=cid,
+                    from_chat_id=replied.chat_id,
+                    message_id=replied.message_id
+                )
+            else:
+                await context.bot.send_message(chat_id=cid, text=text_body)
+            success += 1
+        except Exception:
+            fail += 1
+
+    await _send_msg(update, context,
+        f"📢 Đã gửi thành công <b>{success}/{success + fail}</b> user.",
+        parse_mode=constants.ParseMode.HTML
+    )
 
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1144,6 +1216,7 @@ def main():
     app.add_handler(CommandHandler("st", cmd_status))
     app.add_handler(CommandHandler("list", cmd_list))
     app.add_handler(CommandHandler("ping", cmd_ping))
+    app.add_handler(CommandHandler("chat", cmd_broadcast))
     app.add_handler(CallbackQueryHandler(cb_list_page, pattern=r"^listpage:\d+$"))
     app.add_handler(CallbackQueryHandler(cb_close_msg, pattern=r"^closemsg"))
     app.add_handler(CallbackQueryHandler(cb_run_controls, pattern=r"^run:gki:\d+$"))
@@ -1151,6 +1224,9 @@ def main():
     app.add_handler(CallbackQueryHandler(cb_save_run, pattern=r"^saverun:\d+$"))
     app.add_handler(MessageHandler(filters.Regex(r"^/cancel_\d+(?:@[\w_]+)?$"), cmd_cancel_run))
     app.add_handler(MessageHandler(filters.Regex(r"^/delete_\d+(?:@[\w_]+)?$"), cmd_delete_run))
+
+    # DM user tracker (group=99, catch-all, lowest priority)
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.ALL, dm_tracker), group=99)
 
     # GKI conversation
     gki_conv = build_gki_conversation(gh, storage, config)
@@ -1173,6 +1249,10 @@ def main():
     app.add_handler(build_oki_conversation(gh, storage, config))
 
     async def _post_init(app_):
+        # Seed dm_users từ lịch sử jobs cũ
+        seeded = await app_.bot_data["storage"].seed_dm_users_from_jobs()
+        if seeded:
+            logger.warning("Seeded %d DM users from job history", seeded)
         app_.create_task(app_.bot_data["storage"]._sync_with_cloud())
         app_.create_task(poller(app_))
         app_.create_task(start_web_server(app_))

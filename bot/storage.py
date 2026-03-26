@@ -365,6 +365,42 @@ class HybridStorage:
             return data.get("waiters", [])
 
     # ==========================
+    # DM USERS (Broadcast)
+    # ==========================
+    async def track_dm_user(self, user_id: int, chat_id: int):
+        """Lưu user đã từng DM bot (deduplicate theo user_id)."""
+        async with self._lock:
+            data = self._load()
+            dm_users = data.setdefault("dm_users", [])
+            if not any(u.get("user_id") == user_id for u in dm_users):
+                dm_users.append({"user_id": user_id, "chat_id": chat_id})
+                await self._save(data)
+
+    async def get_dm_users(self) -> List[Dict[str, Any]]:
+        """Trả về danh sách tất cả user đã từng DM bot."""
+        async with self._lock:
+            data = self._load()
+            return data.get("dm_users", [])
+
+    async def seed_dm_users_from_jobs(self):
+        """Quét jobs cũ để truy vết user đã từng tương tác."""
+        async with self._lock:
+            data = self._load()
+            dm_users = data.setdefault("dm_users", [])
+            existing_ids = {u.get("user_id") for u in dm_users}
+            added = 0
+            for job in data.get("jobs", []):
+                uid = job.get("user_id")
+                cid = job.get("chat_id")
+                if uid and cid and uid not in existing_ids:
+                    dm_users.append({"user_id": uid, "chat_id": cid})
+                    existing_ids.add(uid)
+                    added += 1
+            if added:
+                await self._save(data)
+            return added
+
+    # ==========================
     # TELEGRAPH
     # ==========================
     def get_telegraph_token(self) -> Optional[str]:
