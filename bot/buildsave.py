@@ -74,8 +74,11 @@ class BuildSaveFlow:
             rows[row_idx].append(InlineKeyboardButton(v, callback_data=f"bsvar:{v}"))
         rows.append([InlineKeyboardButton("❌ Hủy", callback_data="bs:cancel")])
 
-        await update.message.delete()
-        await update.message.reply_text(
+        try:
+            await update.message.delete()
+        except Exception:
+            pass
+        await update.effective_chat.send_message(
             "🔨 <b>Build Kernel Lưu Trữ</b>\n\nChọn <b>KernelSU Variant</b>:",
             reply_markup=InlineKeyboardMarkup(rows),
             parse_mode="HTML"
