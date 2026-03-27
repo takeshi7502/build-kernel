@@ -527,7 +527,7 @@ async def _show_step(event, session: Dict[str, Any]):
             session["step"] = "release"
             await _show_step(event, session)
             return
-        text = header + _build_menu("<b>Bật hỗ trợ OnePlus 8E?</b> <i>(chỉ dành cho A15/A16)</i>", ["✅ Bật", "❌ Tắt"])
+        text = header + _build_menu("<b>Bật hỗ trợ OnePlus 8E?</b>", ["✅ Bật", "❌ Tắt"])
     elif step == "release":
         # Regular users skip release step (default Actions)
         if not admin:
@@ -728,6 +728,24 @@ async def _handle_input(event, session: Dict[str, Any], raw: str) -> bool:
                 inputs["cancel_susfs"] = toggle_val
             next_idx = STEPS.index(step) + 1
             session["step"] = STEPS[next_idx]
+            await _show_step(event, session)
+            return False
+        except ValueError:
+            pass
+        await _reply_temp(event, "Chọn 1 hoặc 2.", 10)
+        return False
+
+    if step == "supp_op":
+        try:
+            idx = int(val)
+            if idx == 1:
+                inputs["supp_op"] = True
+            elif idx == 2:
+                inputs["supp_op"] = False
+            else:
+                await _reply_temp(event, "Chọn 1 hoặc 2.", 10)
+                return False
+            session["step"] = "release"
             await _show_step(event, session)
             return False
         except ValueError:
