@@ -158,7 +158,7 @@ TOGGLE_FEATURES = [
     ("BBG",   "use_bbg",        "gkitog:bbg"),
     ("KPM",   "use_kpm",        "gkitog:kpm"),
     ("SUSFS", "cancel_susfs",   "gkitog:susfs"),
-    ("OP 8E", "supp_op",        "gkitog:supp_op"),
+    ("Support 1+ 8E", "supp_op",        "gkitog:supp_op"),
 ]
 
 def _toggles_keyboard(inputs: dict, back_cb: str = "", selected_target: str = "") -> InlineKeyboardMarkup:

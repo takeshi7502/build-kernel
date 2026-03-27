@@ -128,6 +128,8 @@ async def get_realtime_data(app):
                     
                 title = variant
                 sub_title = f"{os_str}-{branch}"
+                if inputs.get("supp_op"):
+                    sub_title += " (8E)"
                 
                 custom_version = str(inputs.get("version", "")).strip("-")
                 zram = "Bật" if inputs.get("use_zram", True) else "Tắt"

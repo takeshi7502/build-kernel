@@ -573,6 +573,16 @@ async def _handle_input(event, session: Dict[str, Any], raw: str) -> bool:
     if val == "0":
         prev = _prev_step(step)
         if prev:
+            is_admin = _is_admin(event)
+            # Skip các bước tự động (sẽ bị forward ngay) khi đi ngược
+            # Non-admin: skip bước release (auto-jump sang confirm)
+            if prev == "release" and not is_admin:
+                prev = _prev_step("release")  # → supp_op
+            # Skip bước supp_op nếu target không hỗ trợ
+            if prev == "supp_op":
+                selected_target = session.get("selected_target", "")
+                if selected_target not in SUPP_OP_TARGETS:
+                    prev = _prev_step("supp_op")  # → susfs
             session["step"] = prev
             await _show_step(event, session)
         else:
