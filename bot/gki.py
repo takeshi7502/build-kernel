@@ -409,20 +409,10 @@ class GKIFlow:
             )
             return GKI_VERSION
 
-        if target == "toggles":
-            inputs = context.user_data["gki"]["inputs"]
-            selected_target = context.user_data["gki"].get("selected_target", "")
-            await q.edit_message_text(
-                header + "<b>Tùy chỉnh tính năng:</b>",
-                reply_markup=_toggles_keyboard(inputs, back_cb="gkiback:version", selected_target=selected_target),
-                parse_mode="HTML"
-            )
-            return GKI_TOGGLES
-
         if target == "target":
             await q.edit_message_text(
                 header + "Chọn phiên bản Android để build:",
-                reply_markup=_build_target_keyboard(back_cb="gkiback:toggles"),
+                reply_markup=_build_target_keyboard(back_cb="gkiback:version"),
                 parse_mode="HTML"
             )
             return GKI_BUILD_TARGET
@@ -456,10 +446,20 @@ class GKIFlow:
             )
             return GKI_SUB_VERSION
 
+        if target == "toggles":
+            inputs = context.user_data["gki"]["inputs"]
+            selected_target = context.user_data["gki"].get("selected_target", "")
+            await q.edit_message_text(
+                header + "<b>Tùy chỉnh tính năng:</b>",
+                reply_markup=_toggles_keyboard(inputs, back_cb="gkiback:sub", selected_target=selected_target),
+                parse_mode="HTML"
+            )
+            return GKI_TOGGLES
+
         if target == "release":
             await q.edit_message_text(
                 header + "Chọn loại release: (Nên chọn Actions)",
-                reply_markup=_kb_from_list("gkirel", RELEASE_TYPES, back_cb="gkiback:sub"),
+                reply_markup=_kb_from_list("gkirel", RELEASE_TYPES, back_cb="gkiback:toggles"),
                 parse_mode="HTML"
             )
             return GKI_RELEASE_TYPE
@@ -511,13 +511,11 @@ class GKIFlow:
             await _safe_delete(context, chat_id, update.message.message_id)
 
         header = _task_header(context)
-        inputs = context.user_data["gki"]["inputs"]
-        selected_target = context.user_data["gki"].get("selected_target", "")
         await _update_bot_msg(context, chat_id,
-            header + "<b>Tùy chỉnh tính năng:</b>",
-            reply_markup=_toggles_keyboard(inputs, back_cb="gkiback:version", selected_target=selected_target),
+            header + "Chọn phiên bản Android để build:",
+            reply_markup=_build_target_keyboard(back_cb="gkiback:version"),
             parse_mode="HTML")
-        return GKI_TOGGLES
+        return GKI_BUILD_TARGET
 
     # === TOGGLES COMBINED ===
     async def toggle_feature(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -527,11 +525,19 @@ class GKIFlow:
         inputs = context.user_data["gki"]["inputs"]
 
         if key == "next":
-            # Tiếp tục sang chọn Build Target
+            # Admin → chọn release type; User → confirm thẳng
             header = _task_header(context)
-            await q.edit_message_text(header + "Chọn phiên bản Android để build:",
-                reply_markup=_build_target_keyboard(back_cb="gkiback:toggles"), parse_mode="HTML")
-            return GKI_BUILD_TARGET
+            user_is_admin = await is_admin(update.effective_user.id, self.storage)
+            if user_is_admin:
+                await q.edit_message_text(
+                    header + "Chọn loại release: (Nên chọn Actions)",
+                    reply_markup=_kb_from_list("gkirel", RELEASE_TYPES, back_cb="gkiback:toggles"),
+                    parse_mode="HTML")
+                return GKI_RELEASE_TYPE
+            else:
+                # User: mặc định Actions, chuyển thẳng sang confirm
+                context.user_data["gki"]["inputs"]["release_type"] = "Actions"
+                return await self.confirm(q, context)
 
         # Toggle feature
         toggle_map = {
@@ -549,7 +555,7 @@ class GKIFlow:
         selected_target = context.user_data["gki"].get("selected_target", "")
         await q.edit_message_text(
             header + "<b>Tùy chỉnh tính năng:</b>",
-            reply_markup=_toggles_keyboard(inputs, back_cb="gkiback:version", selected_target=selected_target),
+            reply_markup=_toggles_keyboard(inputs, back_cb="gkiback:sub", selected_target=selected_target),
             parse_mode="HTML"
         )
         return GKI_TOGGLES
@@ -620,7 +626,7 @@ class GKIFlow:
                 rows.append(row)
 
         # Nav: [⬅️] [❌] [➡️]
-        nav = [InlineKeyboardButton("⬅️", callback_data="gkiback:toggles")]
+        nav = [InlineKeyboardButton("⬅️", callback_data="gkiback:target")]
         nav.append(InlineKeyboardButton("❌", callback_data="gki:cancel"))
         if user_is_admin:
             nav.append(InlineKeyboardButton("➡️", callback_data="gkisub:done"))
@@ -640,11 +646,18 @@ class GKIFlow:
         selected = context.user_data["gki"]["selected_subs"]
 
         if not user_is_admin and val not in ("done", "all"):
-            # Đối với user thường, chỉ bấm 1 phát vào sub-version là đi thẳng tới Confirm và set Action
+            # User: chọn 1 sub → vào toggles để chọn tính năng trước khi confirm
             context.user_data["gki"]["selected_subs"] = {val}
             context.user_data["gki"]["inputs"]["sub_levels"] = str(val)
-            context.user_data["gki"]["inputs"]["release_type"] = "Actions"
-            return await self.confirm(q, context)
+            header = _task_header(context)
+            inputs = context.user_data["gki"]["inputs"]
+            selected_target = context.user_data["gki"].get("selected_target", "")
+            await q.edit_message_text(
+                header + "<b>Tùy chỉnh tính năng:</b>",
+                reply_markup=_toggles_keyboard(inputs, back_cb="gkiback:sub", selected_target=selected_target),
+                parse_mode="HTML"
+            )
+            return GKI_TOGGLES
 
         if val == "done":
             # Validate at least 1 selected
@@ -656,10 +669,16 @@ class GKIFlow:
                 context.user_data["gki"]["inputs"]["sub_levels"] = ""  # empty = all
             else:
                 context.user_data["gki"]["inputs"]["sub_levels"] = ",".join(sorted(selected, key=lambda x: int(x)))
-            # Move to release type
+            # Admin: đã chọn sub xong → vào Toggles
             header = _task_header(context)
-            await q.edit_message_text(header + "Chọn loại release: (Nên chọn Actions)", reply_markup=_kb_from_list("gkirel", RELEASE_TYPES, back_cb="gkiback:sub"), parse_mode="HTML")
-            return GKI_RELEASE_TYPE
+            inputs = context.user_data["gki"]["inputs"]
+            selected_target = context.user_data["gki"].get("selected_target", "")
+            await q.edit_message_text(
+                header + "<b>Tùy chỉnh tính năng:</b>",
+                reply_markup=_toggles_keyboard(inputs, back_cb="gkiback:sub", selected_target=selected_target),
+                parse_mode="HTML"
+            )
+            return GKI_TOGGLES
 
         if val == "all":
             # Toggle all
@@ -699,7 +718,7 @@ class GKIFlow:
     async def confirm(self, q, context):
         inputs = context.user_data["gki"]["inputs"]
         user_is_admin = await is_admin(q.from_user.id, self.storage)
-        back_data = "gkiback:release" if user_is_admin else "gkiback:target"
+        back_data = "gkiback:release" if user_is_admin else "gkiback:toggles"
 
         # Dịch targets
         targets = []

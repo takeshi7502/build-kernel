@@ -88,12 +88,14 @@ BUILD_TARGETS = [
     ("Android 13 - 5.15", "build_a13_5_15"),
     ("Android 14 - 6.1", "build_a14_6_1"),
     ("Android 15 - 6.6", "build_a15_6_6"),
+    ("Android 16 - 6.12", "build_a16_6_12"),
 ]
 SUB_LEVELS = {
-    "build_a12_5_10": ["66","81","101","110","117","136","149","160","168","177","185","198","205","209","218","226","233","236","237","240","246"],
-    "build_a13_5_15": ["74","78","94","104","119","123","137","144","148","149","151","153","167","170","178","180","185","189","194"],
-    "build_a14_6_1":  ["25","43","57","68","75","78","84","90","93","99","112","115","118","124","128","129","134","138","141","145","157"],
-    "build_a15_6_6":  ["50","56","57","58","66","77","82","87","89","92","98","102","118"],
+    "build_a12_5_10": ["66","81","101","110","117","136","149","160","168","177","185","198","205","209","218","226","233","236","237","240","246","X"],
+    "build_a13_5_15": ["74","78","94","104","119","123","137","144","148","149","151","153","167","170","178","180","185","189","194","X"],
+    "build_a14_6_1":  ["25","43","57","68","75","78","84","90","93","99","112","115","118","124","128","129","134","138","141","145","157","X"],
+    "build_a15_6_6":  ["50","56","57","58","66","77","82","87","89","92","98","102","118","X"],
+    "build_a16_6_12": ["23","30","38","58","X"],
 }
 
 # Metadata per sub_level (os_patch_level, revision) — mirrors the kernel-aXX workflow matrix
@@ -106,6 +108,7 @@ SUB_LEVEL_META: Dict[str, Dict[str, tuple]] = {
         "205":("2024-03","r1"),"209":("2024-05","r13"),"218":("2024-08","r14"),
         "226":("2024-11","r8"),"233":("2025-02","r1"),"236":("2025-05","r1"),
         "237":("2025-06","r1"),"240":("2025-09","r1"),"246":("2025-12","r1"),
+        "X":("lts","r1"),
     },
     "build_a13_5_15": {
         "74":("2023-01",""),"78":("2023-03",""),"94":("2023-05",""),
@@ -114,7 +117,7 @@ SUB_LEVEL_META: Dict[str, Dict[str, tuple]] = {
         "149":("2024-07",""),"151":("2024-08",""),"153":("2024-09",""),
         "167":("2024-11",""),"170":("2025-01",""),"178":("2025-03",""),
         "180":("2025-05",""),"185":("2025-07",""),"189":("2025-09",""),
-        "194":("2025-12",""),
+        "194":("2025-12",""),"X":("lts",""),
     },
     "build_a14_6_1": {
         "25":("2023-10",""),"43":("2023-11",""),"57":("2024-01",""),
@@ -124,13 +127,18 @@ SUB_LEVEL_META: Dict[str, Dict[str, tuple]] = {
         "118":("2025-01",""),"124":("2025-02",""),"128":("2025-03",""),
         "129":("2025-04",""),"134":("2025-05",""),"138":("2025-06",""),
         "141":("2025-07",""),"145":("2025-09",""),"157":("2025-12",""),
+        "X":("lts",""),
     },
     "build_a15_6_6": {
         "50":("2024-06",""),"56":("2024-09",""),"57":("2024-10",""),
         "58":("2024-11",""),"66":("2025-01",""),"77":("2025-03",""),
         "82":("2025-04",""),"87":("2025-05",""),"89":("2025-06",""),
         "92":("2025-07",""),"98":("2025-09",""),"102":("2025-10",""),
-        "118":("2025-12",""),
+        "118":("2026-01",""),"X":("lts",""),
+    },
+    "build_a16_6_12": {
+        "23":("2025-06",""),"30":("2025-07",""),"38":("2025-09",""),
+        "58":("2025-12",""),"X":("lts",""),
     },
 }
 
@@ -140,18 +148,21 @@ TARGET_META: Dict[str, tuple] = {
     "build_a13_5_15": ("android13", "5.15"),
     "build_a14_6_1":  ("android14", "6.1"),
     "build_a15_6_6":  ("android15", "6.6"),
+    "build_a16_6_12": ("android16", "6.12"),
 }
+
+SUPP_OP_TARGETS = {"build_a15_6_6", "build_a16_6_12"}
 
 CUSTOM_WORKFLOW = "kernel-custom.yml"  # Single-job clean dispatch target
 
 
 TARGET_ALIASES = {
     "a12": "build_a12_5_10", "a13": "build_a13_5_15",
-    "a14": "build_a14_6_1", "a15": "build_a15_6_6",
+    "a14": "build_a14_6_1", "a15": "build_a15_6_6", "a16": "build_a16_6_12",
     "12": "build_a12_5_10", "13": "build_a13_5_15",
-    "14": "build_a14_6_1", "15": "build_a15_6_6",
+    "14": "build_a14_6_1", "15": "build_a15_6_6", "16": "build_a16_6_12",
     "5.10": "build_a12_5_10", "5.15": "build_a13_5_15",
-    "6.1": "build_a14_6_1", "6.6": "build_a15_6_6",
+    "6.1": "build_a14_6_1", "6.6": "build_a15_6_6", "6.12": "build_a16_6_12",
 }
 TARGET_KEYS = list(SUB_LEVELS.keys())
 
@@ -163,10 +174,12 @@ DEFAULT_INPUTS: Dict[str, Any] = {
     "use_bbg": True,
     "use_kpm": True,
     "cancel_susfs": False,
+    "supp_op": False,
     "build_a12_5_10": False,
     "build_a13_5_15": False,
     "build_a14_6_1": True,
     "build_a15_6_6": False,
+    "build_a16_6_12": False,
     "build_all": False,
     "release_type": "Actions",
     "sub_levels": "",
@@ -287,8 +300,8 @@ def _matches_target_run(run: dict) -> bool:
 
 
 # ─── GKI Flow State Machine ──────────────────────────────────────────
-# Steps: variant -> branch -> version -> zram -> bbg -> kpm -> susfs -> target -> sub -> release -> confirm
-STEPS = ["variant", "branch", "version", "zram", "bbg", "kpm", "susfs", "target", "sub", "release", "confirm"]
+# Steps: variant -> branch -> version -> target -> sub -> zram -> bbg -> kpm -> susfs -> [supp_op nếu A15/A16] -> release -> confirm
+STEPS = ["variant", "branch", "version", "target", "sub", "zram", "bbg", "kpm", "susfs", "supp_op", "release", "confirm"]
 
 # Per-user session storage: key = (chat_id, sender_id)
 _sessions: Dict[tuple, Dict[str, Any]] = {}
@@ -493,6 +506,11 @@ async def _show_step(event, session: Dict[str, Any]):
         text = (header + "<b>Nhập tên version</b>\n<i>(VD nhập: JinYan → 5.10.209-JinYan)</i>\n"
                 "Hoặc gửi <code>skip</code> để bỏ qua.\n\n"
                 "  0 = Quay lại  |  x = Hủy")
+    elif step == "target":
+        labels = [label for label, _ in BUILD_TARGETS]
+        text = header + _build_menu("<b>Chọn phiên bản Android để build:</b>", labels)
+    elif step == "sub":
+        text = header + _build_sub_menu(session)
     elif step == "zram":
         text = header + _build_menu("<b>Bật ZRAM?</b> <i>(mặc định: bật)</i>", ["✅ Bật", "❌ Tắt"])
     elif step == "bbg":
@@ -501,11 +519,15 @@ async def _show_step(event, session: Dict[str, Any]):
         text = header + _build_menu("<b>Bật KPM?</b> <i>(mặc định: bật)</i>", ["✅ Bật", "❌ Tắt"])
     elif step == "susfs":
         text = header + _build_menu("<b>Tắt SUSFS?</b> <i>(mặc định: bật)</i>", ["✅ Tắt SUSFS", "❌ Giữ SUSFS"])
-    elif step == "target":
-        labels = [label for label, _ in BUILD_TARGETS]
-        text = header + _build_menu("<b>Chọn phiên bản Android để build:</b>", labels)
-    elif step == "sub":
-        text = header + _build_sub_menu(session)
+    elif step == "supp_op":
+        # Chỉ hiện nếu target là A15 hoặc A16
+        selected_target = session.get("selected_target", "")
+        if selected_target not in SUPP_OP_TARGETS:
+            # Bỏ qua bước này
+            session["step"] = "release"
+            await _show_step(event, session)
+            return
+        text = header + _build_menu("<b>Bật hỗ trợ OnePlus 8E?</b> <i>(chỉ dành cho A15/A16)</i>", ["✅ Bật", "❌ Tắt"])
     elif step == "release":
         # Regular users skip release step (default Actions)
         if not admin:
@@ -604,8 +626,79 @@ async def _handle_input(event, session: Dict[str, Any], raw: str) -> bool:
             inputs["version"] = ""
         else:
             inputs["version"] = val if val.startswith("-") else f"-{val}"
-        session["step"] = "zram"
+        session["step"] = "target"
         await _show_step(event, session)
+        return False
+
+    if step == "target":
+        try:
+            idx = int(val) - 1
+            if 0 <= idx < len(BUILD_TARGETS):
+                _, key = BUILD_TARGETS[idx]
+                for _, k in BUILD_TARGETS:
+                    inputs[k] = (k == key)
+                session["selected_target"] = key
+                available = SUB_LEVELS.get(key, [])
+                session["selected_subs"] = set()
+                session["step"] = "sub"
+                await _show_step(event, session)
+                return False
+        except ValueError:
+            pass
+        await _reply_temp(event, f"Chọn từ 1-{len(BUILD_TARGETS)}.", 10)
+        return False
+
+    if step == "sub":
+        target_key = session["selected_target"]
+        available = SUB_LEVELS.get(target_key, [])
+        selected = session["selected_subs"]
+
+        is_admin = _is_admin(event)
+
+        if val.lower() == "a":
+            if not is_admin:
+                await _reply_temp(event, "⚠️ User thường chỉ được phép chọn 1 sub-version!", 10)
+                return False
+            if len(selected) == len(available):
+                selected.clear()
+            else:
+                selected.update(available)
+            await _show_step(event, session)
+            return False
+
+        if val.lower() == "ok":
+            if not selected:
+                await _reply_temp(event, "⚠️ Chọn ít nhất 1 sub-version!", 10)
+                return False
+            if len(selected) == len(available):
+                inputs["sub_levels"] = ""
+            else:
+                inputs["sub_levels"] = ",".join(sorted(selected, key=lambda x: int(x) if x != "X" else 9999))
+            session["step"] = "zram"
+            await _show_step(event, session)
+            return False
+
+        try:
+            idx = int(val) - 1
+            if 0 <= idx < len(available):
+                sv = available[idx]
+                if not is_admin:
+                    selected.clear()
+                    selected.add(sv)
+                    inputs["sub_levels"] = sv
+                    session["step"] = "zram"
+                    await _show_step(event, session)
+                    return False
+
+                if sv in selected:
+                    selected.discard(sv)
+                else:
+                    selected.add(sv)
+                await _show_step(event, session)
+                return False
+        except ValueError:
+            pass
+        await _reply_temp(event, f"Chọn từ 1-{len(available)}, 'a' (tất cả), hoặc 'ok' (tiếp tục).", 10)
         return False
 
     if step in ("zram", "bbg", "kpm", "susfs"):
@@ -675,8 +768,8 @@ async def _handle_input(event, session: Dict[str, Any], raw: str) -> bool:
             if len(selected) == len(available):
                 inputs["sub_levels"] = ""
             else:
-                inputs["sub_levels"] = ",".join(sorted(selected, key=lambda x: int(x)))
-            session["step"] = "release"
+                inputs["sub_levels"] = ",".join(sorted(selected, key=lambda x: int(x) if x != "X" else 9999))
+            session["step"] = "zram"
             await _show_step(event, session)
             return False
 
@@ -688,7 +781,7 @@ async def _handle_input(event, session: Dict[str, Any], raw: str) -> bool:
                     selected.clear()
                     selected.add(sv)
                     inputs["sub_levels"] = sv
-                    session["step"] = "release"
+                    session["step"] = "zram"
                     await _show_step(event, session)
                     return False
                     
@@ -832,7 +925,7 @@ async def _do_dispatch(event, session: Dict[str, Any]) -> bool:
             "use_bbg":          inputs.get("use_bbg", False),
             "use_kpm":          inputs.get("use_kpm", False),
             "cancel_susfs":     inputs.get("cancel_susfs", False),
-            "supp_op":          False,
+            "supp_op":          inputs.get("supp_op", False) if t_key in SUPP_OP_TARGETS else False,
         }
 
     logger.info("[dispatch] file=%s use_custom=%s t_key=%s", dispatch_file, use_custom, t_key)
@@ -987,8 +1080,8 @@ async def help_cmd(event):
             "<b>.key</b> <code>&lt;code&gt; &lt;uses&gt;</code> — Tạo/sửa key\n"
             "<b>.keyvip</b> <code>&lt;code&gt; &lt;uses&gt;</code> — Tạo VIP key\n"
             "<b>.keys</b> — Xem danh sách key\n"
-            "<b>.auth</b> — Cho phép bot hoạt động trong group này\n"
-            "<b>.ua</b> — Xóa quyền hoạt động trong group khỏi bot\n"
+            "<b>.auth</b> — Cấp quyền hoạt động.\n"
+            "<b>.ua</b> — Xóa quyền hoạt động.\n"
             "</blockquote>"
         )
         
