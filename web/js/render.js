@@ -11,15 +11,20 @@ import { showModal } from './modal.js';
 
 export function renderTabs(datasets) {
   var tabsEl = document.getElementById('tabs');
-  // keep panel-bot button alive!
-  // tabsEl.innerHTML = '';
+  var refNode = document.getElementById('tab-web'); // Nút Web Build (nếu có, để chèn trước đó)
+  
   datasets.forEach(function (ds, idx) {
     var btn = document.createElement('button');
     btn.className = 'tab';
     btn.textContent = ds.meta.label;
     btn.dataset.panel = 'panel-' + idx;
     btn.addEventListener('click', function () { activateTab(btn); });
-    tabsEl.appendChild(btn);
+    
+    if (refNode) {
+      tabsEl.insertBefore(btn, refNode);
+    } else {
+      tabsEl.appendChild(btn);
+    }
   });
 }
 
@@ -36,10 +41,10 @@ function activateTab(btn) {
 export function renderPanels(datasets) {
   var content = document.getElementById('content');
   
-  // Xóa các panel cũ (trừ panel tĩnh của Bot)
+  // Xóa các panel cũ (trừ panel tĩnh của Bot và Web)
   var children = Array.from(content.children);
   children.forEach(function(child) {
-      if (child.id && child.id.startsWith('panel-') && child.id !== 'panel-bot') {
+      if (child.id && child.id.startsWith('panel-') && child.id !== 'panel-bot' && child.id !== 'panel-web') {
           content.removeChild(child);
       }
   });
@@ -47,12 +52,19 @@ export function renderPanels(datasets) {
   var mainLoading = document.getElementById('mainLoading');
   if (mainLoading) mainLoading.style.display = 'none';
 
+  var refPanel = document.getElementById('panel-web'); // Để chèn panel A12-A16 trước nó
+
   datasets.forEach(function (ds, idx) {
     var panel = document.createElement('div');
     panel.className = 'tab-panel';
     panel.id = 'panel-' + idx;
     panel.innerHTML = buildCard(ds.data, ds.meta);
-    content.appendChild(panel);
+    
+    if (refPanel) {
+      content.insertBefore(panel, refPanel);
+    } else {
+      content.appendChild(panel);
+    }
   });
 }
 

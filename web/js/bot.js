@@ -102,13 +102,15 @@ function createBuildCard(build) {
     `;
 }
 
+let currentBotBuilds = [];
+let currentWebBuilds = [];
+
 // Cập nhật trạng thái Bot (Online/Offline)
 function updateStatusBadge(botStatus, lastPing) {
     const badge = document.getElementById('botStatusBadge');
     if (!badge) return;
     const textSpan = document.getElementById('botStatusText');
 
-    // Nếu quá 6.5 phút (400s) không ping, coi như offline
     let isOnline = false;
     if (botStatus === "online" && lastPing) {
         const now = Math.floor(Date.now() / 1000);
@@ -127,21 +129,38 @@ function updateStatusBadge(botStatus, lastPing) {
 }
 
 // Xử lý Render
-function renderBuilds(filter = 'all') {
-    const container = document.getElementById('builds-container');
-    if (!container) return;
-    container.innerHTML = '';
+function renderBuilds() {
+    const filterBot = document.querySelector('.filter-group[data-target="bot"] .filter-btn.active')?.dataset.filter || 'all';
+    const filterWeb = document.querySelector('.filter-group[data-target="web"] .filter-btn.active')?.dataset.filter || 'all';
 
-    if (currentBuilds.length === 0) {
-        container.innerHTML = '<p style="color: var(--text-muted); grid-column: 1 / -1; text-align: center; padding: 40px;">Đang tải dữ liệu hoặc chưa có bản build nào...</p>';
-        return;
+    const containerBot = document.getElementById('builds-container');
+    const containerWeb = document.getElementById('builds-container-web');
+
+    if (containerBot) {
+        containerBot.innerHTML = '';
+        if (currentBotBuilds.length === 0) {
+            containerBot.innerHTML = '<p style="color: var(--text-muted); grid-column: 1 / -1; text-align: center; padding: 40px;">Đang tải dữ liệu hoặc chưa có bản build nào...</p>';
+        } else {
+            currentBotBuilds.forEach(build => {
+                if (filterBot === 'all' || build.status === filterBot) {
+                    containerBot.innerHTML += createBuildCard(build);
+                }
+            });
+        }
     }
 
-    currentBuilds.forEach(build => {
-        if (filter === 'all' || build.status === filter) {
-            container.innerHTML += createBuildCard(build);
+    if (containerWeb) {
+        containerWeb.innerHTML = '';
+        if (currentWebBuilds.length === 0) {
+            containerWeb.innerHTML = '<p style="color: var(--text-muted); grid-column: 1 / -1; text-align: center; padding: 40px;">Đang tải dữ liệu hoặc chưa có bản web build nào...</p>';
+        } else {
+            currentWebBuilds.forEach(build => {
+                if (filterWeb === 'all' || build.status === filterWeb) {
+                    containerWeb.innerHTML += createBuildCard(build);
+                }
+            });
         }
-    });
+    }
     
     // Xử lý hiệu ứng chữ chạy cho tên quá dài
     document.querySelectorAll('.user-name-scroller').forEach(el => {
@@ -160,13 +179,12 @@ async function loadData() {
         if (!res.ok) throw new Error("Fetch failed");
         const data = await res.json();
 
-        currentBuilds = data.builds || [];
-        updateStatusBadge(data.status, data.last_ping);
+        const allBuilds = data.builds || [];
+        currentBotBuilds = allBuilds.filter(b => b.type !== 'buildsave');
+        currentWebBuilds = allBuilds.filter(b => b.type === 'buildsave');
 
-        // Giữ nguyên filter đang kích hoạt
-        const activeFilterBtn = document.querySelector('.filter-btn.active');
-        const activeFilter = activeFilterBtn ? activeFilterBtn.dataset.filter : 'all';
-        renderBuilds(activeFilter);
+        updateStatusBadge(data.status, data.last_ping);
+        renderBuilds();
     } catch (err) {
         console.error("Lỗi lấy dữ liệu:", err);
         updateStatusBadge("offline", 0);
@@ -181,9 +199,12 @@ export function initBot() {
     const filterBtns = document.querySelectorAll('.filter-btn');
     filterBtns.forEach(btn => {
         btn.addEventListener('click', (e) => {
-            filterBtns.forEach(b => b.classList.remove('active'));
+            const group = e.target.closest('.filter-group');
+            if (group) {
+                group.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+            }
             e.target.classList.add('active');
-            renderBuilds(e.target.dataset.filter);
+            renderBuilds();
         });
     });
 

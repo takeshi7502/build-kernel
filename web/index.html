@@ -52,6 +52,7 @@
     <div class="tabs" id="tabs">
       <button class="tab active" id="tab-bot" data-panel="panel-bot"><i class="fa-solid fa-robot" style="margin-right: 6px;"></i>Bot Build</button>
       <!-- renderTabs will append here -->
+      <button class="tab" id="tab-web" data-panel="panel-web"><i class="fa-solid fa-cloud" style="margin-right: 6px;"></i>Web Build</button>
     </div>
   </nav>
 
@@ -100,7 +101,7 @@
     <div class="tab-panel active" id="panel-bot">
         <div class="section-title" style="margin-top: 20px;">
             <h2><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> Lịch Sử Build GKI Kernel</h2>
-            <div class="filter-group">
+            <div class="filter-group" data-target="bot">
                 <button class="filter-btn active" data-filter="all">Tất cả</button>
                 <button class="filter-btn" data-filter="success">Thành công</button>
             </div>
@@ -111,6 +112,19 @@
     </div>
 
     <!-- renderPanels will append A12-A16 here -->
+
+    <div class="tab-panel" id="panel-web">
+        <div class="section-title" style="margin-top: 20px;">
+            <h2><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> Lịch Sử Web Build</h2>
+            <div class="filter-group" data-target="web">
+                <button class="filter-btn active" data-filter="all">Tất cả</button>
+                <button class="filter-btn" data-filter="success">Thành công</button>
+            </div>
+        </div>
+        <div class="builds-grid" id="builds-container-web">
+            <p style="color: var(--text-muted); grid-column: 1 / -1; text-align: center; padding: 40px;">Đang tải dữ liệu Web Build...</p>
+        </div>
+    </div>
 
     <div class="loading" id="mainLoading">
       <div class="loading-spinner"></div>
