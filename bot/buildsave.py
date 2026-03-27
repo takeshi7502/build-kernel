@@ -165,8 +165,7 @@ class BuildSaveFlow:
             f"• Variant: <b>{variant}</b>\n"
             f"• Target: <b>{target_label}</b>\n"
             f"• Sub-level: <b>{full_ver}</b>\n\n"
-            f"<i>Cấu hình cố định: Stable | ZRAM/BBG/SUSFS ✅ | KPM ❌</i>\n\n"
-            f"⚠️ Build này sẽ <b>tự động cập nhật link tải xuống lên web</b> khi hoàn tất.",
+            f"<i>Cấu hình cố định:\n• Stable | ZRAM/BBG/SUSFS ✅ | KPM ❌</i>\n\n",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("✅ Xác nhận Build", callback_data="bs:confirm")],
                 [
@@ -253,13 +252,10 @@ class BuildSaveFlow:
         await q.edit_message_text(
             f"✅ <b>Đã gửi lệnh build lưu trữ!</b>\n"
             f"🔨 {variant} <b>{full_ver}</b>\n"
-            f"👤 Người gửi: {mention}\n\n"
-            f"<i>Bot sẽ thông báo và tự cập nhật link web khi hoàn tất.</i>",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("🔗 GitHub", url=view_url),
-                InlineKeyboardButton("🌐 Web", url="https://kernel.takeshi.dev/"),
-            ]]),
-            parse_mode="HTML"
+            f"👤 Người gửi: {mention}\n"
+            f"<blockquote><b>Xem : <a href='{view_url}'>Github</a> | <a href='https://kernel.takeshi.dev/'>Dashboard</a></b></blockquote>",
+            parse_mode="HTML",
+            disable_web_page_preview=True,
         )
         context.user_data.pop("bs", None)
         return ConversationHandler.END
