@@ -115,6 +115,7 @@ async def get_realtime_data(app):
                     if inputs.get("build_a13_5_15"): os_list.append("A13-5.15")
                     if inputs.get("build_a14_6_1"): os_list.append("A14-6.1")
                     if inputs.get("build_a15_6_6"): os_list.append("A15-6.6")
+                    if inputs.get("build_a16_6_12"): os_list.append("A16-6.12")
                 
                 os_str = os_list[0] if os_list else "Custom"
                 sub = str(inputs.get("sub_levels", "")).replace(",", ".")
