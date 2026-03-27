@@ -50,8 +50,10 @@ document.addEventListener('click', function (e) {
   }).catch(function () {});
 });
 
+let lastDataStr = "";
+
 // 加载内核数据
-async function loadData() {
+async function loadData(isInterval = false) {
   var results = await Promise.allSettled(
     DATA_FILES.map(function (f) {
       return fetchJsonFresh('data/' + f.android + '/' + f.kernel + '.json');
@@ -65,6 +67,14 @@ async function loadData() {
     }
   }
 
+  const newStr = JSON.stringify(datasets);
+  if (isInterval && lastDataStr === newStr) {
+      return; // Không có thanh đổi JSON, bỏ qua render lại
+  }
+  
+  const isFirstLoad = !lastDataStr;
+  lastDataStr = newStr;
+
   if (datasets.length === 0) {
     var err = document.createElement('div');
     err.className = 'error';
@@ -75,27 +85,42 @@ async function loadData() {
     return;
   }
 
-  renderTabs(datasets);
+  var activePanelId = document.querySelector('.tab-panel.active')?.id;
+
+  if (isFirstLoad) {
+      renderTabs(datasets);
+      // Attach event to the static tabs (Bot Build and Web Build) so users can switch back to them
+      ['tab-bot', 'tab-web'].forEach(function(tabId) {
+        var tab = document.getElementById(tabId);
+        if (tab) {
+            tab.addEventListener('click', function () {
+                document.querySelectorAll('.tab').forEach(function (t) { t.classList.remove('active'); });
+                document.querySelectorAll('.tab-panel').forEach(function (p) { p.classList.remove('active'); });
+                tab.classList.add('active');
+                var panel = document.getElementById(tab.dataset.panel);
+                if (panel) panel.classList.add('active');
+            });
+        }
+      });
+  }
+
   renderPanels(datasets);
 
-  // Attach event to the static tabs (Bot Build and Web Build) so users can switch back to them
-  ['tab-bot', 'tab-web'].forEach(function(tabId) {
-    var tab = document.getElementById(tabId);
-    if (tab) {
-        tab.addEventListener('click', function () {
-            document.querySelectorAll('.tab').forEach(function (t) { t.classList.remove('active'); });
-            document.querySelectorAll('.tab-panel').forEach(function (p) { p.classList.remove('active'); });
-            tab.classList.add('active');
-            var panel = document.getElementById(tab.dataset.panel);
-            if (panel) panel.classList.add('active');
-        });
-    }
-  });
-
-  // Default to keeping the Bot tab active on page load
+  if (!isFirstLoad && activePanelId) {
+      // Phục hồi panel nào đang mở
+      var currPanel = document.getElementById(activePanelId);
+      if (currPanel) {
+          currPanel.classList.add('active');
+      }
+  }
 }
 
 // 启动
 initAnnouncement();
 loadData();
+
+// Tự động kiểm tra file JSON mỗi 20 giây để update realtime
+setInterval(function() {
+    loadData(true);
+}, 20000);
 
