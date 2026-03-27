@@ -27,14 +27,16 @@ BUILD_TARGETS = [
     ("A13 - 5.15", "build_a13_5_15"),
     ("A14 - 6.1", "build_a14_6_1"),
     ("A15 - 6.6", "build_a15_6_6"),
+    ("A16 - 6.12", "build_a16_6_12"),
 ]
 
 # Sub-version (sub_level) lists per build target
 SUB_LEVELS = {
-    "build_a12_5_10": ["66","81","101","110","117","136","149","160","168","177","185","198","205","209","218","226","233","236","237","240","246"],
-    "build_a13_5_15": ["74","78","94","104","119","123","137","144","148","149","151","153","167","170","178","180","185","189","194"],
-    "build_a14_6_1": ["25","43","57","68","75","78","84","90","93","99","112","115","118","124","128","129","134","138","141","145","157"],
-    "build_a15_6_6": ["50","56","57","58","66","77","82","87","89","92","98","102","118"],
+    "build_a12_5_10": ["66","81","101","110","117","136","149","160","168","177","185","198","205","209","218","226","233","236","237","240","246","X"],
+    "build_a13_5_15": ["74","78","94","104","119","123","137","144","148","149","151","153","167","170","178","180","185","189","194","X"],
+    "build_a14_6_1": ["25","43","57","68","75","78","84","90","93","99","112","115","118","124","128","129","134","138","141","145","157","X"],
+    "build_a15_6_6": ["50","56","57","58","66","77","82","87","89","92","98","102","118","X"],
+    "build_a16_6_12": ["23","30","38","58","X"],
 }
 
 # Metadata per sub_level → (os_patch_level, revision)
@@ -47,6 +49,7 @@ SUB_LEVEL_META: Dict[str, Dict[str, tuple]] = {
         "205":("2024-03","r1"),"209":("2024-05","r13"),"218":("2024-08","r14"),
         "226":("2024-11","r8"),"233":("2025-02","r1"),"236":("2025-05","r1"),
         "237":("2025-06","r1"),"240":("2025-09","r1"),"246":("2025-12","r1"),
+        "X":("lts","r1"),
     },
     "build_a13_5_15": {
         "74":("2023-01",""),"78":("2023-03",""),"94":("2023-05",""),
@@ -55,7 +58,7 @@ SUB_LEVEL_META: Dict[str, Dict[str, tuple]] = {
         "149":("2024-07",""),"151":("2024-08",""),"153":("2024-09",""),
         "167":("2024-11",""),"170":("2025-01",""),"178":("2025-03",""),
         "180":("2025-05",""),"185":("2025-07",""),"189":("2025-09",""),
-        "194":("2025-12",""),
+        "194":("2025-12",""),"X":("lts",""),
     },
     "build_a14_6_1": {
         "25":("2023-10",""),"43":("2023-11",""),"57":("2024-01",""),
@@ -65,13 +68,18 @@ SUB_LEVEL_META: Dict[str, Dict[str, tuple]] = {
         "118":("2025-01",""),"124":("2025-02",""),"128":("2025-03",""),
         "129":("2025-04",""),"134":("2025-05",""),"138":("2025-06",""),
         "141":("2025-07",""),"145":("2025-09",""),"157":("2025-12",""),
+        "X":("lts",""),
     },
     "build_a15_6_6": {
         "50":("2024-06",""),"56":("2024-09",""),"57":("2024-10",""),
         "58":("2024-11",""),"66":("2025-01",""),"77":("2025-03",""),
         "82":("2025-04",""),"87":("2025-05",""),"89":("2025-06",""),
         "92":("2025-07",""),"98":("2025-09",""),"102":("2025-10",""),
-        "118":("2025-12",""),
+        "118":("2026-01",""),"X":("lts",""),
+    },
+    "build_a16_6_12": {
+        "23":("2025-06",""),"30":("2025-07",""),"38":("2025-09",""),
+        "58":("2025-12",""),"X":("lts",""),
     },
 }
 
@@ -80,7 +88,11 @@ TARGET_META: Dict[str, tuple] = {
     "build_a13_5_15": ("android13", "5.15"),
     "build_a14_6_1":  ("android14", "6.1"),
     "build_a15_6_6":  ("android15", "6.6"),
+    "build_a16_6_12": ("android16", "6.12"),
 }
+
+# Targets hỗ trợ supp_op (OnePlus 8E)
+SUPP_OP_TARGETS = {"build_a15_6_6", "build_a16_6_12"}
 
 CUSTOM_WORKFLOW = "kernel-custom.yml"
 
@@ -146,22 +158,27 @@ TOGGLE_FEATURES = [
     ("BBG",   "use_bbg",        "gkitog:bbg"),
     ("KPM",   "use_kpm",        "gkitog:kpm"),
     ("SUSFS", "cancel_susfs",   "gkitog:susfs"),
+    ("OP 8E", "supp_op",        "gkitog:supp_op"),
 ]
 
-def _toggles_keyboard(inputs: dict, back_cb: str = "") -> InlineKeyboardMarkup:
-    """4 nút bật/tắt xếp 2×2, hàng cuối: back | cancel | next."""
+def _toggles_keyboard(inputs: dict, back_cb: str = "", selected_target: str = "") -> InlineKeyboardMarkup:
+    """Nút bật/tắt features, ẩn OP 8E nếu target không hỗ trợ."""
     rows = []
     btns = []
     for label, key, cb in TOGGLE_FEATURES:
-        # SUSFS: cancel_susfs=True nghĩa là tắt SUSFS, ngưởc lại
+        # Ẩn supp_op nếu target không phải A15/A16
+        if key == "supp_op" and selected_target not in SUPP_OP_TARGETS:
+            continue
+        # SUSFS: cancel_susfs=True nghĩa là tắt SUSFS
         if key == "cancel_susfs":
-            active = not inputs.get(key, True)  # mặc định tắt SUSFS
+            active = not inputs.get(key, True)
         else:
             active = inputs.get(key, False)
         icon = "✅" if active else "⬜"
         btns.append(InlineKeyboardButton(f"{icon} {label}", callback_data=cb))
-    rows.append(btns[:2])
-    rows.append(btns[2:])
+    # Xếp 2 cột
+    for i in range(0, len(btns), 2):
+        rows.append(btns[i:i+2])
     nav = []
     if back_cb:
         nav.append(InlineKeyboardButton("⬅️", callback_data=back_cb))
@@ -277,10 +294,12 @@ class GKIFlow:
             "use_bbg": False,
             "use_kpm": False,
             "cancel_susfs": True,   # True = tắt SUSFS (mặc định SUSFS tắt)
+            "supp_op": False,
             "build_a12_5_10": False,
             "build_a13_5_15": False,
             "build_a14_6_1": False,
             "build_a15_6_6": False,
+            "build_a16_6_12": False,
             "build_all": False,
             "release_type": "Actions",
             "sub_levels": "",
@@ -392,9 +411,10 @@ class GKIFlow:
 
         if target == "toggles":
             inputs = context.user_data["gki"]["inputs"]
+            selected_target = context.user_data["gki"].get("selected_target", "")
             await q.edit_message_text(
                 header + "<b>Tùy chỉnh tính năng:</b>",
-                reply_markup=_toggles_keyboard(inputs, back_cb="gkiback:version"),
+                reply_markup=_toggles_keyboard(inputs, back_cb="gkiback:version", selected_target=selected_target),
                 parse_mode="HTML"
             )
             return GKI_TOGGLES
@@ -492,9 +512,10 @@ class GKIFlow:
 
         header = _task_header(context)
         inputs = context.user_data["gki"]["inputs"]
+        selected_target = context.user_data["gki"].get("selected_target", "")
         await _update_bot_msg(context, chat_id,
             header + "<b>Tùy chỉnh tính năng:</b>",
-            reply_markup=_toggles_keyboard(inputs, back_cb="gkiback:version"),
+            reply_markup=_toggles_keyboard(inputs, back_cb="gkiback:version", selected_target=selected_target),
             parse_mode="HTML")
         return GKI_TOGGLES
 
@@ -514,19 +535,21 @@ class GKIFlow:
 
         # Toggle feature
         toggle_map = {
-            "zram":  "use_zram",
-            "bbg":   "use_bbg",
-            "kpm":   "use_kpm",
-            "susfs": "cancel_susfs",
+            "zram":    "use_zram",
+            "bbg":     "use_bbg",
+            "kpm":     "use_kpm",
+            "susfs":   "cancel_susfs",
+            "supp_op": "supp_op",
         }
         input_key = toggle_map.get(key)
         if input_key:
             inputs[input_key] = not inputs.get(input_key, False)
 
         header = _task_header(context)
+        selected_target = context.user_data["gki"].get("selected_target", "")
         await q.edit_message_text(
             header + "<b>Tùy chỉnh tính năng:</b>",
-            reply_markup=_toggles_keyboard(inputs, back_cb="gkiback:version"),
+            reply_markup=_toggles_keyboard(inputs, back_cb="gkiback:version", selected_target=selected_target),
             parse_mode="HTML"
         )
         return GKI_TOGGLES
@@ -683,10 +706,11 @@ class GKIFlow:
         if inputs.get("build_all"):
             targets = ["Tất cả"]
         else:
-            if inputs.get("build_a12_5_10"): targets.append("Android 12 (5.10)")
-            if inputs.get("build_a13_5_15"): targets.append("Android 13 (5.15)")
-            if inputs.get("build_a14_6_1"):  targets.append("Android 14 (6.1)")
-            if inputs.get("build_a15_6_6"):  targets.append("Android 15 (6.6)")
+            if inputs.get("build_a12_5_10"):  targets.append("Android 12 (5.10)")
+            if inputs.get("build_a13_5_15"):  targets.append("Android 13 (5.15)")
+            if inputs.get("build_a14_6_1"):   targets.append("Android 14 (6.1)")
+            if inputs.get("build_a15_6_6"):   targets.append("Android 15 (6.6)")
+            if inputs.get("build_a16_6_12"):  targets.append("Android 16 (6.12)")
 
         branch_raw = str(inputs.get("kernelsu_branch", "Stable"))
         branch = branch_raw.replace("(标准)", "(Stable)").replace("(开发)", "(Dev)")
@@ -702,6 +726,8 @@ class GKIFlow:
 
         def flag(val): return "✅ Bật" if val else "❌ Tắt"
 
+        target_key = context.user_data["gki"].get("selected_target", "")
+        show_supp_op = target_key in SUPP_OP_TARGETS
         lines = [
             f"• Kernel Build: <b>{inputs.get('kernelsu_variant', '-')}</b>",
             f"• Branch: {branch}",
@@ -712,9 +738,13 @@ class GKIFlow:
             f"• BBG: {flag(inputs.get('use_bbg', True))}",
             f"• KPM: {flag(inputs.get('use_kpm', True))}",
             f"• SUSFS: {flag(not inputs.get('cancel_susfs', False))}",
-            f"• Loại release: {release}",
         ]
-        pretty = "\n".join(lines)
+        if show_supp_op:
+            lines.append(f"• OnePlus 8E: {flag(inputs.get('supp_op', False))}")
+        lines.append(f"• Loại release: {release}")
+        _ = lines  # reassign below
+        lines_final = lines
+        pretty = "\n".join(lines_final)
 
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("✅ Xác nhận", callback_data="gkiconfirm")],
@@ -801,7 +831,7 @@ class GKIFlow:
             return ConversationHandler.END
 
         # Smart dispatch: use kernel-custom.yml for single target + single sub_level
-        target_keys = [k for k in ("build_a12_5_10","build_a13_5_15","build_a14_6_1","build_a15_6_6") if inputs.get(k)]
+        target_keys = [k for k in ("build_a12_5_10","build_a13_5_15","build_a14_6_1","build_a15_6_6","build_a16_6_12") if inputs.get(k)]
         sub_levels_str = str(inputs.get("sub_levels", "")).strip()
         sub_list = [s.strip() for s in sub_levels_str.split(",") if s.strip()] if sub_levels_str else []
         dispatch_file = wf
@@ -826,7 +856,7 @@ class GKIFlow:
                 "use_bbg":          inputs.get("use_bbg", False),
                 "use_kpm":          inputs.get("use_kpm", False),
                 "cancel_susfs":     inputs.get("cancel_susfs", True),
-                "supp_op":          False,
+                "supp_op":          inputs.get("supp_op", False) if t_key in SUPP_OP_TARGETS else False,
             }
 
         res = await self.gh.dispatch_workflow(
