@@ -877,6 +877,15 @@ class GKIFlow:
                 "cancel_susfs":     inputs.get("cancel_susfs", True),
                 "supp_op":          inputs.get("supp_op", False) if t_key in SUPP_OP_TARGETS else False,
             }
+        else:
+            # Workflow chính không có input "supp_op" – lọc bỏ trước khi dispatch
+            _MAIN_WF_ALLOWED = {
+                "build_all", "build_a12_5_10", "build_a13_5_15", "build_a14_6_1",
+                "build_a15_6_6", "build_a16_6_12", "kernelsu_variant", "kernelsu_branch",
+                "version", "use_zram", "use_bbg", "use_kpm", "cancel_susfs",
+                "sub_levels", "release_type",
+            }
+            dispatch_inputs = {k: v for k, v in inputs.items() if k in _MAIN_WF_ALLOWED}
 
         res = await self.gh.dispatch_workflow(
             repo=self.config.GKI_REPO,
