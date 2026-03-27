@@ -35,7 +35,17 @@ function activateTab(btn) {
 
 export function renderPanels(datasets) {
   var content = document.getElementById('content');
-  content.innerHTML = '';
+  
+  // Xóa các panel cũ (trừ panel tĩnh của Bot)
+  var children = Array.from(content.children);
+  children.forEach(function(child) {
+      if (child.id && child.id.startsWith('panel-') && child.id !== 'panel-bot') {
+          content.removeChild(child);
+      }
+  });
+
+  var mainLoading = document.getElementById('mainLoading');
+  if (mainLoading) mainLoading.style.display = 'none';
 
   datasets.forEach(function (ds, idx) {
     var panel = document.createElement('div');

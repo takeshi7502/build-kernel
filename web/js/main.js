@@ -66,8 +66,12 @@ async function loadData() {
   }
 
   if (datasets.length === 0) {
-    document.getElementById('content').innerHTML =
-      '<div class="error"><p>' + t.errorTitle + '</p><p style="margin-top:0.5rem;color:var(--text-muted)">' + t.errorHint + '</p></div>';
+    var err = document.createElement('div');
+    err.className = 'error';
+    err.innerHTML = '<p>' + t.errorTitle + '</p><p style="margin-top:0.5rem;color:var(--text-muted)">' + t.errorHint + '</p>';
+    document.getElementById('content').appendChild(err);
+    var mainLoading = document.getElementById('mainLoading');
+    if (mainLoading) mainLoading.style.display = 'none';
     return;
   }
 
