@@ -22,77 +22,50 @@ function formatDate(isoString) {
 // Hàm tạo mã HTML cho từng Card
 function createBuildCard(build) {
     // Xác định Status class & label
-    let statusClass = build.status;
-    let statusLabel = build.status === 'success' ? 'Success'
+    let statusClass = build.status === 'success' ? 'badge-susfs' 
+        : build.status === 'building' ? 'badge-new' 
+        : 'badge-deprecated';
+        
+    let statusLabel = build.status === 'success' ? 'Thành công'
         : build.status === 'building' ? 'Đang Build'
-            : 'Lỗi';
+        : 'Lỗi';
 
     // Nút action (Download & Github)
     let actionButtons = '';
     if (build.status === 'success') {
         actionButtons = `
-            <a href="${build.nightly_link}" target="_blank" class="btn btn-primary" style="flex: 1; text-align: center; text-decoration: none;"><i class="fa-solid fa-download"></i> Download</a>
-            <a href="${build.github_link}" target="_blank" class="btn btn-secondary" style="flex: 1; text-align: center; text-decoration: none;"><i class="fa-brands fa-github"></i> Github</a>
+            <a href="${build.nightly_link}" target="_blank" class="bot-btn btn-success"><i class="fa-solid fa-download"></i> Tải về</a>
+            <a href="${build.github_link}" target="_blank" class="bot-btn"><i class="fa-brands fa-github"></i> Github</a>
         `;
     } else if (build.status === 'building') {
         actionButtons = `
-            <button class="btn btn-primary" disabled style="flex: 1; opacity: 0.7;"><i class="fa-solid fa-spinner fa-spin"></i> Đang biên dịch</button>
-            <a href="${build.github_link}" target="_blank" class="btn btn-secondary" style="flex: 1; text-align: center; text-decoration: none;"><i class="fa-brands fa-github"></i> Github</a>
+            <button class="bot-btn" disabled><i class="fa-solid fa-spinner fa-spin"></i> Đang biên dịch</button>
+            <a href="${build.github_link}" target="_blank" class="bot-btn"><i class="fa-brands fa-github"></i> Github</a>
         `;
     } else {
         actionButtons = `
-            <button class="btn btn-secondary" disabled style="flex: 1; opacity: 0.7; color: #ef4444; border-color: #ef4444;"><i class="fa-solid fa-xmark"></i> Thất bại</button>
-            <a href="${build.github_link}" target="_blank" class="btn btn-secondary" style="flex: 1; text-align: center; text-decoration: none;"><i class="fa-brands fa-github"></i> Github</a>
+            <button class="bot-btn" disabled style="color: #ef4444; border-color: rgba(239, 68, 68, 0.3);"><i class="fa-solid fa-xmark"></i> Thất bại</button>
+            <a href="${build.github_link}" target="_blank" class="bot-btn"><i class="fa-brands fa-github"></i> Github</a>
         `;
     }
 
     return `
-        <div class="build-card" data-status="${build.status}">
-            <div class="card-header" style="margin-bottom: 8px;">
-                <div style="flex: 1; min-width: 0; overflow: hidden; padding-right: 10px;">
-                    <h3 class="card-title" style="margin-bottom: 2px;">${build.title || 'Unknown OS'}</h3>
-                    <div style="font-size: 0.9rem; font-weight: 500; color: var(--text-secondary);">${build.sub_title || ''}</div>
-                </div>
-                <div class="status ${statusClass}" style="flex-shrink: 0;">${statusLabel}</div>
+        <div class="card" data-status="${build.status}">
+            <div class="card-header">
+                <span class="badge badge-android">${build.title || 'Unknown OS'}</span>
+                <span class="badge badge-kernel">${build.sub_title || 'N/A'}</span>
+                <span class="badge ${statusClass}">${statusLabel}</span>
             </div>
             
-            <div class="card-date" style="color: var(--text-secondary); font-size: 0.85rem; display: flex; align-items: center; white-space: nowrap;">
-                <i class="fa-regular fa-clock" style="margin-right: 5px;"></i> 
-                <span style="margin-right: 5px;">${formatDate(build.date)}</span>
-                <span style="margin-right: 4px;">by</span>
-                <div class="user-name-scroller" style="font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0;">${build.user_name || 'Unknown'}</div>
-            </div>
-            
-            <div class="specs-list" style="margin-top: 15px; margin-bottom: 20px; font-family: 'JetBrains Mono', monospace;">
-                <div class="spec-item">
-                    <span class="spec-label">Custom version:</span>
-                    <span class="spec-value" style="font-weight: 700;">${build.custom_version || '(Mặc định)'}</span>
-                </div>
-                
-                <div class="spec-item" style="display: flex; gap: 15px;">
-                    <div style="flex: 1; display: flex; justify-content: space-between;">
-                        <span class="spec-label">ZRAM:</span>
-                        <span class="spec-value" style="font-weight: 700;">${build.zram}</span>
-                    </div>
-                    <div style="flex: 1; display: flex; justify-content: space-between;">
-                        <span class="spec-label">KPM:</span>
-                        <span class="spec-value" style="font-weight: 700;">${build.kpm}</span>
-                    </div>
-                </div>
-                
-                <div class="spec-item" style="display: flex; gap: 15px; margin-bottom: 0px;">
-                    <div style="flex: 1; display: flex; justify-content: space-between;">
-                        <span class="spec-label">BBG:</span>
-                        <span class="spec-value" style="font-weight: 700;">${build.bbg}</span>
-                    </div>
-                    <div style="flex: 1; display: flex; justify-content: space-between;">
-                        <span class="spec-label">SUSFS:</span>
-                        <span class="spec-value" style="font-weight: 700;">${build.susfs}</span>
-                    </div>
-                </div>
+            <div class="stats" style="grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 0;">
+                <div class="stat"><div class="stat-label">Thời gian</div><div class="stat-value" style="font-size: 0.9rem;">${formatDate(build.date)}</div></div>
+                <div class="stat"><div class="stat-label">Người gửi</div><div class="stat-value user-name-scroller" style="font-size: 0.9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${build.user_name || 'Unknown'}</div></div>
+                <div class="stat" style="grid-column: 1 / -1;"><div class="stat-label">Custom Version</div><div class="stat-value" style="font-size: 0.9rem;">${build.custom_version || '(Mặc định)'}</div></div>
+                <div class="stat"><div class="stat-label">Thông số</div><div class="stat-value" style="font-size: 0.85rem;">ZRAM: ${build.zram} | KPM: ${build.kpm}</div></div>
+                <div class="stat"><div class="stat-label">Mô-đun</div><div class="stat-value" style="font-size: 0.85rem;">BBG: ${build.bbg} | SUSFS: ${build.susfs}</div></div>
             </div>
 
-            <div class="card-actions" style="display: flex; gap: 10px;">
+            <div class="card-actions" style="padding: 15px 20px; display: flex; gap: 10px; border-top: 1px solid var(--border); margin-top: 15px;">
                 ${actionButtons}
             </div>
         </div>
@@ -101,10 +74,11 @@ function createBuildCard(build) {
 
 // Cập nhật trạng thái Bot (Online/Offline)
 function updateStatusBadge(botStatus, lastPing) {
-    const badge = document.querySelector('.stat-badge');
+    const badge = document.getElementById('botStatusBadge');
+    if (!badge) return;
+    const textSpan = document.getElementById('botStatusText');
 
     // Nếu quá 6.5 phút (400s) không ping, coi như offline
-    // (Lý do: Github Raw có bộ đệm Cache mặc định là 5 phút)
     let isOnline = false;
     if (botStatus === "online" && lastPing) {
         const now = Math.floor(Date.now() / 1000);
@@ -114,25 +88,22 @@ function updateStatusBadge(botStatus, lastPing) {
     }
 
     if (isOnline) {
-        badge.innerHTML = `<span class="pulse-dot"></span> Hệ thống đang Online`;
-        badge.style.color = 'var(--status-success)';
-        badge.style.background = 'var(--status-bg-success)';
-        badge.style.borderColor = 'rgba(16, 185, 129, 0.2)';
+        badge.className = "status-btn online";
+        if (textSpan) textSpan.innerText = "Online";
     } else {
-        badge.innerHTML = `<span class="pulse-dot" style="background-color: var(--status-failed); box-shadow: none; animation: none;"></span> Hệ thống đang Offline`;
-        badge.style.color = 'var(--status-failed)';
-        badge.style.background = 'var(--status-bg-failed)';
-        badge.style.borderColor = 'rgba(239, 68, 68, 0.2)';
+        badge.className = "status-btn offline";
+        if (textSpan) textSpan.innerText = "Offline";
     }
 }
 
 // Xử lý Render
 function renderBuilds(filter = 'all') {
     const container = document.getElementById('builds-container');
+    if (!container) return;
     container.innerHTML = '';
 
     if (currentBuilds.length === 0) {
-        container.innerHTML = '<p style="color: var(--text-secondary); grid-column: 1 / -1; text-align: center; padding: 40px;">Đang tải dữ liệu hoặc chưa có bản build nào...</p>';
+        container.innerHTML = '<p style="color: var(--text-muted); grid-column: 1 / -1; text-align: center; padding: 40px;">Đang tải dữ liệu hoặc chưa có bản build nào...</p>';
         return;
     }
 
@@ -163,7 +134,8 @@ async function loadData() {
         updateStatusBadge(data.status, data.last_ping);
 
         // Giữ nguyên filter đang kích hoạt
-        const activeFilter = document.querySelector('.filter-btn.active').dataset.filter;
+        const activeFilterBtn = document.querySelector('.filter-btn.active');
+        const activeFilter = activeFilterBtn ? activeFilterBtn.dataset.filter : 'all';
         renderBuilds(activeFilter);
     } catch (err) {
         console.error("Lỗi lấy dữ liệu:", err);
