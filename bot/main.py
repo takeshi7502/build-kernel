@@ -1202,10 +1202,13 @@ async def start_web_server(app_bot):
     app.router.add_get('/api/data', api_data)
     
     base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    app.router.add_static('/web', os.path.join(base_dir, 'web'))
+    
+    # Phục vụ static files cho source web mới (do webpack build ra)
+    app.router.add_static('/dist', os.path.join(base_dir, 'web', 'dist'))
+    app.router.add_static('/data', os.path.join(base_dir, 'web', 'data'))
     
     async def index(request):
-        return aiohttp_web.FileResponse(os.path.join(base_dir, 'index.html'))
+        return aiohttp_web.FileResponse(os.path.join(base_dir, 'web', 'index.html'))
         
     app.router.add_get('/', index)
     app.router.add_get('/index.html', index)
