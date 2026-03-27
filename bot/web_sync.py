@@ -142,8 +142,9 @@ async def get_realtime_data(app):
                 status = "success" if j.get("conclusion") == "success" else "failed"
                 
             run_id = j.get("run_id")
-            github_link = f"https://github.com/{config.GITHUB_OWNER}/{config.GKI_REPO}/actions/runs/{run_id}" if run_id else "#"
-            nightly_link = f"https://nightly.link/{config.GITHUB_OWNER}/{config.GKI_REPO}/actions/runs/{run_id}" if run_id else "#"
+            repo_name = j.get("repo", config.GKI_REPO)
+            github_link = f"https://github.com/{config.GITHUB_OWNER}/{repo_name}/actions/runs/{run_id}" if run_id else "#"
+            nightly_link = f"https://nightly.link/{config.GITHUB_OWNER}/{repo_name}/actions/runs/{run_id}" if run_id else "#"
             
             b = {
                 "id": str(run_id or j.get("_id", "TBD")),
