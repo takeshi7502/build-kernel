@@ -105,6 +105,24 @@ async def get_realtime_data(app):
                 susfs_val = str(inputs.get("SUSFS_CI", "N/A"))
                 susfs = "Tắt" if susfs_val == "N/A" else "Bật"
                 
+            elif j.get("type") == "buildsave":
+                variant = j.get("bs_variant", "SukiSU")
+                title = variant
+                
+                android_v = j.get("bs_android", "").upper()
+                full_ver = j.get("bs_full_ver", "")
+                os_str = f"{android_v}-{full_ver}"
+                
+                branch = str(inputs.get("kernelsu_branch", "Stable")).replace("(标准)", "").replace("(开发)", "").strip()
+                if not branch: branch = "Stable"
+                sub_title = f"{os_str}-{branch}"
+                
+                custom_version = str(inputs.get("version", "")).strip("-")
+                zram = "Bật" if inputs.get("use_zram", True) else "Tắt"
+                bbg = "Bật" if inputs.get("use_bbg", True) else "Tắt"
+                kpm = "Bật" if inputs.get("use_kpm", True) else "Tắt"
+                susfs = "Tắt" if inputs.get("cancel_susfs", True) else "Bật"
+                
             else:
                 # Normal GKI parsing
                 os_list = []
@@ -148,6 +166,7 @@ async def get_realtime_data(app):
             
             b = {
                 "id": str(run_id or j.get("_id", "TBD")),
+                "type": j.get("type", "gki"),
                 "title": title,
                 "sub_title": sub_title,
                 "custom_version": custom_version,

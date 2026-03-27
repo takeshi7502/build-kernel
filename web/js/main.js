@@ -78,23 +78,21 @@ async function loadData() {
   renderTabs(datasets);
   renderPanels(datasets);
 
-  // Attach event to the Bot Tab so users can switch back to it
-  var botTab = document.getElementById('tab-bot');
-  if (botTab) {
-      botTab.addEventListener('click', function () {
-          // Temporarily simulate activateTab inline or import it
-          document.querySelectorAll('.tab').forEach(function (t) { t.classList.remove('active'); });
-          document.querySelectorAll('.tab-panel').forEach(function (p) { p.classList.remove('active'); });
-          botTab.classList.add('active');
-          var panel = document.getElementById(botTab.dataset.panel);
-          if (panel) panel.classList.add('active');
-      });
-  }
+  // Attach event to the static tabs (Bot Build and Web Build) so users can switch back to them
+  ['tab-bot', 'tab-web'].forEach(function(tabId) {
+    var tab = document.getElementById(tabId);
+    if (tab) {
+        tab.addEventListener('click', function () {
+            document.querySelectorAll('.tab').forEach(function (t) { t.classList.remove('active'); });
+            document.querySelectorAll('.tab-panel').forEach(function (p) { p.classList.remove('active'); });
+            tab.classList.add('active');
+            var panel = document.getElementById(tab.dataset.panel);
+            if (panel) panel.classList.add('active');
+        });
+    }
+  });
 
-  // Default to keeping the Bot tab active on page load, do not click the first pre-built kernel tab
-  // (unless there is a hash like #android12 etc)
-  // var firstTab = document.querySelector('.tab');
-  // if (firstTab) firstTab.click();
+  // Default to keeping the Bot tab active on page load
 }
 
 // 启动
