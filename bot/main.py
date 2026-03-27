@@ -346,35 +346,41 @@ async def poller(app):
                         )
                             
                         try:
-                            msg = await app.bot.send_message(
-                                chat_id=chat_id, text=text,
-                                reply_markup=kb,
-                                parse_mode=constants.ParseMode.HTML,
-                                disable_web_page_preview=True
-                            )
-                            await storage.track_message(msg.message_id, chat_id, user_id)
+                            # Chỉ bỏ qua thông báo chung nếu là build lưu trữ VÀ build thành công (vì sẽ có thông báo riêng)
+                            if not (job.get("type") == "buildsave" and conclusion == "success"):
+                                msg = await app.bot.send_message(
+                                    chat_id=chat_id, text=text,
+                                    reply_markup=kb,
+                                    parse_mode=constants.ParseMode.HTML,
+                                    disable_web_page_preview=True
+                                )
+                                await storage.track_message(msg.message_id, chat_id, user_id)
+
+                            # Cập nhật trạng thái job
                             await storage.update_job(job["_id"], {
                                 "status": "completed",
                                 "conclusion": conclusion,
                                 "notified": True
                             })
+
                             if conclusion == "success":
                                 await storage.add_successful_build(run_id, user_id, job.get("ref", "unknown"), user_name)
-                                # Tự động gửi tin nhắn lưu cấu hình
+                                # Tự động gửi PM cấu hình cho GKI
                                 try:
                                     if job.get("type", "gki") == "gki":
                                         await send_saved_config(app, run_id, job, user_id)
                                 except Exception as e:
                                     logger.error("Auto PM save config failed: %s", e)
 
-                                # ── Buildsave: cập nhật link tải xuống vào web JSON ──
+                                # Buildsave: cập nhật link tải xuống vào JSON và gửi thông báo đặc biệt
                                 if job.get("type") == "buildsave":
                                     try:
                                         await _update_buildsave_download_link(job, run_id, app)
                                     except Exception as e:
                                         logger.error("buildsave JSON update failed: %s", e)
+
                         except Exception as e:
-                            logger.error("Send notification failed: %s", e)
+                            logger.error("Send notification / Post completion failed: %s", e)
                             await storage.update_job(job["_id"], {"notified": True})
 
                         # Báo cho những người đang đợi
@@ -1254,16 +1260,12 @@ async def _update_buildsave_download_link(job: dict, run_id, app):
             f"✅ <b>Build lưu trữ hoàn tất!</b>\n"
             f"📦 <code>{variant}</code> — <b>{full_ver}</b>\n"
             f"🔗 Link tải đã được cập nhật lên web.\n"
-            f"👤 {mention}"
+            f"👤 {mention}\n"
+            f"<blockquote><b>Xem : <a href='{nightly_link}'>Tải xuống</a> | <a href='https://kernel.takeshi.dev/'>Web Dashboard</a></b></blockquote>"
         )
-        buttons = InlineKeyboardMarkup([[
-            InlineKeyboardButton("📥 Tải xuống", url=nightly_link),
-            InlineKeyboardButton("🌐 Xem Web", url="https://kernel.takeshi.dev/"),
-        ]])
         await app.bot.send_message(
             chat_id=chat_id,
             text=text,
-            reply_markup=buttons,
             parse_mode=constants.ParseMode.HTML,
             disable_web_page_preview=True,
         )
