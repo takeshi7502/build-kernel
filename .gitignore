@@ -34,3 +34,5 @@ desktop.ini
 temp_repo/
 workflows_patch/
 
+# Node
+node_modules/

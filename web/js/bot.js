@@ -171,8 +171,7 @@ async function loadData() {
     }
 }
 
-// Lắng nghe sự kiện
-document.addEventListener('DOMContentLoaded', () => {
+export function initBot() {
     // Load lần đầu tiên
     loadData();
 
@@ -188,4 +187,4 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Auto Refresh mỗi 15 giây để luôn lấy dữ liệu mới nhất
     setInterval(loadData, 15000);
-});
+}
