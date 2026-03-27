@@ -462,3 +462,35 @@ class HybridStorage:
                 loop.create_task(self._push_cloud(data))
             except RuntimeError:
                 pass
+
+    # ==========================
+    # BUILDSAVE BATCH QUEUE
+    # ==========================
+    async def get_active_buildsave_count(self) -> int:
+        async with self._lock:
+            data = self._load()
+            return sum(
+                1 for j in data.get("jobs", [])
+                if j.get("type") == "buildsave" and j.get("status") in ["dispatched", "running", "in_progress"]
+            )
+
+    async def get_next_queued_buildsave(self) -> Optional[Dict[str, Any]]:
+        async with self._lock:
+            data = self._load()
+            queued = [j for j in data.get("jobs", []) if j.get("type") == "buildsave" and j.get("status") == "queued"]
+            if not queued: return None
+            # Sort by created_at ISO string string-wise comparison works
+            queued.sort(key=lambda x: x.get("created_at", ""))
+            return queued[0]
+
+    async def get_jobs_by_batch(self, batch_id: str) -> List[Dict[str, Any]]:
+        async with self._lock:
+            data = self._load()
+            jobs = [j for j in data.get("jobs", []) if j.get("batch_id") == batch_id]
+            jobs.sort(key=lambda x: x.get("batch_index", 0))
+            return jobs
+            
+    async def trigger_batch_update(self, batch_id: str):
+        # Được gọi từ ngoài để đánh dấu message layout cần update
+        # Cái này sẽ tự được gọi bằng helper funct ở main.py
+        pass

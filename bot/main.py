@@ -240,6 +240,56 @@ async def safe_delete_message(context: ContextTypes.DEFAULT_TYPE, chat_id: int, 
         pass
 
 
+async def update_batch_message(batch_id: str, storage: HybridStorage, bot):
+    try:
+        jobs = await storage.get_jobs_by_batch(batch_id)
+        if not jobs:
+            return
+            
+        first_job = jobs[0]
+        chat_id = first_job.get("chat_id")
+        msg_id = first_job.get("batch_msg_id")
+        variant = first_job.get("bs_variant", "")
+        
+        if not chat_id or not msg_id:
+            return
+            
+        completed_count = sum(1 for j in jobs if j.get("status") == "completed")
+        total_count = len(jobs)
+        
+        # Header text
+        if completed_count == total_count:
+            lines = [f"✅ <b>Đã hoàn thành toàn bộ batch build {variant} ({completed_count}/{total_count})</b>\n"]
+        else:
+            lines = [f"⏳ <b>Đang build {variant} ({completed_count}/{total_count})</b>\n"]
+        
+        # List of items
+        for j in jobs:
+            idx = j.get("batch_index", 1)
+            full_ver = j.get("bs_full_ver", "")
+            status = j.get("status", "queued")
+            
+            if status == "completed":
+                conclusion = j.get("conclusion", "failure")
+                st_str = "✅ Xong" if conclusion == "success" else "❌ Lỗi"
+            elif status in ("dispatched", "in_progress", "running"):
+                st_str = "🔄 Đang build..."
+            else:
+                st_str = "⏳ Đang chờ"
+                
+            lines.append(f"{idx}. {variant} — {full_ver} | {st_str}")
+            
+        text = "\n".join(lines)
+        
+        await bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=msg_id,
+            text=text,
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        logger.error(f"update_batch_message error: {e}")
+
 async def poller(app):
     gh: GitHubAPI = app.bot_data["gh"]
     storage: HybridStorage = app.bot_data["storage"]
@@ -259,6 +309,37 @@ async def poller(app):
 
     while True:
         try:
+            # 1. Dispatch buildsave queue
+            active_bs = await storage.get_active_buildsave_count()
+            if active_bs == 0:
+                next_bs = await storage.get_next_queued_buildsave()
+                if next_bs:
+                    inputs = next_bs.get("inputs", {})
+                    res = await gh.dispatch_workflow(
+                        repo=next_bs["repo"],
+                        workflow_file=next_bs["workflow_file"],
+                        ref=next_bs["ref"],
+                        inputs=inputs
+                    )
+                    now_iso = datetime.now(timezone.utc).isoformat()
+                    if res.get("status") in (201, 202, 204):
+                        await storage.update_job(next_bs["_id"], {
+                            "status": "dispatched",
+                            "created_at": now_iso
+                        })
+                    else:
+                        await storage.update_job(next_bs["_id"], {
+                            "status": "completed",
+                            "conclusion": "failure",
+                            "notified": True,  # skip polling notification, silently fail
+                            "created_at": now_iso
+                        })
+                    
+                    batch_id = next_bs.get("batch_id")
+                    if batch_id:
+                        await update_batch_message(batch_id, storage, app.bot)
+            
+            # 2. Polling for unnotified jobs
             jobs = await storage.list_unnotified_jobs()
             for job in jobs:
                 try:
@@ -378,6 +459,10 @@ async def poller(app):
                                         await _update_buildsave_download_link(job, run_id, app)
                                     except Exception as e:
                                         logger.error("buildsave JSON update failed: %s", e)
+
+                            # Cập nhật message dạng batch nếu là buildsave
+                            if job.get("type") == "buildsave" and job.get("batch_id"):
+                                await update_batch_message(job["batch_id"], storage, app.bot)
 
                         except Exception as e:
                             logger.error("Send notification / Post completion failed: %s", e)
@@ -1260,7 +1345,6 @@ async def _update_buildsave_download_link(job: dict, run_id, app):
             f"✅ <b>Build lưu trữ hoàn tất!</b>\n"
             f"📦 <code>{variant}</code> — <b>{full_ver}</b>\n"
             f"🔗 Link tải đã được cập nhật lên web.\n"
-            f"👤 {mention}\n"
             f"<blockquote><b>Xem : <a href='{nightly_link}'>Tải xuống</a> | <a href='https://kernel.takeshi.dev/'>Web Dashboard</a></b></blockquote>"
         )
         await app.bot.send_message(
