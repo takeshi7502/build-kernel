@@ -279,12 +279,33 @@ async def update_batch_message(batch_id: str, storage: HybridStorage, bot):
                 
             lines.append(f"{idx}. {variant} — {full_ver} | {st_str}")
             
+        from bot import config
+        
+        # Determine the current running github link
+        current_run_id = None
+        for j in jobs:
+            if j.get("status") in ("dispatched", "in_progress", "running"):
+                current_run_id = j.get("run_id")
+                break
+
+        if current_run_id:
+            github_url = f"https://github.com/{config.GITHUB_OWNER}/{config.GKI_REPO}/actions/runs/{current_run_id}"
+        else:
+            github_url = f"https://github.com/{config.GITHUB_OWNER}/{config.GKI_REPO}/actions"
+            
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔗 Tiến trình GitHub", url=github_url)],
+            [InlineKeyboardButton("🌐 Web Dashboard", url="https://kernel.takeshi.dev/")]
+        ])
+        
         text = "\n".join(lines)
         
         await bot.edit_message_text(
             chat_id=chat_id,
             message_id=msg_id,
             text=text,
+            reply_markup=markup,
             parse_mode="HTML"
         )
     except Exception as e:
@@ -343,8 +364,12 @@ async def poller(app):
             jobs = await storage.list_unnotified_jobs()
             for job in jobs:
                 try:
+                    if job.get("status") == "queued":
+                        continue
+
                     if job.get("notify_via") == "userbot":
                         continue
+                        
                     repo = job["repo"]
                     run_id = job.get("run_id")
                     ref = job.get("ref", "main")
@@ -427,8 +452,8 @@ async def poller(app):
                         )
                             
                         try:
-                            # Chỉ bỏ qua thông báo chung nếu là build lưu trữ VÀ build thành công (vì sẽ có thông báo riêng)
-                            if not (job.get("type") == "buildsave" and conclusion == "success"):
+                            # Không gửi tin nhắn hoàn thành riêng lẻ cho lệnh buildsave (đã có batch realtime info)
+                            if job.get("type") != "buildsave":
                                 msg = await app.bot.send_message(
                                     chat_id=chat_id, text=text,
                                     reply_markup=kb,
