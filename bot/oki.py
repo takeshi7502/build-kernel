@@ -26,7 +26,7 @@ FILES = [
   "oneplus_10_pro_b", "oneplus_10t_v", "oneplus_11r_b", "oneplus_ace2_b", "oneplus_pad_lite_v", "oneplus_pad_mt6983_b",
   "oneplus_ace_2v_b", "oneplus_ace_pro_v", "oneplus_11_b", "oneplus_12r_b", "oneplus_ace2_pro_b", "oneplus_ace3_b",
   "oneplus_open_b", "oneplus_nord_ce4_b", "oneplus_12_b", "oneplus_pad_go_2_b", "oneplus_nord_ce4_lite_5g_b",
-  "oneplus_nord_4_b", "oneplus_ace_3v_b", "oneplus_pad_mt6897_v", "oneplus_13r_b", "oneplus_ace3_pro_b",
+  "oneplus_nord_4_b", "oneplus_ace_3v_b", "oneplus_pad_mt6897_b", "oneplus_13r_b", "oneplus_ace3_pro_b",
   "oneplus_ace5_b", "oneplus_pad_pro_b", "oneplus_pad2_b", "oneplus_nord_ce5_b", "oneplus_nord_5_b",
   "oneplus_ace5_pro_b", "oneplus_13_b", "oneplus_13t_b", "oneplus_13s_b", "oneplus_pad_2_pro_b", "oneplus_pad_3_b",
   "oneplus_ace5_race_b", "oneplus_ace5_ultra_b", "oneplus_ace5_ultra_bak_b", "oneplus_pad2_mt6991_b",
