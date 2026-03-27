@@ -428,6 +428,23 @@ class HybridStorage:
             data = self._load()
             return data.get("group_chats", [])
 
+    async def seed_groups_from_jobs(self) -> int:
+        """Quét jobs cũ để tìm group chat (chat_id < 0) và tự động thêm vào danh sách."""
+        async with self._lock:
+            data = self._load()
+            groups = data.setdefault("group_chats", [])
+            existing_ids = {g.get("chat_id") for g in groups}
+            added = 0
+            for job in data.get("jobs", []):
+                cid = job.get("chat_id")
+                if cid and cid < 0 and cid not in existing_ids:
+                    groups.append({"chat_id": cid, "title": ""})
+                    existing_ids.add(cid)
+                    added += 1
+            if added:
+                await self._save(data)
+            return added
+
     # ==========================
     # TELEGRAPH
     # ==========================

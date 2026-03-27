@@ -1288,6 +1288,10 @@ def main():
         seeded = await app_.bot_data["storage"].seed_dm_users_from_jobs()
         if seeded:
             logger.warning("Seeded %d DM users from job history", seeded)
+        # Seed group_chats từ lịch sử jobs cũ (chat_id < 0)
+        seeded_grp = await app_.bot_data["storage"].seed_groups_from_jobs()
+        if seeded_grp:
+            logger.warning("Seeded %d group chats from job history", seeded_grp)
         app_.create_task(app_.bot_data["storage"]._sync_with_cloud())
         app_.create_task(poller(app_))
         app_.create_task(start_web_server(app_))
