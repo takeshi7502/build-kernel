@@ -372,7 +372,8 @@ class OKIFlow:
                 InlineKeyboardButton("📊 Dashboard", url="https://kernel.takeshi.dev/")
             ]])
             
-            mention = f'<a href="tg://user?id={user.id}">{user.full_name}</a>'
+            clean_name = user.full_name.replace("#", "＃").replace("@", "＠").replace("<", "&lt;").replace(">", "&gt;")
+            mention = f'<a href="tg://user?id={user.id}">{clean_name}</a>'
             
             msg_text = (
                 f"✅ <b>Đã gửi OKI Build thành công!</b>\n"

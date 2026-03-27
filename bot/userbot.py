@@ -993,6 +993,7 @@ async def _do_dispatch(event, session: Dict[str, Any]) -> bool:
         first = getattr(sender, 'first_name', '') or ''
         last = getattr(sender, 'last_name', '') or ''
         sender_name = f"{first} {last}".strip() or 'User'
+        sender_name = sender_name.replace("#", "＃").replace("@", "＠").replace("<", "&lt;").replace(">", "&gt;")
     except Exception:
         sender_name = 'User'
 
