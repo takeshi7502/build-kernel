@@ -406,6 +406,29 @@ class HybridStorage:
             return added
 
     # ==========================
+    # GROUP CHATS (Broadcast)
+    # ==========================
+    async def track_group(self, chat_id: int, title: str = ""):
+        """Lưu nhóm mà bot đang hoạt động (deduplicate theo chat_id)."""
+        async with self._lock:
+            data = self._load()
+            groups = data.setdefault("group_chats", [])
+            existing = next((g for g in groups if g.get("chat_id") == chat_id), None)
+            if existing:
+                if title and existing.get("title") != title:
+                    existing["title"] = title
+                    await self._save(data)
+            else:
+                groups.append({"chat_id": chat_id, "title": title})
+                await self._save(data)
+
+    async def get_group_chats(self) -> List[Dict[str, Any]]:
+        """Trả về danh sách tất cả nhóm bot đã tham gia."""
+        async with self._lock:
+            data = self._load()
+            return data.get("group_chats", [])
+
+    # ==========================
     # TELEGRAPH
     # ==========================
     def get_telegraph_token(self) -> Optional[str]:

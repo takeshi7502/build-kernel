@@ -498,13 +498,17 @@ async def dm_tracker(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Catch-all: tự động lưu chat_id của mọi user DM bot."""
     chat = update.effective_chat
     user = update.effective_user
-    if chat and chat.type == "private" and user:
-        storage: HybridStorage = context.application.bot_data["storage"]
-        await storage.track_dm_user(user.id, chat.id)
+    storage: HybridStorage = context.application.bot_data["storage"]
+    if chat and user:
+        if chat.type == "private":
+            await storage.track_dm_user(user.id, chat.id)
+        elif chat.type in ("group", "supergroup"):
+            title = chat.title or ""
+            await storage.track_group(chat.id, title)
 
 
 async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Admin gửi thông báo đến tất cả user đã từng DM bot."""
+    """Admin gửi thông báo đến tất cả user đã từng DM bot và các nhóm bot đã tham gia."""
     user = update.effective_user
     storage: HybridStorage = context.application.bot_data["storage"]
     if not await is_admin(user.id, storage):
@@ -518,10 +522,11 @@ async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     admin_ids.update(dynamic_admins)
 
     dm_users = await storage.get_dm_users()
-    targets = [u for u in dm_users if u.get("user_id") not in admin_ids]
+    dm_targets = [u for u in dm_users if u.get("user_id") not in admin_ids]
+    group_targets = await storage.get_group_chats()
 
-    if not targets:
-        await _send_msg(update, context, "⚠️ Chưa có user nào trong danh sách để gửi.")
+    if not dm_targets and not group_targets:
+        await _send_msg(update, context, "⚠️ Chưa có user hay nhóm nào trong danh sách để gửi.")
         return
 
     replied = update.message.reply_to_message if update.message else None
@@ -536,13 +541,14 @@ async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    success = 0
-    fail = 0
-    for u in targets:
+    dm_ok = dm_fail = 0
+    grp_ok = grp_fail = 0
+
+    # Gửi tới tất cả user DM
+    for u in dm_targets:
         cid = u.get("chat_id")
         try:
             if replied:
-                # Forward tin nhắn gốc
                 await context.bot.forward_message(
                     chat_id=cid,
                     from_chat_id=replied.chat_id,
@@ -550,12 +556,32 @@ async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
             else:
                 await context.bot.send_message(chat_id=cid, text=text_body)
-            success += 1
+            dm_ok += 1
         except Exception:
-            fail += 1
+            dm_fail += 1
 
+    # Gửi tới tất cả nhóm
+    for g in group_targets:
+        cid = g.get("chat_id")
+        try:
+            if replied:
+                await context.bot.forward_message(
+                    chat_id=cid,
+                    from_chat_id=replied.chat_id,
+                    message_id=replied.message_id
+                )
+            else:
+                await context.bot.send_message(chat_id=cid, text=text_body)
+            grp_ok += 1
+        except Exception:
+            grp_fail += 1
+
+    total_ok = dm_ok + grp_ok
+    total = dm_ok + dm_fail + grp_ok + grp_fail
     await _send_msg(update, context,
-        f"📢 Đã gửi thành công <b>{success}/{success + fail}</b> user.",
+        f"📢 Đã gửi <b>{total_ok}/{total}</b> điểm nhận.\n"
+        f"• User DM: {dm_ok}/{dm_ok + dm_fail}\n"
+        f"• Nhóm: {grp_ok}/{grp_ok + grp_fail}",
         parse_mode=constants.ParseMode.HTML
     )
 
