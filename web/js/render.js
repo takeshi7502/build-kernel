@@ -72,8 +72,9 @@ function buildCard(data, meta) {
   var ltsHtml = '';
   if (lts) {
     var ltsSublevel = lts.split('.')[2] || '';
+    var ltsDownloads = JSON.stringify(data.lts_downloads || {});
     ltsHtml =
-      '<div class="lts-box lts-clickable" data-android="' + esc(meta.android) + '" data-kernel="' + esc(meta.kernel) + '" data-sublevel="' + esc(ltsSublevel) + '" data-patch="lts">' +
+      '<div class="lts-box lts-clickable" data-android="' + esc(meta.android) + '" data-kernel="' + esc(meta.kernel) + '" data-sublevel="' + esc(ltsSublevel) + '" data-patch="lts" data-downloads=\'' + ltsDownloads + "\'" + '>' +
         '<span class="lts-label">LTS</span>' +
         '<span class="lts-version">' + esc(lts) + '</span>' +
       '</div>';
@@ -125,9 +126,14 @@ function buildCard(data, meta) {
       var susfsBadge = isSusfsCompat(entry.kernel) ? '<a href="https://gitlab.com/simonpunk/susfs4ksu" target="_blank" rel="noopener noreferrer" class="badge-susfs" title="SUSFS patches work directly" onclick="event.stopPropagation();">' + esc(t.susfsCompat) + '</a>' : '';
       var badges = depBadgeInner + susfsBadge + newBadge;
       var badgesHtml = badges ? '<span class="kv-badges">' + badges + '</span>' : '';
-      rows += '<tr class="' + rowClass + '" data-android="' + esc(meta.android) + '" data-kernel="' + esc(meta.kernel) + '" data-sublevel="' + esc(sublevel) + '" data-patch="' + esc(entry.date) + '">' +
+      // Serialize downloads cho data attribute (nếu có)
+      var dlJson = JSON.stringify(entry.downloads || {}).replace(/'/g, '&apos;');
+      // Hiển thị icon nếu đã có ít nhất 1 link download
+      var hasDownload = entry.downloads && Object.values(entry.downloads).some(function(v){ return !!v; });
+      var dlIcon = hasDownload ? '<span class="kv-dl-dot" title="Có file tải xuống">📥</span>' : '';
+      rows += '<tr class="' + rowClass + '" data-android="' + esc(meta.android) + '" data-kernel="' + esc(meta.kernel) + '" data-sublevel="' + esc(sublevel) + '" data-patch="' + esc(entry.date) + '" data-downloads=\'' + dlJson + "'" + '>' +
         '<td class="date-cell">' + esc(entry.date) + '</td>' +
-        '<td class="kernel-version"><span class="kv-text">' + esc(entry.kernel) + '</span>' + badgesHtml + '</td>' +
+        '<td class="kernel-version"><span class="kv-text">' + esc(entry.kernel) + '</span>' + badgesHtml + dlIcon + '</td>' +
       '</tr>';
     });
     return '<table>' +

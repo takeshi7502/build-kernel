@@ -1,5 +1,5 @@
 /**
- * 详情弹窗模块（点击内核版本行弹出 GitHub Action 参数）
+ * 详情弹窗模块 — hiển thị nút tải xuống theo KernelSU Variant
  */
 
 import { t } from './i18n.js';
@@ -10,45 +10,40 @@ var modalTitle = document.getElementById('modalTitle');
 var modalBody = document.getElementById('modalBody');
 var modalClose = document.getElementById('modalClose');
 
-// 生成弹窗中的一行（普通文本或代码块）
-function modalRow(label, value, isCode) {
-  if (isCode) {
-    return '<div class="modal-row modal-row-code">' +
-        '<span class="modal-label">' + label + '</span>' +
-        '<div class="modal-code-wrapper">' +
-          '<code class="modal-code">' + esc(value) + '</code>' +
-          '<button class="modal-copy" data-copy="' + esc(value) + '">' + t.copy + '</button>' +
-        '</div>' +
+// Danh sách variant cố định theo thứ tự ưu tiên hiển thị
+var VARIANT_ORDER = ['SukiSU', 'ReSukiSU', 'Next', 'MKSU', 'Official'];
+
+// Hiển thị popup với danh sách nút tải xuống theo variant
+export function showModal(android, kernel, sublevel, patch, downloads) {
+  var fullVer = sublevel && sublevel !== 'lts'
+    ? (kernel + '.' + sublevel)
+    : kernel;
+
+  modalTitle.textContent = fullVer;
+
+  var rows = '';
+
+  VARIANT_ORDER.forEach(function (variant) {
+    var link = downloads && downloads[variant] ? downloads[variant] : null;
+
+    var btn = link
+      ? '<a class="modal-dl-btn modal-dl-btn--active" href="' + esc(link) + '" target="_blank" rel="noopener noreferrer">📥 Tải xuống</a>'
+      : '<span class="modal-dl-btn modal-dl-btn--disabled" aria-disabled="true">Chưa có</span>';
+
+    rows +=
+      '<div class="modal-row modal-variant-row">' +
+        '<span class="modal-label modal-variant-label">' + esc(variant) + '</span>' +
+        btn +
       '</div>';
-  }
-  return '<div class="modal-row">' +
-      '<span class="modal-label">' + label + '</span>' +
-      '<span class="modal-value-group">' +
-        '<span class="modal-value">' + esc(value) + '</span>' +
-        '<button class="modal-copy" data-copy="' + esc(value) + '">' + t.copy + '</button>' +
-      '</span>' +
-    '</div>';
-}
-
-// 显示详情弹窗
-export function showModal(android, kernel, sublevel, patch) {
-  modalTitle.textContent = t.modalTitle;
-
-  var formattedBranch = android + '-' + kernel + '-' + patch;
-  var repoInitCmd = 'repo init --depth=1 -u https://android.googlesource.com/kernel/manifest -b common-' + formattedBranch + ' --repo-rev=v2.16';
-
-  var susfsBranch = 'gki-' + android + '-' + kernel;
-  var susfsCloneCmd = 'git clone https://gitlab.com/simonpunk/susfs4ksu.git -b ' + susfsBranch;
+  });
 
   modalBody.innerHTML =
-    modalRow(t.modalAndroid, android) +
-    modalRow(t.modalKernel, kernel) +
-    modalRow(t.modalSublevel, sublevel) +
-    modalRow(t.modalPatch, patch) +
-    '<div class="modal-section">' + esc(t.modalSectionSource) + '</div>' +
-    modalRow(t.modalRepoInit, repoInitCmd, true) +
-    '<div class="modal-section">' + esc(t.modalSectionSusfs) + '</div>' +
-    modalRow(t.modalSusfsClone, susfsCloneCmd, true);
+    '<div class="modal-variant-header">' +
+      '<span>' + esc(android) + '</span>' +
+      '<span class="badge badge-kernel">Kernel ' + esc(kernel) + '</span>' +
+    '</div>' +
+    rows;
+
   modal.style.display = '';
 }
 
@@ -56,29 +51,32 @@ export function hideModal() {
   modal.style.display = 'none';
 }
 
-// 初始化弹窗事件监听
 export function initModal() {
   modalClose.addEventListener('click', hideModal);
   modal.addEventListener('click', function (e) {
     if (e.target === modal) hideModal();
   });
 
-  // 点击表格行或 LTS 框打开弹窗（事件委托）
   document.addEventListener('click', function (e) {
-    // LTS 框
+    // LTS box
     var ltsBox = e.target.closest('.lts-clickable');
     if (ltsBox) {
+      var dl = {};
+      try { dl = JSON.parse(ltsBox.dataset.downloads || '{}'); } catch (_) {}
       showModal(
         ltsBox.dataset.android,
         ltsBox.dataset.kernel,
         ltsBox.dataset.sublevel,
-        ltsBox.dataset.patch
+        ltsBox.dataset.patch,
+        dl
       );
       return;
     }
-    // 表格行
+    // Table row
     var row = e.target.closest('.row-clickable');
     if (!row) return;
-    showModal(row.dataset.android, row.dataset.kernel, row.dataset.sublevel, row.dataset.patch);
+    var dl = {};
+    try { dl = JSON.parse(row.dataset.downloads || '{}'); } catch (_) {}
+    showModal(row.dataset.android, row.dataset.kernel, row.dataset.sublevel, row.dataset.patch, dl);
   });
 }

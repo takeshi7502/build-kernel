@@ -25,6 +25,7 @@ from telegram.request import HTTPXRequest
 import config
 from gki import build_gki_conversation, _del_msg_job, SUB_LEVELS
 from oki import build_oki_conversation
+from buildsave import build_buildsave_conversation
 from permissions import is_owner, is_admin
 import aiohttp.web as aiohttp_web
 from storage import HybridStorage
@@ -365,6 +366,13 @@ async def poller(app):
                                         await send_saved_config(app, run_id, job, user_id)
                                 except Exception as e:
                                     logger.error("Auto PM save config failed: %s", e)
+
+                                # ── Buildsave: cập nhật link tải xuống vào web JSON ──
+                                if job.get("type") == "buildsave":
+                                    try:
+                                        await _update_buildsave_download_link(job, run_id, app)
+                                    except Exception as e:
+                                        logger.error("buildsave JSON update failed: %s", e)
                         except Exception as e:
                             logger.error("Send notification failed: %s", e)
                             await storage.update_job(job["_id"], {"notified": True})
@@ -1187,7 +1195,84 @@ async def cmd_delete_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if update.message:
             context.job_queue.run_once(_del_msg_job, when=10, chat_id=update.message.chat_id, data=update.message.message_id)
 
+async def _update_buildsave_download_link(job: dict, run_id, app):
+    """Cập nhật link tải xuống vào file JSON của web khi build lưu trữ hoàn tất."""
+    import json as _json
+    variant   = job.get("bs_variant", "")
+    android   = job.get("bs_android", "")       # e.g. "android12"
+    kernel_v  = job.get("bs_kernel_ver", "")    # e.g. "5.10"
+    sub_level = job.get("bs_sub_level", "")     # e.g. "149"
+    full_ver  = job.get("bs_full_ver", "")      # e.g. "5.10.149"
+
+    if not all([variant, android, kernel_v, sub_level]):
+        logger.warning("buildsave: thiếu metadata để cập nhật JSON")
+        return
+
+    nightly_link = (
+        f"https://nightly.link/{config.GITHUB_OWNER}/{config.GKI_REPO}"
+        f"/actions/runs/{run_id}"
+    )
+
+    # Đường dẫn file JSON tương đối từ bot/ → web/data/<android>/<kernel>.json
+    bot_dir  = os.path.dirname(os.path.abspath(__file__))
+    json_path = os.path.join(bot_dir, "..", "web", "data", android, f"{kernel_v}.json")
+    json_path = os.path.normpath(json_path)
+
+    if not os.path.exists(json_path):
+        logger.error("buildsave: không tìm thấy file JSON: %s", json_path)
+        return
+
+    with open(json_path, "r", encoding="utf-8") as f:
+        data = _json.load(f)
+
+    updated = False
+    for entry in data.get("entries", []):
+        if entry.get("kernel") == full_ver:
+            if "downloads" not in entry:
+                entry["downloads"] = {}
+            entry["downloads"][variant] = nightly_link
+            updated = True
+            # Không break — có thể có nhiều entry cùng kernel ver (khác date)
+
+    if not updated:
+        logger.warning("buildsave: không tìm thấy entry kernel=%s trong %s", full_ver, json_path)
+        return
+
+    with open(json_path, "w", encoding="utf-8") as f:
+        _json.dump(data, f, ensure_ascii=False, indent=2)
+    logger.warning("buildsave: đã cập nhật %s → %s = %s", json_path, variant, nightly_link)
+
+    # Gửi thông báo đặc biệt đến chat_id của job
+    try:
+        chat_id = job.get("chat_id")
+        user_id = job.get("user_id")
+        user_name = job.get("user_name", str(user_id))
+        user_name_safe = user_name.replace("#", "＃").replace("@", "＠").replace("<", "&lt;").replace(">", "&gt;")
+        mention = f'<a href="tg://user?id={user_id}">{user_name_safe}</a>'
+
+        text = (
+            f"✅ <b>Build lưu trữ hoàn tất!</b>\n"
+            f"📦 <code>{variant}</code> — <b>{full_ver}</b>\n"
+            f"🔗 Link tải đã được cập nhật lên web.\n"
+            f"👤 {mention}"
+        )
+        buttons = InlineKeyboardMarkup([[
+            InlineKeyboardButton("📥 Tải xuống", url=nightly_link),
+            InlineKeyboardButton("🌐 Xem Web", url="https://kernel.takeshi.dev/"),
+        ]])
+        await app.bot.send_message(
+            chat_id=chat_id,
+            text=text,
+            reply_markup=buttons,
+            parse_mode=constants.ParseMode.HTML,
+            disable_web_page_preview=True,
+        )
+    except Exception as e:
+        logger.error("buildsave: gửi thông báo lỗi: %s", e)
+
+
 async def start_web_server(app_bot):
+
     """Khởi chạy API Web Server cục bộ phục vụ Dashboard Realtime"""
     app = aiohttp_web.Application()
     
@@ -1285,6 +1370,9 @@ def main():
 
     # OKI conversation
     app.add_handler(build_oki_conversation(gh, storage, config))
+
+    # /build — Build kernel lưu trữ (admin only)
+    app.add_handler(build_buildsave_conversation(gh, storage, config))
 
     async def _post_init(app_):
         # Seed dm_users từ lịch sử jobs cũ
