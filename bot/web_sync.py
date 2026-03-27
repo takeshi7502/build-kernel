@@ -67,9 +67,97 @@ async def get_realtime_data(app):
                 jobs = active_jobs
         # -------- KẾT THÚC ĐỒNG BỘ VỚI GITHUB --------
         
-        for j in jobs[:50]: # Lấy 50 build gần nhất
+        # Gom nhóm buildsave jobs cùng batch_id thành 1 card
+        batch_groups: dict = {}
+        standalone_jobs = []
+        
+        for j in jobs:
+            if j.get("type") == "buildsave" and j.get("batch_id"):
+                bid = j["batch_id"]
+                batch_groups.setdefault(bid, [])
+                batch_groups[bid].append(j)
+            else:
+                standalone_jobs.append(j)
+        
+        # Tập hợp tất cả job cần render: non-buildsave + 1 đại diện mỗi batch
+        # Mỗi batch được đại diện bởi job đầu tiên (batch_index nhỏ nhất)
+        batch_representatives = []
+        for bid, bjobs in batch_groups.items():
+            bjobs.sort(key=lambda x: x.get("batch_index", 0))
+            rep = bjobs[0].copy()
+            rep["_batch_jobs"] = bjobs  # Đính kèm toàn bộ sub-jobs
+            batch_representatives.append(rep)
+        
+        # Sắp xếp đại diện các batch theo created_at mới nhất
+        batch_representatives.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+        
+        all_jobs_to_render = sorted(standalone_jobs, key=lambda x: x.get("_id", 0), reverse=True)[:50]
+        all_jobs_to_render = (batch_representatives + all_jobs_to_render)[:60]
+        
+        for j in all_jobs_to_render:
             inputs = j.get("inputs", {})
             user_name = j.get("user_name") or j.get("sender_name") or "Unknown"
+            
+            if j.get("_batch_jobs"):  # Đây là đại diện của 1 batch buildsave
+                bjobs = j["_batch_jobs"]
+                variant = j.get("bs_variant", "SukiSU")
+                android_v = j.get("bs_android", "").upper()
+                
+                # Tạo subtitle gộp các sub-levels lại
+                completed = sum(1 for bj in bjobs if bj.get("status") == "completed" and bj.get("conclusion") == "success")
+                failed = sum(1 for bj in bjobs if bj.get("status") == "completed" and bj.get("conclusion") != "success")
+                total = len(bjobs)
+                
+                # Lấy run_id của job đang active (dispatched/in_progress)
+                active_job = next((bj for bj in bjobs if bj.get("status") in ("dispatched", "in_progress", "running")), None)
+                run_id = active_job.get("run_id") if active_job else bjobs[-1].get("run_id")
+                
+                sub_labels = [bj.get("bs_full_ver", "") for bj in bjobs]
+                sub_title_str = ", ".join(sub_labels) if len(sub_labels) <= 4 else f"{', '.join(sub_labels[:3])}... (+{len(sub_labels)-3})"
+                
+                branch = str(inputs.get("kernelsu_branch", "Stable")).replace("(标准)", "").replace("(开发)", "").strip() or "Stable"
+                sub_title = f"{android_v} | {sub_title_str} | {branch}"
+                custom_version = str(inputs.get("version", "")).strip("-")
+                zram = "Bật" if inputs.get("use_zram", True) else "Tắt"
+                bbg = "Bật" if inputs.get("use_bbg", True) else "Tắt"
+                kpm = "Bật" if inputs.get("use_kpm", True) else "Tắt"
+                susfs = "Tắt" if inputs.get("cancel_susfs", True) else "Bật"
+                
+                # Tính trạng thái tổng hợp của cả batch
+                if all(bj.get("status") == "completed" for bj in bjobs):
+                    if failed == 0:
+                        batch_status = "success"
+                    elif completed == 0:
+                        batch_status = "failed"
+                    else:
+                        batch_status = "partial"  # Một số thành công, một số lỗi
+                elif any(bj.get("status") == "queued" for bj in bjobs):
+                    batch_status = "building"  # Vẫn còn đang chờ
+                else:
+                    batch_status = "building"
+                
+                repo_name = j.get("repo", config.GKI_REPO)
+                github_link = f"https://github.com/{config.GITHUB_OWNER}/{repo_name}/actions/runs/{run_id}" if run_id else "#"
+                nightly_link = f"https://nightly.link/{config.GITHUB_OWNER}/{repo_name}/actions/runs/{run_id}" if run_id else "#"
+                
+                progress_str = f"{completed}/{total} xong"
+                if failed: progress_str += f", {failed} lỗi"
+                
+                b = {
+                    "id": str(j.get("batch_id", j.get("_id", "TBD"))),
+                    "type": "buildsave",
+                    "title": variant,
+                    "sub_title": sub_title,
+                    "custom_version": f"Queue: {progress_str}",
+                    "zram": zram, "kpm": kpm, "bbg": bbg, "susfs": susfs,
+                    "status": batch_status,
+                    "date": j.get("created_at"),
+                    "user_name": user_name,
+                    "github_link": github_link,
+                    "nightly_link": nightly_link
+                }
+                data["builds"].append(b)
+                continue
             
             if j.get("type") == "oki":
                 # OKI build parsing
@@ -106,6 +194,7 @@ async def get_realtime_data(app):
                 susfs = "Tắt" if susfs_val == "N/A" else "Bật"
                 
             elif j.get("type") == "buildsave":
+                # Buildsave đơn lẻ (không có batch_id) - fallback
                 variant = j.get("bs_variant", "SukiSU")
                 title = variant
                 

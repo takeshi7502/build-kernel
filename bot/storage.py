@@ -229,27 +229,44 @@ class HybridStorage:
                 return True
             return False
 
-    async def delete_old_jobs(self, older_than_days: int = 7):
+    async def delete_old_jobs(self, older_than_days: int = 30):
         async with self._lock:
             data = self._load()
             cutoff = datetime.now(timezone.utc) - timedelta(days=older_than_days)
             jobs = data.get("jobs", [])
-            new_jobs = []
-            deleted = 0
-            for j in jobs:
+            
+            # Tách biệt 2 nhóm job
+            gki_oki_jobs = [j for j in jobs if j.get("type") in (None, "gki", "oki")]
+            buildsave_jobs = [j for j in jobs if j.get("type") == "buildsave"]
+            
+            # --- Nhóm GKI/OKI: Luôn giữ 30 job gần nhất, không bao giờ xóa theo thời gian ---
+            gki_oki_jobs_sorted = sorted(gki_oki_jobs, key=lambda x: x.get("created_at", ""), reverse=True)
+            kept_gki_oki = gki_oki_jobs_sorted[:30]  # Luôn giữ 30 job gần nhất
+            
+            # --- Nhóm Buildsave: Chỉ giữ lại các job còn hiệu lực (queued, dispatched) hoặc mới hơn cutoff ---
+            # Các job queued/active luôn được giữ lại
+            active_statuses = ("queued", "dispatched", "running", "in_progress")
+            kept_buildsave = []
+            deleted_bs = 0
+            for j in buildsave_jobs:
+                if j.get("status") in active_statuses:
+                    kept_buildsave.append(j)  # Giữ lại nếu đang active
+                    continue
                 try:
                     ts_str = j.get("created_at", "")
                     if ts_str:
                         ts = datetime.fromisoformat(ts_str)
                         if ts >= cutoff:
-                            new_jobs.append(j)
+                            kept_buildsave.append(j)
                         else:
-                            deleted += 1
+                            deleted_bs += 1
                     else:
-                        deleted += 1
+                        deleted_bs += 1
                 except Exception:
-                    deleted += 1
-            data["jobs"] = new_jobs
+                    deleted_bs += 1
+            
+            deleted = (len(gki_oki_jobs) - len(kept_gki_oki)) + deleted_bs
+            data["jobs"] = kept_gki_oki + kept_buildsave
             await self._save(data)
             return deleted
 

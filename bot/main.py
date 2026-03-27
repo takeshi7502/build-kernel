@@ -319,7 +319,7 @@ async def poller(app):
         while True:
             try:
                 deleted_msg = await storage.delete_old_messages(24)
-                deleted_jobs = await storage.delete_old_jobs(7)
+                deleted_jobs = await storage.delete_old_jobs(30) # Lưu lịch sử Bot Build trong 30 ngày thay vì 7 ngày
                 if deleted_msg or deleted_jobs:
                     logger.info("Cleanup: %d messages, %d jobs", deleted_msg, deleted_jobs)
             except Exception as e:
