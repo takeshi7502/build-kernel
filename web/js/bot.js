@@ -50,22 +50,52 @@ function createBuildCard(build) {
     }
 
     return `
-        <div class="card" data-status="${build.status}">
-            <div class="card-header">
-                <span class="badge badge-android">${build.title || 'Unknown OS'}</span>
-                <span class="badge badge-kernel">${build.sub_title || 'N/A'}</span>
-                <span class="badge ${statusClass}">${statusLabel}</span>
+        <div class="card" data-status="${build.status}" style="display: flex; flex-direction: column;">
+            <div class="card-header" style="margin-bottom: 12px; display: flex; justify-content: space-between; align-items: flex-start;">
+                <div style="flex: 1; min-width: 0; padding-right: 15px;">
+                    <h3 style="margin: 0 0 4px 0; font-size: 1.1rem; font-weight: 600; color: var(--text-primary); text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">${build.title || 'Unknown OS'}</h3>
+                    <div style="font-size: 0.85rem; font-weight: 500; color: var(--text-muted); text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">${build.sub_title || ''}</div>
+                </div>
+                <div class="badge ${statusClass}" style="flex-shrink: 0;">${statusLabel}</div>
             </div>
             
-            <div class="stats" style="grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 0;">
-                <div class="stat"><div class="stat-label">Thời gian</div><div class="stat-value" style="font-size: 0.9rem;">${formatDate(build.date)}</div></div>
-                <div class="stat"><div class="stat-label">Người gửi</div><div class="stat-value user-name-scroller" style="font-size: 0.9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${build.user_name || 'Unknown'}</div></div>
-                <div class="stat" style="grid-column: 1 / -1;"><div class="stat-label">Custom Version</div><div class="stat-value" style="font-size: 0.9rem;">${build.custom_version || '(Mặc định)'}</div></div>
-                <div class="stat"><div class="stat-label">Thông số</div><div class="stat-value" style="font-size: 0.85rem;">ZRAM: ${build.zram} | KPM: ${build.kpm}</div></div>
-                <div class="stat"><div class="stat-label">Mô-đun</div><div class="stat-value" style="font-size: 0.85rem;">BBG: ${build.bbg} | SUSFS: ${build.susfs}</div></div>
+            <div style="color: var(--text-muted); font-size: 0.85rem; display: flex; align-items: center; margin-bottom: 16px;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                <span style="white-space: nowrap;">${formatDate(build.date)}</span>
+                <span style="margin: 0 6px;">by</span>
+                <span style="font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px;">${build.user_name || 'Unknown'}</span>
+            </div>
+            
+            <div style="background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 16px; margin-bottom: 20px; font-family: 'Roboto Mono', monospace;">
+                <div style="display: flex; justify-content: space-between; font-size: 0.85rem; margin-bottom: 12px; align-items: center;">
+                    <span style="color: var(--text-muted); font-weight: 500;">Custom version:</span>
+                    <span style="font-weight: 600; color: var(--text-primary); text-align: right; max-width: 60%; word-break: break-all;">${build.custom_version || '(Mặc định)'}</span>
+                </div>
+                
+                <div style="display: flex; gap: 15px; font-size: 0.85rem; margin-bottom: 12px;">
+                    <div style="flex: 1; display: flex; justify-content: space-between; align-items: center;">
+                        <span style="color: var(--text-muted); font-weight: 500;">ZRAM:</span>
+                        <span style="font-weight: 600; color: var(--text-primary);">${build.zram}</span>
+                    </div>
+                    <div style="flex: 1; display: flex; justify-content: space-between; align-items: center;">
+                        <span style="color: var(--text-muted); font-weight: 500;">KPM:</span>
+                        <span style="font-weight: 600; color: var(--text-primary);">${build.kpm}</span>
+                    </div>
+                </div>
+                
+                <div style="display: flex; gap: 15px; font-size: 0.85rem;">
+                    <div style="flex: 1; display: flex; justify-content: space-between; align-items: center;">
+                        <span style="color: var(--text-muted); font-weight: 500;">BBG:</span>
+                        <span style="font-weight: 600; color: var(--text-primary);">${build.bbg}</span>
+                    </div>
+                    <div style="flex: 1; display: flex; justify-content: space-between; align-items: center;">
+                        <span style="color: var(--text-muted); font-weight: 500;">SUSFS:</span>
+                        <span style="font-weight: 600; color: var(--text-primary);">${build.susfs}</span>
+                    </div>
+                </div>
             </div>
 
-            <div class="card-actions" style="padding: 15px 20px; display: flex; gap: 10px; border-top: 1px solid var(--border); margin-top: 15px;">
+            <div style="display: flex; gap: 10px; margin-top: auto; border-top: 1px solid var(--border); padding-top: 16px;">
                 ${actionButtons}
             </div>
         </div>
