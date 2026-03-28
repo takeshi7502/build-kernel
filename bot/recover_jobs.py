@@ -16,8 +16,8 @@ async def main():
         
     print("Connecting to MongoDB...")
     client = motor.motor_asyncio.AsyncIOMotorClient(config.MONGODB_URI)
-    db = client[config.MONGODB_DB_NAME]
-    collection = db["storage"]
+    db = client["kernel_bot_db"]
+    collection = db["storage_data"]
     
     doc = await collection.find_one({"_id": "master_data"})
     if not doc:
