@@ -1655,7 +1655,6 @@ async def _update_buildsave_download_link(job: dict, run_id, app):
     # Thông báo tổng hợp sẽ do update_batch_message xử lý khi tất cả xong
     logger.info("buildsave: da cap nhat JSON cho %s %s", variant, full_ver)
 import uuid
-import aiofiles
 
 async def cmd_dl(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
@@ -1757,12 +1756,11 @@ async def cb_dl_variant(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if file_resp.status != 200:
                     await query.edit_message_text(f"❌ Không thể tải file từ nightly.link (Lỗi {file_resp.status}). Có thể artifact đã hết hạn.")
                     return
-                f = await aiofiles.open(tmp_path, mode='wb')
-                downloaded = 0
-                async for chunk in file_resp.content.iter_chunked(2 * 1024 * 1024):
-                    await f.write(chunk)
-                    downloaded += len(chunk)
-                await f.close()
+                with open(tmp_path, 'wb') as f:
+                    downloaded = 0
+                    async for chunk in file_resp.content.iter_chunked(2 * 1024 * 1024):
+                        f.write(chunk)
+                        downloaded += len(chunk)
                 
         file_size = os.path.getsize(tmp_path)
         mb = file_size / (1024*1024)
