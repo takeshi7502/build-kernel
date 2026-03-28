@@ -57,11 +57,24 @@ async def main():
             json.dump(web_data, f, indent=4)
         print(f"Injected {json_updates} Next links into web/data/android12/5.10.json!")
         
-        # Update VPS local cache just in case
+        # Update VPS local cache
         local_file = os.path.join(os.path.dirname(__file__), "data.json")
         if os.path.exists(local_file):
-            import subprocess
-            print("Purged VPS cached jobs by running fix_next... wait actually VPS doesn't have it.")
-            
+            with open(local_file, "r", encoding="utf-8") as f:
+                local_data = json.load(f)
+                
+            local_updates = 0
+            for j in local_data.get("jobs", []):
+                if j.get("type") == "buildsave" and j.get("bs_android") == "android12" and j.get("bs_kernel_ver") == "5.10" and j.get("bs_variant") == "Next":
+                    ver = j.get("bs_full_ver")
+                    if ver in RUN_ID_MAP:
+                        j["run_id"] = RUN_ID_MAP[ver]
+                        local_updates += 1
+                        
+            if local_updates > 0:
+                with open(local_file, "w", encoding="utf-8") as f:
+                    json.dump(local_data, f, indent=4)
+                print(f"Updated {local_updates} run_ids in VPS local cache.")
+
 if __name__ == "__main__":
     asyncio.run(main())
