@@ -255,29 +255,48 @@ async def update_batch_message(batch_id: str, storage: HybridStorage, bot):
             return
             
         completed_count = sum(1 for j in jobs if j.get("status") == "completed")
+        success_count = sum(1 for j in jobs if j.get("status") == "completed" and j.get("conclusion") == "success")
         total_count = len(jobs)
         
+        # Danh sách version rút gọn
+        vers = [j.get("bs_full_ver", "") for j in jobs]
+        prefix = ""
+        short_vers = []
+        if vers:
+            parts = vers[0].split(".")
+            if len(parts) >= 2:
+                prefix = f"{parts[0]}.{parts[1]}."
+            for v in vers:
+                if v.startswith(prefix):
+                    short_vers.append(v[len(prefix):])
+                else:
+                    short_vers.append(v)
+        
+        if len(short_vers) > 3:
+            v_str = f"{prefix}{','.join(short_vers[:3])}..."
+        else:
+            v_str = f"{prefix}{','.join(short_vers)}"
+
         # Header text
         if completed_count == total_count:
-            lines = [f"✅ <b>Đã hoàn thành toàn bộ batch build {variant} ({completed_count}/{total_count})</b>\n"]
-        else:
-            lines = [f"⏳ <b>Đang build {variant} ({completed_count}/{total_count})</b>\n"]
-        
-        # List of items
-        for j in jobs:
-            idx = j.get("batch_index", 1)
-            full_ver = j.get("bs_full_ver", "")
-            status = j.get("status", "queued")
-            
-            if status == "completed":
-                conclusion = j.get("conclusion", "failure")
-                st_str = "✅ Xong" if conclusion == "success" else "❌ Lỗi"
-            elif status in ("dispatched", "in_progress", "running"):
-                st_str = "🔄 Đang build..."
+            if success_count == 0:
+                lines = [
+                    f"❌ <b>Đã huỷ/thất bại toàn bộ batch!</b>",
+                    f"🔨 {variant} — {v_str}",
+                    f"⏳ Tiến trình: {completed_count}/{total_count}"
+                ]
             else:
-                st_str = "⏳ Đang chờ"
-                
-            lines.append(f"{idx}. {variant} — {full_ver} | {st_str}")
+                lines = [
+                    f"✅ <b>Đã hoàn thành batch build!</b>",
+                    f"🔨 {variant} — {v_str}",
+                    f"⏳ Tiến trình: {completed_count}/{total_count} ({success_count} thành công)"
+                ]
+        else:
+            lines = [
+                f"✅ <b>Đang build kernel cho lưu trữ!</b>",
+                f"🔨 {variant} — {v_str}",
+                f"⏳ Tiến trình: {completed_count}/{total_count}"
+            ]
             
         from bot import config
         
@@ -293,52 +312,17 @@ async def update_batch_message(batch_id: str, storage: HybridStorage, bot):
         else:
             github_url = f"https://github.com/{config.GITHUB_OWNER}/{config.GKI_REPO}/actions"
             
-        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-        markup = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔗 Tiến trình GitHub", url=github_url)],
-            [InlineKeyboardButton("🌐 Web Dashboard", url="https://kernel.takeshi.dev/")]
-        ])
+        lines.append(f"<blockquote>Xem: <a href='{github_url}'>Github</a> | <a href='https://kernel.takeshi.dev/'>Dashboard</a> ❞</blockquote>")
         
-        text = "\n".join(lines)
+        text = "\\n".join(lines)
         
         await bot.edit_message_text(
             chat_id=chat_id,
             message_id=msg_id,
             text=text,
-            reply_markup=markup,
-            parse_mode="HTML"
+            parse_mode="HTML",
+            disable_web_page_preview=True
         )
-        
-        # Nếu tất cả đã hoàn thành, gửi thêm 1 thông báo tóm tắt riêng
-        if completed_count == total_count:
-            success_count = sum(1 for j in jobs if j.get("conclusion") == "success")
-            fail_count = total_count - success_count
-            summary_lines = [f"✅ <b>Đã hoàn thành toàn bộ {total_count} bản build {variant}!</b>\n"]
-            for j in jobs:
-                full_ver = j.get("bs_full_ver", "")
-                conclusion = j.get("conclusion", "failure")
-                icon = "✅" if conclusion == "success" else "❌"
-                summary_lines.append(f"{icon} {variant} — {full_ver}")
-            summary_lines.append(f"\n<i>Thành công: {success_count} | Thất bại: {fail_count}</i>")
-            summary_text = "\n".join(summary_lines)
-            
-            final_markup = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🌐 Web Dashboard", url="https://kernel.takeshi.dev/")]
-            ])
-            
-            # Chỉ gửi 1 lần - check flag trong job đầu tiên
-            if not first_job.get("batch_all_notified"):
-                await storage.update_job(first_job["_id"], {"batch_all_notified": True})
-                try:
-                    await bot.send_message(
-                        chat_id=chat_id,
-                        text=summary_text,
-                        reply_markup=final_markup,
-                        parse_mode="HTML",
-                        disable_web_page_preview=True
-                    )
-                except Exception:
-                    pass
     except Exception as e:
         logger.error(f"update_batch_message error: {e}")
 
@@ -1339,7 +1323,11 @@ async def cmd_cancel_batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await storage.update_job(j["_id"], {"status": "completed", "conclusion": "cancelled", "notified": True})
             cancelled += 1
 
-    await update.message.reply_text(f"✅ Đã huỷ <b>{cancelled}/{len(batch_jobs)}</b> jobs trong batch.", parse_mode="HTML")
+    msg = await update.message.reply_text(f"✅ Đã huỷ <b>{cancelled}/{len(batch_jobs)}</b> jobs trong batch.", parse_mode="HTML")
+    if context.job_queue:
+        context.job_queue.run_once(_del_msg_job, when=15, chat_id=msg.chat_id, data=msg.message_id)
+        if update.message:
+            context.job_queue.run_once(_del_msg_job, when=15, chat_id=update.message.chat_id, data=update.message.message_id)
 
 async def cmd_cancel_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _safe_delete_user_msg(update, context)
@@ -1359,18 +1347,26 @@ async def cmd_cancel_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     gh: GitHubAPI = context.application.bot_data["gh"]
     msg = await _send_msg(update, context, f"⏳ Đang gửi lệnh hủy Run #{run_id} lên GitHub...")
     res = await gh.cancel_run(config.GKI_REPO, run_id)
+    
     if res["status"] in (202, 204):
-        for _ in range(10):
-            await asyncio.sleep(5)
-            rn = await gh.get_run(config.GKI_REPO, run_id)
-            if rn["status"] == 200 and rn["json"].get("status") == "completed":
-                break
-        del_res = await gh.delete_run(config.GKI_REPO, run_id)
-        if del_res["status"] == 204:
-            await storage.delete_job_by_run_id(run_id)
-            await msg.edit_text(f"✅ Đã hủy và dọn dẹp thành công Run #{run_id}.")
-        else:
-            await msg.edit_text(f"⚠️ Hủy thành công nhưng xóa thất bại (HTTP {del_res['status']}).")
+        job = await storage.get_job_by_run_id(run_id)
+        if job:
+            await storage.update_job(job["_id"], {"status": "completed", "conclusion": "cancelled", "notified": True})
+            if job.get("batch_id"):
+                from bot.main import update_batch_message
+                await update_batch_message(job["batch_id"], storage, context.application.bot)
+        
+        # Dọn dẹp github run actions list
+        async def _cleanup_gh():
+            for _ in range(10):
+                await asyncio.sleep(5)
+                rn = await gh.get_run(config.GKI_REPO, run_id)
+                if rn["status"] == 200 and rn.get("json", {}).get("status") == "completed":
+                    break
+            await gh.delete_run(config.GKI_REPO, run_id)
+        
+        context.application.create_task(_cleanup_gh())
+        await msg.edit_text(f"✅ Đã hủy thành công Run #{run_id}.")
     else:
         await msg.edit_text(f"❌ Lỗi hủy: {res['status']} {res.get('json', '')}")
         
