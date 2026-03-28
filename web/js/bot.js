@@ -124,8 +124,10 @@ function createWebBuildCard(build) {
         else if (item.status === 'cancelled') { stClass = 'color:#f59e0b'; stLabel = '🚫 Đã huỷ'; }
         else if (item.status === 'failed') { stClass = 'color:#ef4444'; stLabel = '❌ Thất bại'; }
         else { stClass = 'color:var(--text-muted)'; stLabel = '⏳ Đang chờ'; }
+        let durStr = item.duration || '-';
         return `<tr>
             <td style="padding:5px 8px;font-size:0.82rem;color:var(--text-primary);font-family:'Roboto Mono',monospace;">${item.ver}</td>
+            <td style="padding:5px 8px;font-size:0.75rem;color:var(--text-muted);text-align:center;">${durStr}</td>
             <td style="padding:5px 8px;font-size:0.82rem;${stClass};font-weight:600;text-align:right;">${stLabel}</td>
         </tr>`;
     }).join('');
@@ -165,6 +167,7 @@ function createWebBuildCard(build) {
                     <thead>
                         <tr style="border-bottom:1px solid var(--border);">
                             <th style="padding:7px 8px;font-size:0.78rem;color:var(--text-muted);font-weight:600;text-align:left;background:rgba(255,255,255,0.02);">Version</th>
+                            <th style="padding:7px 8px;font-size:0.78rem;color:var(--text-muted);font-weight:600;text-align:center;background:rgba(255,255,255,0.02);">Thời gian</th>
                             <th style="padding:7px 8px;font-size:0.78rem;color:var(--text-muted);font-weight:600;text-align:right;background:rgba(255,255,255,0.02);">Trạng thái</th>
                         </tr>
                     </thead>

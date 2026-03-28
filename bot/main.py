@@ -477,6 +477,21 @@ async def poller(app):
                     if status == "completed":
                         conclusion = rn["json"].get("conclusion")
                         html_url = rn["json"].get("html_url")
+                        
+                        gh_dur = ""
+                        try:
+                            t1_str = rn["json"].get("run_started_at") or rn["json"].get("created_at", "")
+                            if t1_str:
+                                t1 = datetime.fromisoformat(t1_str.replace("Z", "+00:00"))
+                                t2_str = rn["json"].get("updated_at")
+                                if t2_str:
+                                    t2 = datetime.fromisoformat(t2_str.replace("Z", "+00:00"))
+                                    diff = int((t2 - t1).total_seconds())
+                                    if diff > 0:
+                                        gh_dur = f"{diff//60}m {diff%60}s"
+                        except Exception:
+                            pass
+
 
                         buttons = []
                         # Tạo trang Telegraph cho artifacts
@@ -538,6 +553,7 @@ async def poller(app):
                             await storage.update_job(job["_id"], {
                                 "status": "completed",
                                 "conclusion": conclusion,
+                                "gh_duration": gh_dur,
                                 "notified": True
                             })
 

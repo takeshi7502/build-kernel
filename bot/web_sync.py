@@ -161,7 +161,26 @@ async def get_realtime_data(app):
                         bj_st = "building"
                     else:
                         bj_st = "queued"
-                    sub_items.append({"ver": bj.get("bs_full_ver", ""), "status": bj_st})
+                        
+                    bj_dur = bj.get("gh_duration", "")
+                    run_id = str(bj.get("run_id", ""))
+                    if run_id in _GH_RUNS_CACHE:
+                        r = _GH_RUNS_CACHE[run_id]
+                        try:
+                            t1_str = r.get("run_started_at") or r.get("created_at", "")
+                            if t1_str:
+                                t1 = datetime.fromisoformat(t1_str.replace("Z", "+00:00"))
+                                t2_str = r.get("updated_at")
+                                if r.get("status") == "completed" and t2_str:
+                                    t2 = datetime.fromisoformat(t2_str.replace("Z", "+00:00"))
+                                else:
+                                    t2 = datetime.now(timezone.utc)
+                                diff = int((t2 - t1).total_seconds())
+                                if diff > 0:
+                                    bj_dur = f"{diff//60}m {diff%60}s"
+                        except Exception:
+                            pass
+                    sub_items.append({"ver": bj.get("bs_full_ver", ""), "status": bj_st, "duration": bj_dur})
 
                 # Ẩn card nếu tất cả đã done nhưng không có cái nào success (toàn cancel/fail)
                 all_done_batch = all(bj.get("status") == "completed" for bj in bjobs)
