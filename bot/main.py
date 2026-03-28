@@ -870,7 +870,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 wv = [j.get("bs_full_ver", "?") for j in q_jobs[:5]]
                 lines.append(f"┠ ⏳ Hàng chờ: <code>{', '.join(wv)}</code>" + (f" (+{len(q_jobs)-5})" if len(q_jobs) > 5 else ""))
             lines.append(f"┠ Huỷ sub này → /cancel_{run_id}")
-            lines.append(f"┖ Huỷ TOÀN BỘ batch → /cancelbatch_{batch_id}")
+            lines.append(f"┖ Huỷ TOÀN BỘ batch → /cancelbatch_{batch_id.replace('-','')[:16]}")
         else:
             lines.append(f"┖ Huỷ job → /cancel_{run_id}")
 
@@ -882,7 +882,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
             lines.append("")
             lines.append(f"<b>🗂 [Web Build — Hàng chờ]</b>")
             lines.append(f"┠ ⏳ {', '.join(vers)}" + (f" (+{len(bj_list)-5})" if len(bj_list) > 5 else ""))
-            lines.append(f"┖ Huỷ TOÀN BỘ → /cancelbatch_{bid}")
+            lines.append(f"┖ Huỷ TOÀN BỘ → /cancelbatch_{bid.replace('-','')[:16]}")
 
     msg_text = "\n".join(lines)
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Đóng", callback_data=f"closemsg:{update.message.message_id}")]])
@@ -1316,12 +1316,13 @@ async def cmd_cancel_batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Sai cú pháp.")
         return
 
-    batch_id = m.group(1)
+    batch_prefix = m.group(1).replace("-", "")  # Đã bỏ gạch ngang khi hiển thị
     jobs = await storage.get_jobs()
-    batch_jobs = [j for j in jobs if j.get("batch_id") == batch_id]
+    # So sánh prefix 16 ký tự (đã bỏ gạch ngang UUID)
+    batch_jobs = [j for j in jobs if j.get("batch_id", "").replace("-", "")[:16] == batch_prefix[:16]]
 
     if not batch_jobs:
-        await update.message.reply_text(f"❌ Không tìm thấy batch `{batch_id[:8]}...`", parse_mode="Markdown")
+        await update.message.reply_text(f"❌ Không tìm thấy batch `{batch_prefix[:8]}...`", parse_mode="Markdown")
         return
 
     cancelled = 0
