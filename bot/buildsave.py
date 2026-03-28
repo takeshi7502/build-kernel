@@ -16,13 +16,31 @@ from permissions import is_admin
 from config import send_admin_notification
 from gki import (
     VARIANTS, TARGET_META, SUB_LEVELS, SUB_LEVEL_META,
-    CUSTOM_WORKFLOW, _del_msg_job
+    CUSTOM_WORKFLOW, _del_msg_job, TOGGLE_FEATURES, SUPP_OP_TARGETS
 )
 
 # States
 BS_VARIANT = 1
 BS_TARGET  = 2
 BS_SUB     = 3
+BS_TOGGLES = 4
+
+def _bs_toggles_keyboard(inputs: dict, selected_target: str) -> InlineKeyboardMarkup:
+    rows = []
+    btns = []
+    for label, key, _ in TOGGLE_FEATURES:
+        if key == "supp_op" and selected_target not in SUPP_OP_TARGETS: continue
+        if key == "cancel_susfs": active = not inputs.get(key, True)
+        else: active = inputs.get(key, False)
+        icon = "✅" if active else "⬜"
+        btns.append(InlineKeyboardButton(f"{icon} {label}", callback_data=f"bstog:{key}"))
+    for i in range(0, len(btns), 2): rows.append(btns[i:i+2])
+    rows.append([
+        InlineKeyboardButton("⬅️ Quay lại", callback_data="bsback:target"),
+        InlineKeyboardButton("🚀 Xác nhận Build", callback_data="bs:confirm")
+    ])
+    rows.append([InlineKeyboardButton("❌ Hủy", callback_data="bs:cancel")])
+    return InlineKeyboardMarkup(rows)
 
 # Cấu hình cố định cho build lưu trữ
 _FIXED_CONFIG = {
@@ -66,7 +84,15 @@ class BuildSaveFlow:
         if not await is_admin(user.id, storage):
             return ConversationHandler.END
 
-        context.user_data["bs"] = {}
+        context.user_data["bs"] = {
+            "inputs": {
+                "use_zram": _FIXED_CONFIG["use_zram"],
+                "use_bbg": _FIXED_CONFIG["use_bbg"],
+                "use_kpm": _FIXED_CONFIG["use_kpm"],
+                "cancel_susfs": _FIXED_CONFIG["cancel_susfs"],
+                "supp_op": False
+            }
+        }
 
         rows = []
         for i, v in enumerate(VARIANTS, 1):
@@ -151,9 +177,8 @@ class BuildSaveFlow:
         else:
             rows.append([InlineKeyboardButton("✨ Chọn Tất Cả", callback_data="bstoggle:all")])
             
-        # Nút xác nhận
         if selected:
-            rows.append([InlineKeyboardButton(f"🚀 Chạy Build ({len(selected)} bản)", callback_data="bs:confirm")])
+            rows.append([InlineKeyboardButton(f"➡️ Tiếp tục ({len(selected)} bản)", callback_data="bs:next_toggles")])
             
         rows.append([
             InlineKeyboardButton("⬅️", callback_data="bsback:target"),
@@ -192,6 +217,38 @@ class BuildSaveFlow:
                 
         return await self.render_sub_menu(q, context)
 
+    # ─── Màn hình Tính năng chung ────────────────────────────────────
+    async def next_toggles(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        q = update.callback_query; await q.answer()
+        bs = context.user_data.get("bs", {})
+        selected_subs = bs.get("subs", [])
+        if not selected_subs: return BS_SUB
+        
+        target_key = bs.get("target_key", "")
+        inputs = bs.get("inputs", {})
+        await q.edit_message_text(
+            f"🔨 <b>Build Kernel Lưu Trữ</b>\n\n<b>Tùy chỉnh tính năng chung cho {len(selected_subs)} bản build:</b>",
+            reply_markup=_bs_toggles_keyboard(inputs, target_key),
+            parse_mode="HTML"
+        )
+        return BS_TOGGLES
+
+    async def toggle_feature(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        q = update.callback_query; await q.answer()
+        _, key = q.data.split(":", 1)
+        bs = context.user_data.get("bs", {})
+        inputs = bs.setdefault("inputs", {})
+        target_key = bs.get("target_key", "")
+        
+        inputs[key] = not inputs.get(key, False)
+        
+        await q.edit_message_text(
+            f"🔨 <b>Build Kernel Lưu Trữ</b>\n\n<b>Tùy chỉnh tính năng chung cho {len(bs.get('subs', []))} bản build:</b>",
+            reply_markup=_bs_toggles_keyboard(inputs, target_key),
+            parse_mode="HTML"
+        )
+        return BS_TOGGLES
+
     # ─── Confirm → Queue Dispatch ───────────────────────────────────
     async def do_dispatch(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         import uuid
@@ -215,6 +272,8 @@ class BuildSaveFlow:
         )
         batch_msg_id = msg.message_id
         
+        inputs = bs.get("inputs", {})
+        
         now_iso = datetime.now(timezone.utc).isoformat()
         jobs_to_create = []
         index = 1
@@ -232,10 +291,11 @@ class BuildSaveFlow:
                 "kernelsu_variant":  variant,
                 "kernelsu_branch":   _FIXED_CONFIG["kernelsu_branch"],
                 "version":           _FIXED_CONFIG["version"],
-                "use_zram":          _FIXED_CONFIG["use_zram"],
-                "use_bbg":           _FIXED_CONFIG["use_bbg"],
-                "use_kpm":           _FIXED_CONFIG["use_kpm"],
-                "cancel_susfs":      _FIXED_CONFIG["cancel_susfs"],
+                "use_zram":          inputs.get("use_zram", True),
+                "use_bbg":           inputs.get("use_bbg", True),
+                "use_kpm":           inputs.get("use_kpm", False),
+                "cancel_susfs":      inputs.get("cancel_susfs", False),
+                "supp_op":           inputs.get("supp_op", False)
             }
 
             job = {
@@ -348,8 +408,14 @@ def build_buildsave_conversation(gh, storage, cfg):
             BS_TARGET:   [CallbackQueryHandler(flow.set_target,  pattern=r"^bstgt:.+$"), back_h, cancel_h],
             BS_SUB:      [
                 CallbackQueryHandler(flow.toggle_sub,   pattern=r"^bstoggle:.+$"), 
-                CallbackQueryHandler(flow.do_dispatch,  pattern=r"^bs:confirm$"), 
+                CallbackQueryHandler(flow.next_toggles, pattern=r"^bs:next_toggles$"), 
                 back_h, 
+                cancel_h
+            ],
+            BS_TOGGLES:  [
+                CallbackQueryHandler(flow.toggle_feature, pattern=r"^bstog:.+$"),
+                CallbackQueryHandler(flow.do_dispatch,    pattern=r"^bs:confirm$"),
+                back_h,
                 cancel_h
             ],
         },
