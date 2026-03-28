@@ -32,34 +32,46 @@ export function initSearch() {
 function filterActivePanel(rawQuery) {
   var panel = document.querySelector('.tab-panel.active');
   if (!panel) return;
-  var card = panel.querySelector('.card');
-  if (!card) return;
 
   var query = rawQuery.trim().toLowerCase();
-  var wrapper = card.querySelector('.table-dual-wrapper');
-  var rows = wrapper.querySelectorAll('tbody tr');
-  var visibleCount = 0;
+  var cards = panel.querySelectorAll('.card');
 
-  rows.forEach(function (row) {
-    if (!query) { row.style.display = ''; visibleCount++; return; }
-    var dateText = (row.querySelector('.date-cell') || {}).textContent || '';
-    var kernelText = (row.querySelector('.kernel-version') || {}).textContent || '';
-    var match = dateText.toLowerCase().indexOf(query) !== -1 || kernelText.toLowerCase().indexOf(query) !== -1;
-    row.style.display = match ? '' : 'none';
-    if (match) visibleCount++;
-  });
-
-  var existing = card.querySelector('.search-no-results');
-  if (visibleCount === 0 && query) {
-    if (!existing) {
-      var msg = document.createElement('div');
-      msg.className = 'search-no-results';
-      msg.textContent = t.noResults;
-      wrapper.parentNode.insertBefore(msg, wrapper.nextSibling);
+  cards.forEach(function (card) {
+    if (!query) {
+      card.style.display = '';
+      var rows = card.querySelectorAll('.table-dual-wrapper tbody tr');
+      rows.forEach(function(row) { row.style.display = ''; });
+      return;
     }
-    wrapper.style.display = 'none';
-  } else {
-    if (existing) existing.remove();
-    wrapper.style.display = '';
-  }
+    
+    var wrapper = card.querySelector('.table-dual-wrapper');
+    if (wrapper) {
+      // Tích hợp tìm kiếm nội dung tổng thể (Ví dụ: config ZRAM, BBG hoăc Tiêu đề thẻ Web Build)
+      var titleText = (card.querySelector('h3') ? card.querySelector('h3').textContent : '').toLowerCase();
+      var configText = (card.textContent || '').toLowerCase(); // Bao gồm cả thông tin người chạy "CitrusChan"
+      
+      var rows = wrapper.querySelectorAll('tbody tr');
+      var visibleCount = 0;
+      
+      // Nếu có bất kì từ nào khớp vào config/tiêu đề, có thể hiện toàn bộ
+      rows.forEach(function(row) {
+        var rowText = (row.textContent || '').toLowerCase();
+        var match = rowText.indexOf(query) !== -1 || configText.indexOf(query) !== -1;
+        row.style.display = match ? '' : 'none';
+        if (match) visibleCount++;
+      });
+      
+      // Ẩn toàn bộ Card nếu không có row nào thoả mãn (Và card cũng không chứa từ khóa)
+      if (visibleCount === 0) {
+        card.style.display = 'none';
+      } else {
+        card.style.display = '';
+      }
+    } else {
+      // Xử lý đối với Bot Build (Single Card không có Table)
+      var text = (card.textContent || '').toLowerCase();
+      var match = text.indexOf(query) !== -1;
+      card.style.display = match ? '' : 'none';
+    }
+  });
 }
