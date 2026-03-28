@@ -94,8 +94,8 @@ async def get_realtime_data(app):
         # Sắp xếp đại diện các batch theo created_at mới nhất
         batch_representatives.sort(key=lambda x: x.get("created_at", ""), reverse=True)
         
-        all_jobs_to_render = sorted(standalone_jobs, key=lambda x: x.get("_id", 0), reverse=True)[:50]
-        all_jobs_to_render = (batch_representatives + all_jobs_to_render)[:60]
+        all_jobs_to_render = sorted(standalone_jobs, key=lambda x: x.get("_id", 0), reverse=True)
+        all_jobs_to_render = batch_representatives + all_jobs_to_render
         
         for j in all_jobs_to_render:
             inputs = j.get("inputs", {})
