@@ -40,42 +40,41 @@ async def main():
                     
                     full_ver = os.path.basename(file).replace(".json", "")
                     for entry in data.get("entries", []):
-                        run_id = entry.get("run_id")
-                        if not run_id: 
-                            continue
-                            
-                        # If string link like github.com/.../runs/xxx
-                        if isinstance(run_id, str) and "/" in run_id:
-                            run_id = int(run_id.split("/")[-1])
-                        else:
-                            run_id = int(run_id)
-                            
-                        if run_id in existing_run_ids:
-                            continue
-                            
-                        # construct fake job
-                        dt = entry.get("date", datetime.now(timezone.utc).isoformat())
-                        if not dt.endswith("Z") and "+" not in dt:
-                            dt += "Z" # Ensure valid ISO for standard parser
-                            
-                        job = {
-                            "_id": 90000000 + run_id, # arbitrary high id
-                            "type": "buildsave",
-                            "status": "completed",
-                            "conclusion": "success",
-                            "run_id": run_id,
-                            "created_at": dt,
-                            "updated_at": dt,
-                            "user_name": entry.get("runner", "Recovery"),
-                            "zram": entry.get("zram", ""),
-                            "kpm": entry.get("kpm", ""),
-                            "bbg": entry.get("bbg", ""),
-                            "susfs": entry.get("susfs", ""),
-                            "bs_variant": entry.get("title", ""),
-                            "bs_full_ver": full_ver
-                        }
-                        records.append(job)
-                        existing_run_ids.add(run_id)
+                        for variant, link in entry.get("downloads", {}).items():
+                            if "/runs/" not in link:
+                                continue
+                            run_id = link.split("/runs/")[-1].split("/")[0]
+                            try:
+                                run_id = int(run_id)
+                            except ValueError:
+                                continue
+                                
+                            if run_id in existing_run_ids:
+                                continue
+                                
+                            # construct fake job
+                            dt = entry.get("date", datetime.now(timezone.utc).isoformat())
+                            if not dt.endswith("Z") and "+" not in dt:
+                                dt += "Z" # Ensure valid ISO for standard parser
+                                
+                            job = {
+                                "_id": 90000000 + run_id, # arbitrary high id
+                                "type": "buildsave",
+                                "status": "completed",
+                                "conclusion": "success",
+                                "run_id": run_id,
+                                "created_at": dt,
+                                "updated_at": dt,
+                                "user_name": entry.get("runner", "Recovery"),
+                                "zram": entry.get("zram", ""),
+                                "kpm": entry.get("kpm", ""),
+                                "bbg": entry.get("bbg", ""),
+                                "susfs": entry.get("susfs", ""),
+                                "bs_variant": variant,
+                                "bs_full_ver": full_ver
+                            }
+                            records.append(job)
+                            existing_run_ids.add(run_id)
                 except Exception as e:
                     print(f"Error parse {fpath}: {e}")
 
