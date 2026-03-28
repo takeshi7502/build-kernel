@@ -271,7 +271,7 @@ class BuildSaveFlow:
              await self.storage.add_job(j)
              
         # Gửi thông điệp cập nhật lần đầu tiên
-        from bot.main import update_batch_message
+        from main import update_batch_message
         await update_batch_message(batch_id, self.storage, context.bot)
 
         context.user_data.pop("bs", None)

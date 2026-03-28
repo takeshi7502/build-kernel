@@ -1353,7 +1353,6 @@ async def cmd_cancel_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if job:
             await storage.update_job(job["_id"], {"status": "completed", "conclusion": "cancelled", "notified": True})
             if job.get("batch_id"):
-                from bot.main import update_batch_message
                 await update_batch_message(job["batch_id"], storage, context.application.bot)
         
         # Dọn dẹp github run actions list
