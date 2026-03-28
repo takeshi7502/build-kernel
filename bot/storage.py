@@ -51,6 +51,8 @@ class HybridStorage:
         return mode
 
     def _can_push(self) -> bool:
+        if not getattr(self, "_synced", False):
+            return False
         if self._resolved_sync_mode() != "push":
             return False
         if self.writer_hostname and self.hostname != self.writer_hostname:
@@ -80,13 +82,47 @@ class HybridStorage:
             cloud_doc = await self.collection.find_one({"_id": "master_data"})
             local_data = self._load()
             
-            # If fresh local (no keys and no jobs) but cloud has data -> Restore
-            if self._can_pull() and cloud_doc and not local_data.get("keys") and not local_data.get("jobs"):
-                cloud_doc.pop("_id", None)
-                async with self._lock:
-                    self._save_local(cloud_doc)
-                logger.warning("Restored local data.json from MongoDB Atlas!")
-            elif self._can_push():
+            if cloud_doc and self._can_pull():
+                # Merge cloud data into local instead of blindly restoring or pushing
+                merged = False
+                
+                if not local_data.get("keys") and cloud_doc.get("keys"):
+                    local_data["keys"] = cloud_doc["keys"]
+                    merged = True
+                    
+                # Merge jobs combining both sets, relying on run_id
+                local_jobs = local_data.get("jobs", [])
+                cloud_jobs = cloud_doc.get("jobs", [])
+                
+                if not local_jobs and cloud_jobs:
+                    local_data["jobs"] = cloud_jobs
+                    merged = True
+                elif local_jobs and cloud_jobs:
+                    # Simple merge: prefer local if duplicate _id, append cloud if missing
+                    local_run_ids = {j.get("run_id") for j in local_jobs if j.get("run_id")}
+                    local_ids = {j.get("_id") for j in local_jobs if j.get("_id")}
+                    for c_job in cloud_jobs:
+                        c_run_id = c_job.get("run_id")
+                        c_id = c_job.get("_id")
+                        if (c_run_id and c_run_id not in local_run_ids) or (c_id and c_id not in local_ids):
+                            local_jobs.append(c_job)
+                            merged = True
+                    local_data["jobs"] = local_jobs
+                
+                for field in ["auth_chats", "admins", "waiters", "successful_builds", "dm_users", "group_chats"]:
+                    if not local_data.get(field) and cloud_doc.get(field):
+                        local_data[field] = cloud_doc.get(field)
+                        merged = True
+                        
+                if merged:
+                    async with self._lock:
+                        self._save_local(local_data)
+                    logger.info("Merged MongoDB Atlas data into local data.json")
+            
+            # Sync complete
+            self._synced = True
+            
+            if self._can_push():
                 await self._push_cloud(local_data)
         except Exception as e:
             logger.error("MongoDB Sync Error: %s", e)
