@@ -298,7 +298,7 @@ async def update_batch_message(batch_id: str, storage: HybridStorage, bot):
                 f"⏳ Tiến trình: {completed_count}/{total_count}"
             ]
             
-        from bot import config
+        import config
         
         # Determine the current running github link
         current_run_id = None
