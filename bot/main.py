@@ -1654,6 +1654,155 @@ async def _update_buildsave_download_link(job: dict, run_id, app):
     # Không gửi thông báo riêng lẻ từng sub
     # Thông báo tổng hợp sẽ do update_batch_message xử lý khi tất cả xong
     logger.info("buildsave: da cap nhat JSON cho %s %s", variant, full_ver)
+import uuid
+import aiofiles
+
+async def cmd_dl(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    args = context.args
+    if not args:
+        msg = await update.message.reply_text("Sử dụng: /dl <version>\nVí dụ: /dl 5.10.149")
+        if context.job_queue:
+            context.job_queue.run_once(_del_msg_job, when=10, chat_id=chat_id, data=msg.message_id)
+        return
+        
+    version = args[0].strip()
+    storage: HybridStorage = context.application.bot_data["storage"]
+    
+    all_jobs = await storage.get_jobs()
+    variants_map = {}
+    
+    for job in sorted(all_jobs, key=lambda x: x.get("created_at", "")):
+        if job.get("type") == "buildsave" and job.get("status") == "completed" and job.get("conclusion") == "success":
+            if job.get("bs_full_ver") == version:
+                var = job.get("bs_variant")
+                if var:
+                    variants_map[var] = job
+                    
+    if not variants_map:
+        msg = await update.message.reply_text(f"Chưa có bản build nào cho version {version}")
+        if context.job_queue:
+            context.job_queue.run_once(_del_msg_job, when=10, chat_id=chat_id, data=msg.message_id)
+        return
+        
+    keyboard = []
+    row = []
+    for var in sorted(variants_map.keys()):
+        row.append(InlineKeyboardButton(var, callback_data=f"dl_var:{version}:{var}"))
+        if len(row) == 2:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+        
+    await update.message.reply_text(f"📦 Chọn bản KernelSU cho {version}:", reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+async def cb_dl_variant(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    data = query.data
+    _, version, variant = data.split(":", 2)
+    
+    storage: HybridStorage = context.application.bot_data["storage"]
+    gh: GitHubAPI = context.application.bot_data["gh"]
+    
+    await query.edit_message_text(f"⏳ Đang xử lý tải xuống {version} - {variant}...")
+    
+    all_jobs = await storage.get_jobs()
+    target_job = None
+    for job in sorted(all_jobs, key=lambda x: x.get("created_at", ""), reverse=True):
+        if job.get("type") == "buildsave" and job.get("status") == "completed" and job.get("conclusion") == "success":
+            if job.get("bs_full_ver") == version and job.get("bs_variant") == variant:
+                target_job = job
+                break
+                
+    if not target_job or not target_job.get("run_id"):
+        await query.edit_message_text("❌ Lỗi: Không tìm thấy dữ liệu run_id trên hệ thống.")
+        return
+        
+    run_id = target_job["run_id"]
+    
+    resp = await gh.list_artifacts_for_run(config.GKI_REPO, run_id)
+    if resp["status"] != 200:
+        await query.edit_message_text("❌ Lỗi lấy thông tin API hoặc bản build đã hết hạn (quá 90 ngày).")
+        return
+        
+    artifacts = resp.get("json", {}).get("artifacts", [])
+    if not artifacts:
+        await query.edit_message_text("❌ Không có file zip nào trong bản build này.")
+        return
+        
+    selected_artifact = None
+    for a in artifacts:
+        name = a.get("name", "")
+        # Lấy tên file chính xác, bỏ các bản phụ (như Manager, Rejects, AnyKernel, susfs-release...)
+        if name.startswith(variant) and "Rejects" not in name and "Manager" not in name and "susfs-release" not in name and "AnyKernel" not in name:
+            selected_artifact = name
+            break
+            
+    if not selected_artifact:
+        selected_artifact = artifacts[0]["name"]
+        
+    dl_url = f"https://nightly.link/{config.GITHUB_OWNER}/{config.GKI_REPO}/actions/runs/{run_id}/{selected_artifact}.zip"
+    
+    await query.edit_message_text("⬇️ Đang tải file từ Github về máy chủ (thường mất vài chục giây)...")
+    
+    tmp_path = f"/tmp/{uuid.uuid4().hex}_{selected_artifact}.zip"
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(dl_url) as file_resp:
+                if file_resp.status != 200:
+                    await query.edit_message_text(f"❌ Không thể tải file từ nightly.link (Lỗi {file_resp.status}). Có thể artifact đã hết hạn.")
+                    return
+                f = await aiofiles.open(tmp_path, mode='wb')
+                downloaded = 0
+                async for chunk in file_resp.content.iter_chunked(2 * 1024 * 1024):
+                    await f.write(chunk)
+                    downloaded += len(chunk)
+                await f.close()
+                
+        file_size = os.path.getsize(tmp_path)
+        mb = file_size / (1024*1024)
+        
+        zram = target_job.get("use_zram", True)
+        bbg = target_job.get("use_bbg", True)
+        susfs = not target_job.get("cancel_susfs", False)
+        
+        cfg_parts = []
+        if zram: cfg_parts.append("ZRAM")
+        if bbg: cfg_parts.append("BBG")
+        if susfs: cfg_parts.append("SUSFS")
+        cfg_str = " + ".join(cfg_parts) if cfg_parts else "Mặc định"
+        
+        caption_html = f"<b>{selected_artifact}.zip</b>\n\nCấu hình: {cfg_str}"
+        
+        if file_size > 50 * 1024 * 1024:
+            fallback_text = f"⚙️ File quá lớn ({mb:.1f}MB > 50MB) xin hãy dùng link để tải:\n\n{caption_html}\n\n<a href='{dl_url}'>📥 Bấm vào đây để tải</a>"
+            await query.edit_message_text(fallback_text, parse_mode="html", disable_web_page_preview=True)
+        else:
+            await query.edit_message_text(f"📤 Đã tải xong ({mb:.1f}MB). Đang upload lên Telegram...")
+            with open(tmp_path, "rb") as fd:
+                await context.bot.send_document(
+                    chat_id=query.message.chat_id,
+                    document=fd,
+                    filename=f"{selected_artifact}.zip",
+                    caption=caption_html,
+                    parse_mode="html"
+                )
+            await query.delete_message()
+            
+    except Exception as e:
+        logger.error(f"DL error: {e}")
+        await query.edit_message_text(f"❌ Gặp lỗi khi tải: {str(e)}")
+    finally:
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except:
+                pass
 
 
 async def start_web_server(app_bot):
@@ -1735,6 +1884,8 @@ def main():
     app.add_handler(MessageHandler(filters.Regex(r"^/cancelbatch_[\w-]+(?:@[\w_]+)?$"), cmd_cancel_batch))
     app.add_handler(MessageHandler(filters.Regex(r"^/delete_\d+(?:@[\w_]+)?$"), cmd_delete_run))
     app.add_handler(CommandHandler("fixqueue", cmd_fix_queue))
+    app.add_handler(CommandHandler("dl", cmd_dl))
+    app.add_handler(CallbackQueryHandler(cb_dl_variant, pattern=r"^dl_var:"))
 
     # DM user tracker (group=99, catch-all, lowest priority)
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.ALL, dm_tracker), group=99)
