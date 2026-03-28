@@ -1,255 +1,125 @@
-# 🔧 GKI Kernel Build Bot
+# 🔧 GKI Kernel Build System
 
-Telegram bot để tự động build GKI Kernel thông qua GitHub Actions.
+Hệ thống tự động hóa quá trình compile GKI & Custom Kernel thông qua GitHub Actions, quản lý bằng Telegram Bot và theo dõi qua Web Dashboard Realtime.
 
-## ✨ Tính năng
+## ✨ Tính năng nổi bật
 
-- 🚀 **Build GKI Kernel** — Chọn variant, nhánh, phiên bản Android và dispatch workflow trực tiếp từ Telegram
-- 📋 **Lịch sử build** (`/list`) — Xem danh sách build thành công với phân trang, link tải qua Telegraph
-- 📊 **Trạng thái** (`/st`) — Theo dõi build đang chạy, ước tính thời gian còn lại, hủy build
-- 🔐 **Phân quyền** — Owner / Admin / User với key system
-- 🔔 **Thông báo tự động** — Bot gửi kết quả khi build xong, thông báo khi hệ thống rảnh
-- 📰 **Telegraph** — Tự động tạo trang Telegraph chứa danh sách file tải về (gọn gàng)
+- 🤖 **Telegram Bot Management** — Tự động deploy Kernel Build flow thông qua hội thoại (`/gki`) hoặc lệnh (`/build`). 
+- 🌐 **Web Dashboard Realtime** — Giao diện hiển thị trực tiếp tiến trình build của toàn bộ server, trạng thái queue, và logs của từng phiên bản.
+- 📦 **Batch Queue System** — Lên lịch build cùng lúc hàng loạt version (ví dụ: 20 bản 5.10.x), hệ thống tự xếp hàng và quản lý slot GitHub.
+- 🗄️ **Hybrid Storage** — Lưu trữ mượt mà kết hợp tính linh hoạt của Local JSON + MongoDB cho độ nạp tối ưu, lưu trữ lâu dài.
+- 📰 **Telegraph & Downloads** — Tự động get artifacts và tạo link tải trực tiếp vô cùng sạch sẽ thông qua bài viết Telegraph.
+- 🗑️ **Cancel & Cleanup** — Dừng một chuỗi build đang chạy (`/cancelbatch`) hoặc huỷ đơn lẻ các tiến trình lỗi, bot sẽ tự dọn rác cả trên GitHub Actions để tiết kiệm bộ nhớ.
+- 🔐 **Multi-role Permission** — Quản trị viên/User whitelist, cấp key giới hạn lượt build cho mem.
 
-## 📁 Cấu trúc
+## 📂 Kiến trúc hệ thống
 
+```text
+├── bot/                 # Source code Bot Telegram (Python)
+│   ├── main.py          # Entry point chính của Bot & Poller
+│   ├── web_sync.py      # Core đồng bộ trạng thái Realtime cho Web Dashboard
+│   ├── buildsave.py     # Flow dành riêng cho chức năng Batch Build (hàng đợi)
+│   ├── gki.py           # Flow tạo phân nhánh build đơn cơ bản
+│   └── userbot.py       # Module telethon dự phòng
+├── web/                 # Source code Web Dashboard (Node.js/React/Vite)
+│   ├── index.html       
+│   ├── js/              # Mã nguồn xử lý render giao diện thẻ Masonry theo từng Batch
+│   ├── src/             # Component mở rộng
+│   └── data/            # Thư mục giao tiếp CSDL JSON JSON giữa Bot và Frontend
+├── ecosystem.config.js  # Cấu hình PM2 để Start đồng loạt nhiều dịch vụ
+└── requirements.txt     # Python Dependencies
 ```
-├── main.py            # Bot mode (Bot Token)
-├── userbot.py         # User account mode (Telethon)
-├── gki.py             # GKI build conversation flow
-├── config.py          # Load & validate config từ .env
-├── permissions.py     # is_owner() / is_admin() helpers
-├── requirements.txt   # Dependencies
-├── .env.example       # Template config (push lên GitHub)
-├── .env               # Config thật (KHÔNG push)
-├── data.json          # Dữ liệu runtime (KHÔNG push)
-└── .gitignore
-```
 
-## 🔑 Bảng phân quyền
+## 📝 Danh sách lệnh chính trên Telegram
 
-| Role | Quyền | Cách thiết lập |
-|------|-------|----------------|
-| **Owner** | Toàn quyền: `/key`, `/st`, `/list`, bypass key & job limit | `OWNER_ID` trong `.env` |
-| **Admin** | `/st`, `/list`, build không cần key, bypass job limit | `ADMIN_IDS` trong `.env` |
-| **User** | Build bằng `/gki {key}`, giới hạn 1 job / 3 giờ | Ai cũng được |
-
-## 📝 Danh sách lệnh
-
-| Lệnh | Quyền | Mô tả |
-|------|-------|-------|
-| `/gki` hoặc `/gki {key}` | Admin / User | Bắt đầu build GKI Kernel |
-| `/st` | Admin | Xem build đang chạy + nút hủy |
-| `/list` | Admin | Lịch sử build thành công (phân trang) |
-| `/key {mã} {số_lượt}` | Owner | Tạo/cập nhật key cho user |
+| Lệnh | Role | Mô tả |
+|------|------|-------|
+| `/gki` | Admin / User | Bắt đầu tạo 1 bản build riêng lẻ bằng giao diện bấm nút |
+| `/build` | Admin | Tạo Batch Queue (build hàng loạt nhiều version cùng lúc vào lưu trữ) |
+| `/st` | Admin | Kiểm tra tiến trình tất cả các job đang chờ/đang build |
+| `/list` | Admin | Lịch sử build thành công & Lấy link tải Telegraph |
+| `/cancel _id` | Admin | Huỷ 1 tiến trình đang chạy đơn lẻ |
+| `/cancelbatch_id` | Admin | Huỷ toàn bộ một đợt batch queuing đang chạy để clear slot |
+| `/key` | Owner | Quản lý whitelist member (Tạo thêm lượt build cho mem) |
 
 ---
 
-## 🖥️ Chạy trên máy (Local)
+## 🚀 Hướng dẫn Triển khai Server (VPS Ubuntu/Debian)
 
-### Yêu cầu
-- Python 3.10+
-- Git
-- Telegram Bot Token (từ [@BotFather](https://t.me/BotFather))
-- GitHub Fine-grained PAT (quyền **Actions: Read and Write**)
+Hệ thống được thiết kế tối ưu nhất khi chạy với **PM2** và có **MongoDB**.
 
-### Bước 1: Clone repo
-
-```bash
-git clone https://github.com/<username>/<repo>.git
-cd <repo>
-```
-
-### Bước 2: Tạo môi trường ảo (khuyến khích)
-
-```bash
-python -m venv venv
-
-# Windows
-venv\Scripts\activate
-
-# Linux / macOS
-source venv/bin/activate
-```
-
-### Bước 3: Cài dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-### Bước 4: Cấu hình
-
-```bash
-# Copy file mẫu
-cp .env.example .env
-
-# Mở .env và điền thông tin thật
-```
-
-Nội dung `.env` cần điền:
-
-```env
-TELEGRAM_BOT_TOKEN=your_bot_token
-GITHUB_TOKEN=ghp_xxxxxxxxxxxxx
-GITHUB_OWNER=your_github_username
-GKI_REPO=your_gki_repo
-GKI_DEFAULT_BRANCH=main
-GKI_WORKFLOWS=Build=main.yml
-OWNER_ID=123456789
-ADMIN_IDS=
-```
-
-> 💡 **Lấy `OWNER_ID`**: Gửi tin nhắn cho [@userinfobot](https://t.me/userinfobot) trên Telegram để biết ID của bạn.
-
-> 💡 **Tạo GitHub Token**: GitHub → Settings → Developer settings → Personal access tokens → **Fine-grained tokens** → Chọn repo → Permission: **Actions: Read and Write**
-
-### Bước 5: Chạy bot
-
-```bash
-python main.py
-```
-
----
-
-## 🌐 Chạy trên VPS (Ubuntu)
-
-### Bước 1: Cài đặt Python
-
+### Bước 1: Cài đặt phần mềm cơ sở
 ```bash
 sudo apt update && sudo apt upgrade -y
-sudo apt install python3 python3-pip python3-venv git -y
+sudo apt install python3 python3-pip python3-venv git curl -y
+
+# Cài Node.js & PM2
+curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+sudo apt-get install -y nodejs
+sudo npm install -g pm2
 ```
 
-### Bước 2: Clone repo
-
+### Bước 2: Clone Repo
 ```bash
-cd ~
-git clone https://github.com/<username>/<repo>.git
-cd <repo>
+git clone https://github.com/takeshi7502/build-kernel.git
+cd build-kernel
 ```
 
-### Bước 3: Tạo môi trường ảo
+### Bước 3: Build Web Dashboard (Frontend)
+```bash
+cd web
+npm install
+npm run build
+cd ..
+```
 
+### Bước 4: Môi trường ảo Bot (Backend Python)
 ```bash
 python3 -m venv venv
 source venv/bin/activate
-```
-
-### Bước 4: Cài dependencies
-
-```bash
 pip install -r requirements.txt
 ```
 
-### Bước 5: Cấu hình
-
+### Bước 5: Cấu hình Môi trường `.env`
+Thiết lập file cấu hình bí mật:
 ```bash
 cp .env.example .env
 nano .env
-# Điền đầy đủ thông tin, Ctrl+O để lưu, Ctrl+X để thoát
+```
+Nội dung file `.env` cần chuẩn bị:
+```env
+TELEGRAM_BOT_TOKEN=7xxx:AAHxxx...
+GITHUB_TOKEN=ghp_...
+GITHUB_OWNER=Quản_trị_viên_repo_Github
+GKI_REPO=Tên_Repo_Action_Của_Bạn
+MONGO_URI=mongodb://localhost:27017/gki_build
+OWNER_ID=ID_Telegram_Của_Bạn
+ADMIN_IDS=Các_Admin_Khác
 ```
 
-### Bước 6: Chạy nền với `systemd` (khuyến khích)
-
-Tạo service file:
-
+### Bước 6: Khởi chạy toàn bộ hệ thống
+Sử dụng PM2 ecosystem để spawn toàn bộ các process liên quan:
 ```bash
-sudo nano /etc/systemd/system/gki-bot.service
+pm2 start ecosystem.config.js
+pm2 save
+pm2 startup
 ```
 
-Dán nội dung sau (thay `<user>` và `<repo>` cho đúng):
-
-```ini
-[Unit]
-Description=GKI Kernel Build Bot
-After=network.target
-
-[Service]
-Type=simple
-User=<user>
-WorkingDirectory=/home/<user>/<repo>
-ExecStart=/home/<user>/<repo>/venv/bin/python main.py
-Restart=always
-RestartSec=10
-Environment=PYTHONUNBUFFERED=1
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Kích hoạt và chạy:
-
+Kiểm tra trạng thái hệ thống:
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable gki-bot
-sudo systemctl start gki-bot
-```
-
-Xem log:
-
-```bash
-# Xem log realtime
-sudo journalctl -u gki-bot -f
-
-# Xem trạng thái
-sudo systemctl status gki-bot
-```
-
-### Hoặc chạy nhanh với `screen`
-
-```bash
-screen -S gki-bot
-source venv/bin/activate
-python main.py
-# Nhấn Ctrl+A rồi D để detach
-
-# Quay lại xem:
-screen -r gki-bot
+pm2 status
 ```
 
 ---
 
-## 👤 Chạy Bằng Tài Khoản Telegram User (Telethon)
-
-Ngoài bot token mode (`main.py`), repo đã có thêm user account mode (`userbot.py`).
-Mode này chạy bằng chính tài khoản Telegram cá nhân của bạn.
-
-### Cấu hình thêm trong `.env`
-
+## 🎨 Tích hợp Userbot (Telethon)
+Nếu Bot API bị giới hạn tín hiệu vì lý do nào đó, bạn có thể triển khai thêm `userbot.py` để gửi tín hiệu bypass API bot. Chỉnh sửa `.env`:
 ```env
-TELEGRAM_API_ID=123456
-TELEGRAM_API_HASH=your_api_hash
+TELEGRAM_API_ID=...
+TELEGRAM_API_HASH=...
 TELEGRAM_SESSION=gki_user
-USERBOT_ALLOWED_CHAT_IDS=
 ```
+Khởi chạy `pm2 start bot/userbot.py --name gki-userbot`.
 
-- Lấy `TELEGRAM_API_ID` và `TELEGRAM_API_HASH` tại [my.telegram.org](https://my.telegram.org).
-- `USERBOT_ALLOWED_CHAT_IDS` là tùy chọn (phân cách bằng dấu phẩy), để giới hạn chat được phép chạy lệnh.
-
-### Chạy user mode
-
-```bash
-python userbot.py
-```
-
-Lần đầu chạy, Telethon sẽ yêu cầu nhập số điện thoại, mã OTP và (nếu có) mật khẩu 2FA để tạo session.
-
-### Lệnh trong user mode
-
-- `/pings`
-- `/sts`
-- `/keyss`
-- `/lists` hoặc `/lists 2`
-- `/cancels <run_id>`
-- `/gkis [key=value ...]`
-
-Ví dụ:
-
-```text
-/gkis target=a13 variant=ReSukiSU version=HzzMonet release=actions subs=74,78
-```
-
-## 📄 License
-
-MIT
+## 📄 Bản quyền
+MIT License. Cảm ơn sự hỗ trợ từ các Open Source Repository và The Android Open Source Project. Mọi thắc mắc kỹ thuật có thể mở Issue.
