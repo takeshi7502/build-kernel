@@ -314,7 +314,7 @@ async def update_batch_message(batch_id: str, storage: HybridStorage, bot):
             
         lines.append(f"<blockquote>Xem: <a href='{github_url}'>Github</a> | <a href='https://kernel.takeshi.dev/'>Dashboard</a> ❞</blockquote>")
         
-        text = "\\n".join(lines)
+        text = "\n".join(lines)
         
         await bot.edit_message_text(
             chat_id=chat_id,
