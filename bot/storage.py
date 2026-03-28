@@ -101,10 +101,15 @@ class HybridStorage:
                     # Simple merge: prefer local if duplicate _id, append cloud if missing
                     local_run_ids = {j.get("run_id") for j in local_jobs if j.get("run_id")}
                     local_ids = {j.get("_id") for j in local_jobs if j.get("_id")}
+                    
                     for c_job in cloud_jobs:
                         c_run_id = c_job.get("run_id")
                         c_id = c_job.get("_id")
-                        if (c_run_id and c_run_id not in local_run_ids) or (c_id and c_id not in local_ids):
+                        
+                        if (c_id and c_id in local_ids) or (c_run_id and c_run_id in local_run_ids):
+                            # Already exists locally, don't duplicate
+                            pass
+                        else:
                             local_jobs.append(c_job)
                             merged = True
                     local_data["jobs"] = local_jobs
