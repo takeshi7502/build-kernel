@@ -362,6 +362,32 @@ async def poller(app):
 
     while True:
         try:
+            # 0. Dọn ghost buildsave jobs (dispatched không có run_id quá 10 phút)
+            _now = datetime.now(timezone.utc)
+            _all_jobs = await storage.get_jobs()
+            for _gj in _all_jobs:
+                if _gj.get("type") != "buildsave":
+                    continue
+                _gst = _gj.get("status", "")
+                if _gst not in ("dispatched", "in_progress", "running"):
+                    continue
+                _grun = _gj.get("run_id")
+                try:
+                    _gcat = datetime.fromisoformat(_gj.get("created_at", "").replace("Z", "+00:00"))
+                    _gmin = (_now - _gcat).total_seconds() / 60
+                    # Ghost: không có run_id sau 10 phút, hoặc có run_id nhưng trên 120 phút
+                    _is_ghost = (not _grun and _gmin > 10) or (_grun and _gmin > 120)
+                except Exception:
+                    _is_ghost = not _grun
+                if _is_ghost:
+                    logger.warning("Poller: ghost buildsave job detected _id=%s, marking cancelled", _gj.get("_id"))
+                    await storage.update_job(_gj["_id"], {
+                        "status": "completed", "conclusion": "cancelled", "notified": True
+                    })
+                    _gbid = _gj.get("batch_id")
+                    if _gbid:
+                        await update_batch_message(_gbid, storage, app.bot)
+
             # 1. Dispatch buildsave queue
             active_bs = await storage.get_active_buildsave_count()
             if active_bs == 0:
@@ -1473,6 +1499,59 @@ async def cmd_cancel_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if update.message:
             context.job_queue.run_once(_del_msg_job, when=10, chat_id=update.message.chat_id, data=update.message.message_id)
 
+async def cmd_fix_queue(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Force-reset stuck/ghost buildsave jobs so queue unblocks."""
+    await _safe_delete_user_msg(update, context)
+    user = update.effective_user
+    storage: HybridStorage = context.application.bot_data["storage"]
+    if not await is_admin(user.id, storage):
+        return
+
+    jobs = await storage.get_jobs()
+    now = datetime.now(timezone.utc)
+    fixed = 0
+    for j in jobs:
+        if j.get("type") != "buildsave":
+            continue
+        status = j.get("status", "")
+        if status not in ("dispatched", "in_progress", "running", "queued"):
+            continue
+
+        # Ghost: dispatched/running nhưng không có run_id, hoặc đã qú 30 phút
+        run_id = j.get("run_id")
+        is_ghost = False
+        try:
+            cat = datetime.fromisoformat(j.get("created_at", "").replace("Z", "+00:00"))
+            age_min = (now - cat).total_seconds() / 60
+            if status == "queued" and age_min > 30:
+                is_ghost = True
+            elif status in ("dispatched", "in_progress", "running") and not run_id and age_min > 5:
+                is_ghost = True
+            elif status in ("dispatched", "in_progress", "running") and age_min > 90:
+                is_ghost = True
+        except Exception:
+            is_ghost = True
+
+        if is_ghost:
+            await storage.update_job(j["_id"], {
+                "status": "completed",
+                "conclusion": "cancelled",
+                "notified": True,
+            })
+            bid = j.get("batch_id")
+            if bid:
+                await update_batch_message(bid, storage, context.application.bot)
+            fixed += 1
+
+    msg = await context.application.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=f"✅ Đã xóa <b>{fixed}</b> ghost/stuck job khỏi queue. Hàng đợi đã được giải phóng."
+             if fixed else "✅ Không có job bị kẹt. Queue đang hoạt động bình thường.",
+        parse_mode="HTML"
+    )
+    if context.job_queue:
+        context.job_queue.run_once(_del_msg_job, when=15, chat_id=msg.chat_id, data=msg.message_id)
+
 async def cmd_delete_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _safe_delete_user_msg(update, context)
     user = update.effective_user
@@ -1639,6 +1718,7 @@ def main():
     app.add_handler(MessageHandler(filters.Regex(r"^/cancel_\d+(?:@[\w_]+)?$"), cmd_cancel_run))
     app.add_handler(MessageHandler(filters.Regex(r"^/cancelbatch_[\w-]+(?:@[\w_]+)?$"), cmd_cancel_batch))
     app.add_handler(MessageHandler(filters.Regex(r"^/delete_\d+(?:@[\w_]+)?$"), cmd_delete_run))
+    app.add_handler(CommandHandler("fixqueue", cmd_fix_queue))
 
     # DM user tracker (group=99, catch-all, lowest priority)
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.ALL, dm_tracker), group=99)
