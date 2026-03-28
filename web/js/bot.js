@@ -167,8 +167,8 @@ function createWebBuildCard(build) {
                     <thead>
                         <tr style="border-bottom:1px solid var(--border);">
                             <th style="padding:7px 8px;font-size:0.78rem;color:var(--text-muted);font-weight:600;text-align:left;background:rgba(255,255,255,0.02);">Version</th>
-                            <th style="padding:7px 8px;font-size:0.78rem;color:var(--text-muted);font-weight:600;text-align:center;background:rgba(255,255,255,0.02);">Time</th>
-                            <th style="padding:7px 8px;font-size:0.78rem;color:var(--text-muted);font-weight:600;text-align:right;background:rgba(255,255,255,0.02);">Status</th>
+                            <th style="padding:7px 8px;font-size:0.78rem;color:var(--text-muted);font-weight:600;text-align:center;background:rgba(255,255,255,0.02);">Status</th>
+                            <th style="padding:7px 8px;font-size:0.78rem;color:var(--text-muted);font-weight:600;text-align:right;background:rgba(255,255,255,0.02);">Time</th>
                         </tr>
                     </thead>
                     <tbody>${rows}</tbody>
