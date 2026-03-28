@@ -140,21 +140,34 @@ async def get_realtime_data(app):
                 github_link = f"https://github.com/{config.GITHUB_OWNER}/{repo_name}/actions/runs/{run_id}" if run_id else "#"
                 nightly_link = f"https://nightly.link/{config.GITHUB_OWNER}/{repo_name}/actions/runs/{run_id}" if run_id else "#"
                 
-                progress_str = f"{completed}/{total} xong"
-                if failed: progress_str += f", {failed} lỗi"
-                
+                android_label = j.get("bs_android", "").replace("android", "Android")
+
+                # sub_items: danh sach tung version va status rieng
+                sub_items = []
+                for bj in bjobs:
+                    bj_status_raw = bj.get("status", "queued")
+                    bj_conclusion = bj.get("conclusion", "")
+                    if bj_status_raw == "completed":
+                        bj_st = "success" if bj_conclusion == "success" else "failed"
+                    elif bj_status_raw in ("dispatched", "in_progress", "running"):
+                        bj_st = "building"
+                    else:
+                        bj_st = "queued"
+                    sub_items.append({"ver": bj.get("bs_full_ver", ""), "status": bj_st})
+
                 b = {
                     "id": str(j.get("batch_id", j.get("_id", "TBD"))),
                     "type": "buildsave",
                     "title": variant,
-                    "sub_title": sub_title,
-                    "custom_version": f"Queue: {progress_str}",
+                    "sub_title": f"{android_label} | Tiến trình {completed}/{total}",
+                    "custom_version": "",
                     "zram": zram, "kpm": kpm, "bbg": bbg, "susfs": susfs,
                     "status": batch_status,
                     "date": j.get("created_at"),
                     "user_name": user_name,
                     "github_link": github_link,
-                    "nightly_link": nightly_link
+                    "nightly_link": nightly_link,
+                    "sub_items": sub_items
                 }
                 data["builds"].append(b)
                 continue

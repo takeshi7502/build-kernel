@@ -1,4 +1,4 @@
-﻿/* Bot Dashboard Build Cards Styles */
+/* Bot Dashboard Build Cards Styles */
 .stat-badge {
     background: var(--status-bg-success);
     color: var(--status-success);
@@ -65,11 +65,29 @@
     color: var(--text-primary);
 }
 
-/* Grid System */
+/* Grid System - Bot Build (grid layout) */
 .builds-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
     gap: 24px;
+}
+
+/* Web Build: Masonry columns layout - chiều cao tự co dãn */
+#builds-container-web {
+    display: block;
+    columns: 3;
+    column-gap: 20px;
+
+    > * {
+        break-inside: avoid;
+        margin-bottom: 20px;
+    }
+}
+
+@media (max-width: 1200px) {
+    #builds-container-web {
+        columns: 2;
+    }
 }
 
 @media (max-width: 768px) {
@@ -77,24 +95,28 @@
         grid-template-columns: 1fr;
         gap: 16px;
     }
-    
+
+    #builds-container-web {
+        columns: 1;
+    }
+
     .section-title {
         flex-direction: column;
         align-items: flex-start;
         gap: 16px;
         margin-bottom: 20px;
     }
-    
+
     .section-title h2 {
         font-size: 16px;
     }
-    
+
     .filter-group {
         width: 100%;
         display: flex;
         gap: 8px;
     }
-    
+
     .filter-btn {
         flex: 1;
         text-align: center;

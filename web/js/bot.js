@@ -102,6 +102,83 @@ function createBuildCard(build) {
     `;
 }
 
+// Card riêng cho Web Build (batch buildsave) — hiển thị bảng Version/Status
+function createWebBuildCard(build) {
+    let badge = '';
+    if (build.status === 'success') {
+        badge = '<span class="badge badge-susfs">Hoàn thành</span>';
+    } else if (build.status === 'building') {
+        badge = '<span class="badge badge-new">Đang Build</span>';
+    } else if (build.status === 'partial') {
+        badge = '<span class="badge" style="background:rgba(234,179,8,0.15);color:#eab308;border:1px solid rgba(234,179,8,0.3);">Một phần</span>';
+    } else {
+        badge = '<span class="badge badge-deprecated">Lỗi</span>';
+    }
+
+    const subItems = build.sub_items || [];
+    const rows = subItems.map(item => {
+        let stClass = '', stLabel = '';
+        if (item.status === 'success') { stClass = 'color:#10b981'; stLabel = '✅ Thành công'; }
+        else if (item.status === 'building') { stClass = 'color:#3b82f6'; stLabel = '🔄 Đang build...'; }
+        else if (item.status === 'failed') { stClass = 'color:#ef4444'; stLabel = '❌ Thất bại'; }
+        else { stClass = 'color:var(--text-muted)'; stLabel = '⏳ Đang chờ'; }
+        return `<tr>
+            <td style="padding:5px 8px;font-size:0.82rem;color:var(--text-primary);font-family:'Roboto Mono',monospace;">${item.ver}</td>
+            <td style="padding:5px 8px;font-size:0.82rem;${stClass};font-weight:600;text-align:right;">${stLabel}</td>
+        </tr>`;
+    }).join('');
+
+    let actionButtons = '';
+    if (build.status === 'building') {
+        actionButtons = `
+            <button class="bot-btn" disabled><i class="fa-solid fa-spinner fa-spin"></i> Đang biên dịch</button>
+            <a href="${build.github_link}" target="_blank" class="bot-btn"><i class="fa-brands fa-github"></i> Github</a>
+        `;
+    } else {
+        actionButtons = `
+            <a href="${build.github_link}" target="_blank" class="bot-btn"><i class="fa-brands fa-github"></i> Github</a>
+        `;
+    }
+
+    return `
+        <div class="card web-build-card" data-status="${build.status}" style="break-inside:avoid;display:flex;flex-direction:column;">
+            <div style="margin-bottom:12px;display:flex;justify-content:space-between;align-items:flex-start;">
+                <div style="flex:1;min-width:0;padding-right:12px;">
+                    <h3 style="margin:0 0 4px 0;font-size:1.1rem;font-weight:600;color:var(--text-primary);">${build.title || 'Unknown'}</h3>
+                    <div style="font-size:0.83rem;font-weight:500;color:var(--text-muted);">${build.sub_title || ''}</div>
+                </div>
+                <div style="flex-shrink:0;">${badge}</div>
+            </div>
+
+            <div style="color:var(--text-muted);font-size:0.82rem;display:flex;align-items:center;margin-bottom:14px;">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:5px;flex-shrink:0;"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                <span style="white-space:nowrap;">${formatDate(build.date)}</span>
+                <span style="margin:0 5px;">by</span>
+                <span style="font-weight:600;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:130px;">${build.user_name || 'Unknown'}</span>
+            </div>
+
+            ${subItems.length > 0 ? `
+            <div style="background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-md);margin-bottom:16px;overflow:hidden;">
+                <table style="width:100%;border-collapse:collapse;">
+                    <thead>
+                        <tr style="border-bottom:1px solid var(--border);">
+                            <th style="padding:7px 8px;font-size:0.78rem;color:var(--text-muted);font-weight:600;text-align:left;background:rgba(255,255,255,0.02);">Version</th>
+                            <th style="padding:7px 8px;font-size:0.78rem;color:var(--text-muted);font-weight:600;text-align:right;background:rgba(255,255,255,0.02);">Trạng thái</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>` : ''}
+
+            <div style="display:flex;gap:10px;margin-top:auto;border-top:1px solid var(--border);padding-top:14px;">
+                ${actionButtons}
+            </div>
+        </div>
+    `;
+}
+
+
+
 let currentBotBuilds = [];
 let currentWebBuilds = [];
 
@@ -152,11 +229,11 @@ function renderBuilds() {
     if (containerWeb) {
         containerWeb.innerHTML = '';
         if (currentWebBuilds.length === 0) {
-            containerWeb.innerHTML = '<p style="color: var(--text-muted); grid-column: 1 / -1; text-align: center; padding: 40px;">Đang tải dữ liệu hoặc chưa có bản web build nào...</p>';
+            containerWeb.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 40px;">Đang tải dữ liệu hoặc chưa có bản web build nào...</p>';
         } else {
             currentWebBuilds.forEach(build => {
                 if (filterWeb === 'all' || build.status === filterWeb) {
-                    containerWeb.innerHTML += createBuildCard(build);
+                    containerWeb.innerHTML += createWebBuildCard(build);
                 }
             });
         }
