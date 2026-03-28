@@ -367,30 +367,44 @@ async def poller(app):
             if active_bs == 0:
                 next_bs = await storage.get_next_queued_buildsave()
                 if next_bs:
-                    inputs = next_bs.get("inputs", {})
-                    res = await gh.dispatch_workflow(
-                        repo=next_bs["repo"],
-                        workflow_file=next_bs["workflow_file"],
-                        ref=next_bs["ref"],
-                        inputs=inputs
-                    )
-                    now_iso = datetime.now(timezone.utc).isoformat()
-                    if res.get("status") in (201, 202, 204):
-                        await storage.update_job(next_bs["_id"], {
-                            "status": "dispatched",
-                            "created_at": now_iso
-                        })
-                    else:
-                        await storage.update_job(next_bs["_id"], {
-                            "status": "completed",
-                            "conclusion": "failure",
-                            "notified": True,  # skip polling notification, silently fail
-                            "created_at": now_iso
-                        })
-                    
-                    batch_id = next_bs.get("batch_id")
-                    if batch_id:
-                        await update_batch_message(batch_id, storage, app.bot)
+                    # Kiểm tra batch đã bị huỷ chưa (có job nào trong batch bị cancelled chưa)
+                    _batch_id = next_bs.get("batch_id")
+                    _skip = False
+                    if _batch_id:
+                        _siblings = await storage.get_jobs_by_batch(_batch_id)
+                        if any(j.get("conclusion") == "cancelled" for j in _siblings):
+                            # Batch đã huỷ → bỏ qua, đánh dấu cancelled luôn
+                            await storage.update_job(next_bs["_id"], {
+                                "status": "completed", "conclusion": "cancelled", "notified": True
+                            })
+                            await update_batch_message(_batch_id, storage, app.bot)
+                            _skip = True
+
+                    if not _skip:
+                        inputs = next_bs.get("inputs", {})
+                        res = await gh.dispatch_workflow(
+                            repo=next_bs["repo"],
+                            workflow_file=next_bs["workflow_file"],
+                            ref=next_bs["ref"],
+                            inputs=inputs
+                        )
+                        now_iso = datetime.now(timezone.utc).isoformat()
+                        if res.get("status") in (201, 202, 204):
+                            await storage.update_job(next_bs["_id"], {
+                                "status": "dispatched",
+                                "created_at": now_iso
+                            })
+                        else:
+                            await storage.update_job(next_bs["_id"], {
+                                "status": "completed",
+                                "conclusion": "failure",
+                                "notified": True,
+                                "created_at": now_iso
+                            })
+                        batch_id = next_bs.get("batch_id")
+                        if batch_id:
+                            await update_batch_message(batch_id, storage, app.bot)
+
             
             # 2. Polling for unnotified jobs
             jobs = await storage.list_unnotified_jobs()
@@ -1345,16 +1359,14 @@ async def cmd_cancel_batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     text = update.message.text or ""
-    # Format: /cancelbatch_<uuid>
     import re as _re
     m = _re.match(r"^/cancelbatch_([\w-]+)", text.strip())
     if not m:
         await update.message.reply_text("❌ Sai cú pháp.")
         return
 
-    batch_prefix = m.group(1).replace("-", "")  # Đã bỏ gạch ngang khi hiển thị
+    batch_prefix = m.group(1).replace("-", "")
     jobs = await storage.get_jobs()
-    # So sánh prefix 16 ký tự (đã bỏ gạch ngang UUID)
     batch_jobs = [j for j in jobs if j.get("batch_id", "").replace("-", "")[:16] == batch_prefix[:16]]
 
     if not batch_jobs:
@@ -1362,24 +1374,59 @@ async def cmd_cancel_batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     cancelled = 0
+    batch_id = batch_jobs[0].get("batch_id") if batch_jobs else None
     for j in batch_jobs:
         status = j.get("status", "")
         run_id = j.get("run_id")
-        if status == "queued":
-            # Huỷ job queued trong DB ngay
-            await storage.update_job(j["_id"], {"status": "completed", "conclusion": "cancelled", "notified": True})
-            cancelled += 1
-        elif status in ("dispatched", "in_progress", "running") and run_id:
-            # Gửi cancel lên GitHub
-            res = await gh.cancel_run(j.get("repo", config.GKI_REPO), int(run_id))
+        if status in ("queued", "completed"):
+            # Đánh dấu cancelled nếu chưa done thực sự
+            if j.get("conclusion") not in ("success",):
+                await storage.update_job(j["_id"], {"status": "completed", "conclusion": "cancelled", "notified": True})
+                cancelled += 1
+        elif status in ("dispatched", "in_progress", "running"):
+            # Huỷ trên GitHub nếu có run_id
+            if run_id:
+                try:
+                    await gh.cancel_run(j.get("repo", config.GKI_REPO), int(run_id))
+                except Exception as e:
+                    logger.warning("cancel_batch: cancel_run error for %s: %s", run_id, e)
             await storage.update_job(j["_id"], {"status": "completed", "conclusion": "cancelled", "notified": True})
             cancelled += 1
 
+    # Cập nhật batch message và xử lý card web
+    if batch_id:
+        # Kiểm tra xem có job nào thành công không
+        updated_jobs = await storage.get_jobs_by_batch(batch_id)
+        any_success = any(j.get("conclusion") == "success" for j in updated_jobs)
+
+        if not any_success:
+            # Không có gì thành công → xoá tin nhắn batch
+            first_job = updated_jobs[0] if updated_jobs else None
+            if first_job:
+                chat_id = first_job.get("chat_id")
+                msg_id = first_job.get("batch_msg_id")
+                if chat_id and msg_id:
+                    try:
+                        await context.application.bot.delete_message(chat_id=chat_id, message_id=msg_id)
+                    except Exception:
+                        # Nếu xoá không được thì cập nhật text thay thế
+                        try:
+                            await context.application.bot.edit_message_text(
+                                chat_id=chat_id, message_id=msg_id,
+                                text=f"❌ <b>Đã huỷ batch build.</b>\n🔨 {first_job.get('bs_variant', '')} — Đã huỷ {cancelled}/{len(batch_jobs)} bản.",
+                                parse_mode="HTML", disable_web_page_preview=True
+                            )
+                        except Exception:
+                            pass
+        else:
+            # Có ít nhất 1 bản thành công → cập nhật message
+            await update_batch_message(batch_id, storage, context.application.bot)
+
     msg = await update.message.reply_text(f"✅ Đã huỷ <b>{cancelled}/{len(batch_jobs)}</b> jobs trong batch.", parse_mode="HTML")
     if context.job_queue:
-        context.job_queue.run_once(_del_msg_job, when=15, chat_id=msg.chat_id, data=msg.message_id)
+        context.job_queue.run_once(_del_msg_job, when=12, chat_id=msg.chat_id, data=msg.message_id)
         if update.message:
-            context.job_queue.run_once(_del_msg_job, when=15, chat_id=update.message.chat_id, data=update.message.message_id)
+            context.job_queue.run_once(_del_msg_job, when=12, chat_id=update.message.chat_id, data=update.message.message_id)
 
 async def cmd_cancel_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _safe_delete_user_msg(update, context)
