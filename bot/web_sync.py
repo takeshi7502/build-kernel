@@ -60,9 +60,12 @@ async def get_realtime_data(app):
                         continue
                         
                     gh_run = _GH_RUNS_CACHE[run_id]
-                    # Update status native
-                    j["status"] = "completed" if gh_run.get("status") == "completed" else "in_progress"
-                    j["conclusion"] = gh_run.get("conclusion")
+                    # Nếu DB đã đánh dấu cancelled thì giữ nguyên, không để GH override
+                    if j.get("conclusion") == "cancelled":
+                        j["status"] = "completed"
+                    else:
+                        j["status"] = "completed" if gh_run.get("status") == "completed" else "in_progress"
+                        j["conclusion"] = gh_run.get("conclusion")
                     active_jobs.append(j)
                 jobs = active_jobs
         # -------- KẾT THÚC ĐỒNG BỘ VỚI GITHUB --------
