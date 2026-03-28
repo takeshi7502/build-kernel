@@ -106,22 +106,25 @@ function createBuildCard(build) {
 function createWebBuildCard(build) {
     let badge = '';
     if (build.status === 'success') {
-        badge = '<span class="badge badge-susfs">Hoàn thành</span>';
+        badge = '<span class="badge badge-susfs">Ho\u00e0n th\u00e0nh</span>';
     } else if (build.status === 'building') {
-        badge = '<span class="badge badge-new">Đang Build</span>';
+        badge = '<span class="badge badge-new">\u0110ang Build</span>';
     } else if (build.status === 'partial') {
-        badge = '<span class="badge" style="background:rgba(234,179,8,0.15);color:#eab308;border:1px solid rgba(234,179,8,0.3);">Một phần</span>';
+        badge = '<span class="badge" style="background:rgba(234,179,8,0.15);color:#eab308;border:1px solid rgba(234,179,8,0.3);">M\u1ed9t ph\u1ea7n \u2705</span>';
+    } else if (build.status === 'cancelled') {
+        badge = '<span class="badge" style="background:rgba(245,158,11,0.15);color:#f59e0b;border:1px solid rgba(245,158,11,0.3);">\u0110\u00e3 hu\u1ef7</span>';
     } else {
-        badge = '<span class="badge badge-deprecated">Lỗi</span>';
+        badge = '<span class="badge badge-deprecated">L\u1ed7i</span>';
     }
 
     const subItems = build.sub_items || [];
     const rows = subItems.map(item => {
         let stClass = '', stLabel = '';
-        if (item.status === 'success') { stClass = 'color:#10b981'; stLabel = '✅ Thành công'; }
-        else if (item.status === 'building') { stClass = 'color:#3b82f6'; stLabel = '🔄 Đang build...'; }
-        else if (item.status === 'failed') { stClass = 'color:#ef4444'; stLabel = '❌ Thất bại'; }
-        else { stClass = 'color:var(--text-muted)'; stLabel = '⏳ Đang chờ'; }
+        if (item.status === 'success') { stClass = 'color:#10b981'; stLabel = '\u2705 Th\u00e0nh c\u00f4ng'; }
+        else if (item.status === 'building') { stClass = 'color:#3b82f6'; stLabel = '\ud83d\udd04 \u0110ang build...'; }
+        else if (item.status === 'cancelled') { stClass = 'color:#f59e0b'; stLabel = '\ud83d\udeab \u0110\u00e3 hu\u1ef7'; }
+        else if (item.status === 'failed') { stClass = 'color:#ef4444'; stLabel = '\u274c Th\u1ea5t b\u1ea1i'; }
+        else { stClass = 'color:var(--text-muted)'; stLabel = '\u23f3 \u0110ang ch\u1edd'; }
         return `<tr>
             <td style="padding:5px 8px;font-size:0.82rem;color:var(--text-primary);font-family:'Roboto Mono',monospace;">${item.ver}</td>
             <td style="padding:5px 8px;font-size:0.82rem;${stClass};font-weight:600;text-align:right;">${stLabel}</td>

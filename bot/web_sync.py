@@ -148,12 +148,22 @@ async def get_realtime_data(app):
                     bj_status_raw = bj.get("status", "queued")
                     bj_conclusion = bj.get("conclusion", "")
                     if bj_status_raw == "completed":
-                        bj_st = "success" if bj_conclusion == "success" else "failed"
+                        if bj_conclusion == "success":
+                            bj_st = "success"
+                        elif bj_conclusion in ("cancelled", "stale"):
+                            bj_st = "cancelled"
+                        else:
+                            bj_st = "failed"
                     elif bj_status_raw in ("dispatched", "in_progress", "running"):
                         bj_st = "building"
                     else:
                         bj_st = "queued"
                     sub_items.append({"ver": bj.get("bs_full_ver", ""), "status": bj_st})
+
+                # Ẩn card nếu tất cả đã done nhưng không có cái nào success (toàn cancel/fail)
+                all_done_batch = all(bj.get("status") == "completed" for bj in bjobs)
+                if all_done_batch and completed == 0:
+                    continue  # Xoá khỏi web, không hiển thị card thất bại/cancel hoàn toàn
 
                 b = {
                     "id": str(j.get("batch_id", j.get("_id", "TBD"))),
