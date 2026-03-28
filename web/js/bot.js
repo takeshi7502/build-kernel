@@ -25,25 +25,25 @@ function createBuildCard(build) {
         : build.status === 'building' ? 'background:rgba(234,179,8,0.15);color:#eab308;border:1px solid rgba(234,179,8,0.3);' 
         : 'background:rgba(239,68,68,0.15);color:#ef4444;border:1px solid rgba(239,68,68,0.3);';
         
-    let statusLabel = build.status === 'success' ? 'Thành công'
-        : build.status === 'building' ? 'Đang Build'
-        : 'Lỗi';
+    let statusLabel = build.status === 'success' ? 'Success'
+        : build.status === 'building' ? 'Building'
+        : 'Failed';
 
     // Nút action (Download & Github)
     let actionButtons = '';
     if (build.status === 'success') {
         actionButtons = `
-            <a href="${build.nightly_link}" target="_blank" class="bot-btn btn-success"><i class="fa-solid fa-download"></i> Tải về</a>
+            <a href="${build.nightly_link}" target="_blank" class="bot-btn btn-success"><i class="fa-solid fa-download"></i> Download</a>
             <a href="${build.github_link}" target="_blank" class="bot-btn"><i class="fa-brands fa-github"></i> Github</a>
         `;
     } else if (build.status === 'building') {
         actionButtons = `
-            <button class="bot-btn" disabled><i class="fa-solid fa-spinner fa-spin"></i> Đang biên dịch</button>
+            <button class="bot-btn" disabled><i class="fa-solid fa-spinner fa-spin"></i> Compiling</button>
             <a href="${build.github_link}" target="_blank" class="bot-btn"><i class="fa-brands fa-github"></i> Github</a>
         `;
     } else {
         actionButtons = `
-            <button class="bot-btn" disabled style="color: #ef4444; border-color: rgba(239, 68, 68, 0.3);"><i class="fa-solid fa-xmark"></i> Thất bại</button>
+            <button class="bot-btn" disabled style="color: #ef4444; border-color: rgba(239, 68, 68, 0.3);"><i class="fa-solid fa-xmark"></i> Failed</button>
             <a href="${build.github_link}" target="_blank" class="bot-btn"><i class="fa-brands fa-github"></i> Github</a>
         `;
     }
@@ -105,37 +105,37 @@ function createBuildCard(build) {
 function createWebBuildCard(build) {
     let badge = '';
     if (build.status === 'success') {
-        badge = '<span class="badge" style="background:rgba(16,185,129,0.15);color:#10b981;border:1px solid rgba(16,185,129,0.3);">Thành công</span>';
+        badge = '<span class="badge" style="background:rgba(16,185,129,0.15);color:#10b981;border:1px solid rgba(16,185,129,0.3);">Success</span>';
     } else if (build.status === 'building') {
-        badge = '<span class="badge" style="background:rgba(234,179,8,0.15);color:#eab308;border:1px solid rgba(234,179,8,0.3);">Đang Build</span>';
+        badge = '<span class="badge" style="background:rgba(234,179,8,0.15);color:#eab308;border:1px solid rgba(234,179,8,0.3);">Building</span>';
     } else if (build.status === 'partial') {
-        badge = '<span class="badge" style="background:rgba(59,130,246,0.15);color:#3b82f6;border:1px solid rgba(59,130,246,0.3);">Một phần ✅</span>';
+        badge = '<span class="badge" style="background:rgba(59,130,246,0.15);color:#3b82f6;border:1px solid rgba(59,130,246,0.3);">Partial ✅</span>';
     } else if (build.status === 'cancelled') {
-        badge = '<span class="badge" style="background:rgba(245,158,11,0.15);color:#f59e0b;border:1px solid rgba(245,158,11,0.3);">Đã huỷ</span>';
+        badge = '<span class="badge" style="background:rgba(245,158,11,0.15);color:#f59e0b;border:1px solid rgba(245,158,11,0.3);">Cancelled</span>';
     } else {
-        badge = '<span class="badge" style="background:rgba(239,68,68,0.15);color:#ef4444;border:1px solid rgba(239,68,68,0.3);">Lỗi</span>';
+        badge = '<span class="badge" style="background:rgba(239,68,68,0.15);color:#ef4444;border:1px solid rgba(239,68,68,0.3);">Failed</span>';
     }
 
     const subItems = build.sub_items || [];
     const rows = subItems.map(item => {
         let stClass = '', stLabel = '';
-        if (item.status === 'success') { stClass = 'color:#10b981'; stLabel = '✅ Thành công'; }
-        else if (item.status === 'building') { stClass = 'color:#eab308'; stLabel = '🔄 Đang build...'; }
-        else if (item.status === 'cancelled') { stClass = 'color:#f59e0b'; stLabel = '🚫 Đã huỷ'; }
-        else if (item.status === 'failed') { stClass = 'color:#ef4444'; stLabel = '❌ Thất bại'; }
-        else { stClass = 'color:var(--text-muted)'; stLabel = '⏳ Đang chờ'; }
+        if (item.status === 'success') { stClass = 'color:#10b981'; stLabel = '✅ Success'; }
+        else if (item.status === 'building') { stClass = 'color:#eab308'; stLabel = '🔄 Building...'; }
+        else if (item.status === 'cancelled') { stClass = 'color:#f59e0b'; stLabel = '🚫 Cancelled'; }
+        else if (item.status === 'failed') { stClass = 'color:#ef4444'; stLabel = '❌ Failed'; }
+        else { stClass = 'color:var(--text-muted)'; stLabel = '⏳ Waiting'; }
         let durStr = item.duration || '-';
         return `<tr>
             <td style="padding:5px 8px;font-size:0.82rem;color:var(--text-primary);font-family:'Roboto Mono',monospace;">${item.ver}</td>
-            <td style="padding:5px 8px;font-size:0.75rem;color:var(--text-muted);text-align:center;">${durStr}</td>
-            <td style="padding:5px 8px;font-size:0.82rem;${stClass};font-weight:600;text-align:right;">${stLabel}</td>
+            <td style="padding:5px 8px;font-size:0.82rem;${stClass};font-weight:600;text-align:center;white-space:nowrap;">${stLabel}</td>
+            <td style="padding:5px 8px;font-size:0.75rem;color:var(--text-muted);text-align:right;">${durStr}</td>
         </tr>`;
     }).join('');
 
     let actionButtons = '';
     if (build.status === 'building') {
         actionButtons = `
-            <button class="bot-btn" disabled><i class="fa-solid fa-spinner fa-spin"></i> Đang biên dịch</button>
+            <button class="bot-btn" disabled><i class="fa-solid fa-spinner fa-spin"></i> Compiling</button>
             <a href="${build.github_link}" target="_blank" class="bot-btn"><i class="fa-brands fa-github"></i> Github</a>
         `;
     } else {
@@ -167,8 +167,8 @@ function createWebBuildCard(build) {
                     <thead>
                         <tr style="border-bottom:1px solid var(--border);">
                             <th style="padding:7px 8px;font-size:0.78rem;color:var(--text-muted);font-weight:600;text-align:left;background:rgba(255,255,255,0.02);">Version</th>
-                            <th style="padding:7px 8px;font-size:0.78rem;color:var(--text-muted);font-weight:600;text-align:center;background:rgba(255,255,255,0.02);">Thời gian</th>
-                            <th style="padding:7px 8px;font-size:0.78rem;color:var(--text-muted);font-weight:600;text-align:right;background:rgba(255,255,255,0.02);">Trạng thái</th>
+                            <th style="padding:7px 8px;font-size:0.78rem;color:var(--text-muted);font-weight:600;text-align:center;background:rgba(255,255,255,0.02);">Time</th>
+                            <th style="padding:7px 8px;font-size:0.78rem;color:var(--text-muted);font-weight:600;text-align:right;background:rgba(255,255,255,0.02);">Status</th>
                         </tr>
                     </thead>
                     <tbody>${rows}</tbody>
