@@ -767,8 +767,11 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         disable_web_page_preview=True
     )
 
-async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await _safe_delete_user_msg(update, context)
+async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE, message_to_edit=None, cmd_msg_id=0):
+    if not message_to_edit:
+        await _safe_delete_user_msg(update, context)
+        cmd_msg_id = update.message.message_id if update.message else 0
+        
     user = update.effective_user
     storage: HybridStorage = context.application.bot_data["storage"]
     
@@ -788,12 +791,23 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 active_runs.append(r)
 
     if not active_runs:
-        m = await _send_msg(update, context, "ℹ️ Hiện không có tiến trình build nào đang chạy.")
-        if context.job_queue:
-            context.job_queue.run_once(_del_msg_job, when=60, chat_id=m.chat_id, data=m.message_id)
-            if update.message:
-                context.job_queue.run_once(_del_msg_job, when=60, chat_id=update.message.chat_id, data=update.message.message_id)
+        text = "ℹ️ Hiện không có tiến trình build nào đang chạy."
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔄 Làm mới", callback_data=f"refresh_st:{cmd_msg_id}"), InlineKeyboardButton("❌ Đóng", callback_data=f"closemsg:{cmd_msg_id}")]
+        ])
+        if message_to_edit:
+            try:
+                await message_to_edit.edit_text(text, reply_markup=kb)
+            except Exception:
+                pass
+        else:
+            m = await _send_msg(update, context, text, reply_markup=kb)
+            if context.job_queue:
+                context.job_queue.run_once(_del_msg_job, when=60, chat_id=m.chat_id, data=m.message_id)
+                if update.message:
+                    context.job_queue.run_once(_del_msg_job, when=60, chat_id=update.message.chat_id, data=cmd_msg_id)
         return
+
 
     # Lấy danh sách jobs local để map user_id nếu có
     jobs = await storage.get_jobs()
@@ -869,8 +883,29 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
             lines.append(f"┖ Huỷ TOÀN BỘ → /cancelbatch_{bid.replace('-','')[:16]}")
 
     msg_text = "\n".join(lines)
-    kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Đóng", callback_data=f"closemsg:{update.message.message_id}")]])
-    await _send_msg(update, context, msg_text, parse_mode=constants.ParseMode.HTML, reply_markup=kb)
+    kb = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🔄 Làm mới", callback_data=f"refresh_st:{cmd_msg_id}"),
+            InlineKeyboardButton("❌ Đóng", callback_data=f"closemsg:{cmd_msg_id}")
+        ]
+    ])
+    if message_to_edit:
+        try:
+            await message_to_edit.edit_text(msg_text, parse_mode=constants.ParseMode.HTML, reply_markup=kb)
+        except Exception:
+            pass
+    else:
+        await _send_msg(update, context, msg_text, parse_mode=constants.ParseMode.HTML, reply_markup=kb)
+
+async def cb_refresh_st(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer("Đang tải dữ liệu mới nhất...")
+    try:
+        parts = q.data.split(":")
+        cmd_msg_id = int(parts[1]) if len(parts) > 1 else 0
+    except:
+        cmd_msg_id = 0
+    await cmd_status(update, context, message_to_edit=q.message, cmd_msg_id=cmd_msg_id)
 
 def _run_button_text(repo_label: str, run: dict) -> str:
     n = run.get("run_number")
@@ -1533,6 +1568,7 @@ def main():
     app.add_handler(CommandHandler("chat", cmd_broadcast))
     app.add_handler(CallbackQueryHandler(cb_list_page, pattern=r"^listpage:\d+$"))
     app.add_handler(CallbackQueryHandler(cb_close_msg, pattern=r"^closemsg"))
+    app.add_handler(CallbackQueryHandler(cb_refresh_st, pattern=r"^refresh_st"))
     app.add_handler(CallbackQueryHandler(cb_run_controls, pattern=r"^run:gki:\d+$"))
     app.add_handler(CallbackQueryHandler(cb_run_control_action, pattern=r"^runctl:(cancel|close):gki:\d+(?::\d+)?$"))
     app.add_handler(CallbackQueryHandler(cb_save_run, pattern=r"^saverun:\d+$"))
