@@ -108,10 +108,15 @@ export function initI18n() {
   document.getElementById('loadingText').textContent = t.loading;
   document.getElementById('footerPre').textContent = t.footerPre;
   document.getElementById('footerPost').textContent = t.footerPost;
-  document.getElementById('tcTitle').textContent = t.tcTitle;
-  document.getElementById('tcDateLabel').textContent = t.tcDate;
-  document.getElementById('tcTimeLabel').textContent = t.tcTime;
-  document.getElementById('tcCopy').textContent = t.copy;
+  var tcTitle = document.getElementById('tcTitle');
+  var tcDateLabel = document.getElementById('tcDateLabel');
+  var tcTimeLabel = document.getElementById('tcTimeLabel');
+  var tcCopyBtn = document.getElementById('tcCopy');
+  if (tcTitle) tcTitle.textContent = t.tcTitle;
+  if (tcDateLabel) tcDateLabel.textContent = t.tcDate;
+  if (tcTimeLabel) tcTimeLabel.textContent = t.tcTime;
+  if (tcCopyBtn) tcCopyBtn.textContent = t.copy;
+
   document.title = t.title;
 
   // 语言切换按钮
