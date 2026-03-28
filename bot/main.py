@@ -815,43 +815,74 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     jobs = await storage.get_jobs()
     run_to_job = {j.get("run_id"): j for j in jobs if j.get("run_id")}
 
+    # Gom buildsave queued theo batch_id
+    queued_bs = [j for j in jobs if j.get("type") == "buildsave" and j.get("status") == "queued"]
+    batch_queued = {}
+    for bj in queued_bs:
+        bid = bj.get("batch_id")
+        if bid:
+            batch_queued.setdefault(bid, []).append(bj)
+
     lines = []
+    seen_batches = set()
+
     for idx, run in enumerate(active_runs, 1):
         run_id = run["id"]
         status = run["status"]
         name = run.get("name") or run.get("display_title") or "workflow"
         job = run_to_job.get(run_id, {})
-        inputs = job.get("inputs", {})
-        
-        target_count = sum(1 for k in ('build_a12_5_10', 'build_a13_5_15', 'build_a14_6_1', 'build_a15_6_6') if inputs.get(k))
-        if inputs.get("build_all"):
-            target_count = 4
-        target_count = max(1, target_count)
-        
+
         created_at_str = run.get("created_at")
         elapsed_min = 0
         if created_at_str:
             try:
-                created_at = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
-                elapsed = datetime.now(timezone.utc) - created_at
+                created_at_dt = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
+                elapsed = datetime.now(timezone.utc) - created_at_dt
                 elapsed_min = int(elapsed.total_seconds() // 60)
             except:
                 pass
 
-        job = run_to_job.get(run_id, {})
         user_id = job.get("user_id", "Unknown")
         user_name = job.get("user_name", "Unknown")
-        if user_id != "Unknown":
-            mention = f'<a href="tg://user?id={user_id}">{user_name}</a>'
+        mention = f'<a href="tg://user?id={user_id}">{user_name}</a>' if user_id != "Unknown" else "GitHub / Manual"
+
+        job_type = job.get("type", "gki")
+        if job_type == "buildsave":
+            type_label = "🗂 [Web Build]"
+        elif job_type == "oki":
+            type_label = "📱 [OKI Build]"
         else:
-            mention = "GitHub / Manual"
+            type_label = "🤖 [Bot Build]"
 
         if idx > 1:
-            lines.append("") # thêm dòng trống giữa các job
-            
-        lines.append(f"<b>{idx}. Task by {mention} ( #{run_id}) đang chạy</b>")
-        lines.append(f"┠ <b>Tình trạng:</b> {status} ({name[:20]})")
-        lines.append(f"┖ <b>Huỷ job</b> → /cancel_{run_id}")
+            lines.append("")
+
+        lines.append(f"<b>{type_label}</b> — {mention} <code>#{run_id}</code>")
+        lines.append(f"┠ <b>Trạng thái:</b> {status} ({name[:25]}) — ⏱ {elapsed_min} phút")
+
+        batch_id = job.get("batch_id")
+        if job_type == "buildsave" and batch_id and batch_id not in seen_batches:
+            seen_batches.add(batch_id)
+            q_jobs = sorted(batch_queued.get(batch_id, []), key=lambda x: x.get("batch_index", 0))
+            current_ver = job.get("bs_full_ver", "đang build")
+            lines.append(f"┠ 🔄 Đang build: <code>{current_ver}</code>")
+            if q_jobs:
+                wv = [j.get("bs_full_ver", "?") for j in q_jobs[:5]]
+                lines.append(f"┠ ⏳ Hàng chờ: <code>{', '.join(wv)}</code>" + (f" (+{len(q_jobs)-5})" if len(q_jobs) > 5 else ""))
+            lines.append(f"┠ Huỷ sub này → /cancel_{run_id}")
+            lines.append(f"┖ Huỷ TOÀN BỘ batch → /cancelbatch_{batch_id}")
+        else:
+            lines.append(f"┖ Huỷ job → /cancel_{run_id}")
+
+    # Hiển thị các batch đang chờ chưa chạy
+    for bid, bj_list in batch_queued.items():
+        if bid not in seen_batches and bj_list:
+            bj_list = sorted(bj_list, key=lambda x: x.get("batch_index", 0))
+            vers = [j.get("bs_full_ver","?") for j in bj_list[:5]]
+            lines.append("")
+            lines.append(f"<b>🗂 [Web Build — Hàng chờ]</b>")
+            lines.append(f"┠ ⏳ {', '.join(vers)}" + (f" (+{len(bj_list)-5})" if len(bj_list) > 5 else ""))
+            lines.append(f"┖ Huỷ TOÀN BỘ → /cancelbatch_{bid}")
 
     msg_text = "\n".join(lines)
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Đóng", callback_data=f"closemsg:{update.message.message_id}")]])
@@ -1268,6 +1299,47 @@ async def cb_save_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Nút "Lưu" có thể được bấm trong nhóm. Nếu user chưa start bot, sẽ ném lỗi Forbidden
         await q.answer("❌ Lỗi: Bạn cần nhắn tin cho Bot trước (nhấn START) để nhận tin nhắn riêng.", show_alert=True)
 
+async def cmd_cancel_batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Huỷ toàn bộ batch buildsave theo batch_id."""
+    user = update.effective_user
+    storage: HybridStorage = context.application.bot_data["storage"]
+    gh: GitHubAPI = context.application.bot_data["gh"]
+
+    if not await is_admin(user.id, storage):
+        return
+
+    text = update.message.text or ""
+    # Format: /cancelbatch_<uuid>
+    import re as _re
+    m = _re.match(r"^/cancelbatch_([\w-]+)", text.strip())
+    if not m:
+        await update.message.reply_text("❌ Sai cú pháp.")
+        return
+
+    batch_id = m.group(1)
+    jobs = await storage.get_jobs()
+    batch_jobs = [j for j in jobs if j.get("batch_id") == batch_id]
+
+    if not batch_jobs:
+        await update.message.reply_text(f"❌ Không tìm thấy batch `{batch_id[:8]}...`", parse_mode="Markdown")
+        return
+
+    cancelled = 0
+    for j in batch_jobs:
+        status = j.get("status", "")
+        run_id = j.get("run_id")
+        if status == "queued":
+            # Huỷ job queued trong DB ngay
+            await storage.update_job(j["_id"], {"status": "completed", "conclusion": "cancelled", "notified": True})
+            cancelled += 1
+        elif status in ("dispatched", "in_progress", "running") and run_id:
+            # Gửi cancel lên GitHub
+            res = await gh.cancel_run(j.get("repo", config.GKI_REPO), int(run_id))
+            await storage.update_job(j["_id"], {"status": "completed", "conclusion": "cancelled", "notified": True})
+            cancelled += 1
+
+    await update.message.reply_text(f"✅ Đã huỷ <b>{cancelled}/{len(batch_jobs)}</b> jobs trong batch.", parse_mode="HTML")
+
 async def cmd_cancel_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _safe_delete_user_msg(update, context)
     user = update.effective_user
@@ -1469,6 +1541,7 @@ def main():
     app.add_handler(CallbackQueryHandler(cb_run_control_action, pattern=r"^runctl:(cancel|close):gki:\d+(?::\d+)?$"))
     app.add_handler(CallbackQueryHandler(cb_save_run, pattern=r"^saverun:\d+$"))
     app.add_handler(MessageHandler(filters.Regex(r"^/cancel_\d+(?:@[\w_]+)?$"), cmd_cancel_run))
+    app.add_handler(MessageHandler(filters.Regex(r"^/cancelbatch_[\w-]+(?:@[\w_]+)?$"), cmd_cancel_batch))
     app.add_handler(MessageHandler(filters.Regex(r"^/delete_\d+(?:@[\w_]+)?$"), cmd_delete_run))
 
     # DM user tracker (group=99, catch-all, lowest priority)
