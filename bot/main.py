@@ -1389,28 +1389,9 @@ async def _update_buildsave_download_link(job: dict, run_id, app):
         _json.dump(data, f, ensure_ascii=False, indent=2)
     logger.warning("buildsave: đã cập nhật %s → %s = %s", json_path, variant, nightly_link)
 
-    # Gửi thông báo đặc biệt đến chat_id của job
-    try:
-        chat_id = job.get("chat_id")
-        user_id = job.get("user_id")
-        user_name = job.get("user_name", str(user_id))
-        user_name_safe = user_name.replace("#", "＃").replace("@", "＠").replace("<", "&lt;").replace(">", "&gt;")
-        mention = f'<a href="tg://user?id={user_id}">{user_name_safe}</a>'
-
-        text = (
-            f"✅ <b>Build lưu trữ hoàn tất!</b>\n"
-            f"📦 <code>{variant}</code> — <b>{full_ver}</b>\n"
-            f"🔗 Link tải đã được cập nhật lên web.\n"
-            f"<blockquote><b>Xem : <a href='{nightly_link}'>Tải xuống</a> | <a href='https://kernel.takeshi.dev/'>Web Dashboard</a></b></blockquote>"
-        )
-        await app.bot.send_message(
-            chat_id=chat_id,
-            text=text,
-            parse_mode=constants.ParseMode.HTML,
-            disable_web_page_preview=True,
-        )
-    except Exception as e:
-        logger.error("buildsave: gửi thông báo lỗi: %s", e)
+    # Không gửi thông báo riêng lẻ từng sub
+    # Thông báo tổng hợp sẽ do update_batch_message xử lý khi tất cả xong
+    logger.info("buildsave: da cap nhat JSON cho %s %s", variant, full_ver)
 
 
 async def start_web_server(app_bot):
