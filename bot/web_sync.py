@@ -293,6 +293,25 @@ async def get_realtime_data(app):
             if j.get("status") == "completed":
                 status = "success" if j.get("conclusion") == "success" else "failed"
                 
+            duration = j.get("gh_duration", "")
+            run_id = str(j.get("run_id", ""))
+            if run_id in _GH_RUNS_CACHE:
+                r = _GH_RUNS_CACHE[run_id]
+                try:
+                    t1_str = r.get("run_started_at") or r.get("created_at", "")
+                    if t1_str:
+                        t1 = datetime.fromisoformat(t1_str.replace("Z", "+00:00"))
+                        t2_str = r.get("updated_at")
+                        if r.get("status") == "completed" and t2_str:
+                            t2 = datetime.fromisoformat(t2_str.replace("Z", "+00:00"))
+                        else:
+                            t2 = datetime.now(timezone.utc)
+                        diff = int((t2 - t1).total_seconds())
+                        if diff > 0:
+                            duration = f"{diff//60}m {diff%60}s"
+                except Exception:
+                    pass
+
             run_id = j.get("run_id")
             repo_name = j.get("repo", config.GKI_REPO)
             github_link = f"https://github.com/{config.GITHUB_OWNER}/{repo_name}/actions/runs/{run_id}" if run_id else "#"
@@ -309,6 +328,7 @@ async def get_realtime_data(app):
                 "bbg": bbg,
                 "susfs": susfs,
                 "status": status,
+                "duration": duration,
                 "date": j.get("created_at"),
                 "user_name": user_name,
                 "github_link": github_link,

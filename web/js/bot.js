@@ -55,7 +55,10 @@ function createBuildCard(build) {
                     <h3 style="margin: 0 0 4px 0; font-size: 1.1rem; font-weight: 600; color: var(--text-primary); text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">${build.title || 'Unknown OS'}</h3>
                     <div style="font-size: 0.85rem; font-weight: 500; color: var(--text-muted); text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">${build.sub_title || ''}</div>
                 </div>
-                <div class="badge" style="flex-shrink: 0; ${statusStyle}">${statusLabel}</div>
+                <div style="flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end;">
+                    <div class="badge" style="${statusStyle}">${statusLabel}</div>
+                    ${build.duration ? `<span style="font-size: 0.75rem; color: var(--text-muted); margin-top: 5px; font-weight: 500;">⏱ ${build.duration}</span>` : ''}
+                </div>
             </div>
             
             <div style="color: var(--text-muted); font-size: 0.85rem; display: flex; align-items: center; margin-bottom: 16px;">
@@ -159,6 +162,36 @@ function createWebBuildCard(build) {
                 <span style="white-space:nowrap;">${formatDate(build.date)}</span>
                 <span style="margin:0 5px;">by</span>
                 <span style="font-weight:600;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:130px;">${build.user_name || 'Unknown'}</span>
+            </div>
+
+            <div style="background: rgba(255,255,255,0.015); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px; margin-bottom: 16px; font-family: 'Roboto Mono', monospace;">
+                ${build.custom_version ? `
+                <div style="display: flex; justify-content: space-between; font-size: 0.85rem; margin-bottom: 10px; align-items: center;">
+                    <span style="color: var(--text-muted); font-weight: 500;">Custom version:</span>
+                    <span style="font-weight: 600; color: var(--text-primary); text-align: right; max-width: 60%; word-break: break-all;">${build.custom_version}</span>
+                </div>` : ''}
+                
+                <div style="display: flex; gap: 15px; font-size: 0.85rem; margin-bottom: 10px;">
+                    <div style="flex: 1; display: flex; justify-content: space-between; align-items: center;">
+                        <span style="color: var(--text-muted); font-weight: 500;">ZRAM:</span>
+                        <span style="font-weight: 600; color: var(--text-primary);">${build.zram || 'Tắt'}</span>
+                    </div>
+                    <div style="flex: 1; display: flex; justify-content: space-between; align-items: center;">
+                        <span style="color: var(--text-muted); font-weight: 500;">KPM:</span>
+                        <span style="font-weight: 600; color: var(--text-primary);">${build.kpm || 'Tắt'}</span>
+                    </div>
+                </div>
+                
+                <div style="display: flex; gap: 15px; font-size: 0.85rem;">
+                    <div style="flex: 1; display: flex; justify-content: space-between; align-items: center;">
+                        <span style="color: var(--text-muted); font-weight: 500;">BBG:</span>
+                        <span style="font-weight: 600; color: var(--text-primary);">${build.bbg || 'Tắt'}</span>
+                    </div>
+                    <div style="flex: 1; display: flex; justify-content: space-between; align-items: center;">
+                        <span style="color: var(--text-muted); font-weight: 500;">SUSFS:</span>
+                        <span style="font-weight: 600; color: var(--text-primary);">${build.susfs || 'Tắt'}</span>
+                    </div>
+                </div>
             </div>
 
             ${subItems.length > 0 ? `
