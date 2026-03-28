@@ -37,6 +37,23 @@ logging.basicConfig(
 )
 logger = logging.getLogger("gww-bot")
 
+from telegram.ext import ExtBot
+from telegram.error import RetryAfter
+import asyncio
+
+_original_do_post = ExtBot._do_post
+
+async def _safe_do_post(self, *args, **kwargs):
+    for attempt in range(4):
+        try:
+            return await _original_do_post(self, *args, **kwargs)
+        except RetryAfter as e:
+            logger.warning(f"Telegram Rate Limit! ⏳ Sleeping {e.retry_after}s... (Attempt {attempt+1}/4)")
+            await asyncio.sleep(e.retry_after + 1.0)
+    return await _original_do_post(self, *args, **kwargs)
+
+ExtBot._do_post = _safe_do_post
+
 import os
 DATA_JSON = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data.json")
 
