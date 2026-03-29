@@ -104,6 +104,9 @@ def patch_build_yml(content: str) -> str:
     yaml.width = 4096
     data = yaml.load(content)
     
+    if data is None:
+        return content
+
     inputs = data.get("on", {}).get("workflow_call", {}).get("inputs", {})
     if "sub_levels" not in inputs:
         inputs["sub_levels"] = {
@@ -124,6 +127,9 @@ def patch_main_yml(content: str) -> str:
     yaml.width = 4096
     data = yaml.load(content)
     
+    if data is None:
+        return content
+
     inputs = data.get("on", {}).get("workflow_dispatch", {}).get("inputs", {})
     if "sub_levels" not in inputs:
         inputs["sub_levels"] = {
@@ -155,6 +161,9 @@ def patch_kernel_yml(content: str) -> str:
     yaml.width = 4096
     data = yaml.load(content)
     
+    if data is None:
+        return content
+
     for trigger in ["workflow_dispatch", "workflow_call"]:
         inputs = data.get("on", {}).get(trigger, {}).get("inputs", {})
         if "sub_levels" not in inputs:
