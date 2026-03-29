@@ -9,79 +9,136 @@
     },
     {
       "date": "2023-01",
-      "kernel": "5.15.74"
+      "kernel": "5.15.74",
+      "downloads": {
+        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23684325108"
+      }
     },
     {
       "date": "2023-03",
-      "kernel": "5.15.78"
+      "kernel": "5.15.78",
+      "downloads": {
+        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23684495571"
+      }
     },
     {
       "date": "2023-05",
-      "kernel": "5.15.94"
+      "kernel": "5.15.94",
+      "downloads": {
+        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23684667078"
+      }
     },
     {
       "date": "2023-07",
-      "kernel": "5.15.104"
+      "kernel": "5.15.104",
+      "downloads": {
+        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23684842570"
+      }
     },
     {
       "date": "2023-09",
-      "kernel": "5.15.119"
+      "kernel": "5.15.119",
+      "downloads": {
+        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23685248189"
+      }
     },
     {
       "date": "2023-11",
-      "kernel": "5.15.123"
+      "kernel": "5.15.123",
+      "downloads": {
+        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23685420447"
+      }
     },
     {
       "date": "2024-01",
-      "kernel": "5.15.137"
+      "kernel": "5.15.137",
+      "downloads": {
+        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23685584918"
+      }
     },
     {
       "date": "2024-03",
-      "kernel": "5.15.144"
+      "kernel": "5.15.144",
+      "downloads": {
+        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23685735369"
+      }
     },
     {
       "date": "2024-05",
-      "kernel": "5.15.148"
+      "kernel": "5.15.148",
+      "downloads": {
+        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23685943155"
+      }
     },
     {
       "date": "2024-07",
-      "kernel": "5.15.149"
+      "kernel": "5.15.149",
+      "downloads": {
+        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23686106742"
+      }
     },
     {
       "date": "2024-08",
-      "kernel": "5.15.151"
+      "kernel": "5.15.151",
+      "downloads": {
+        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23686318707"
+      }
     },
     {
       "date": "2024-09",
-      "kernel": "5.15.153"
+      "kernel": "5.15.153",
+      "downloads": {
+        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23686490144"
+      }
     },
     {
       "date": "2024-11",
-      "kernel": "5.15.167"
+      "kernel": "5.15.167",
+      "downloads": {
+        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23686659533"
+      }
     },
     {
       "date": "2025-01",
-      "kernel": "5.15.170"
+      "kernel": "5.15.170",
+      "downloads": {
+        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23686842883"
+      }
     },
     {
       "date": "2025-03",
-      "kernel": "5.15.178"
+      "kernel": "5.15.178",
+      "downloads": {
+        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23687016293"
+      }
     },
     {
       "date": "2025-05",
-      "kernel": "5.15.180"
+      "kernel": "5.15.180",
+      "downloads": {
+        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23687291117"
+      }
     },
     {
       "date": "2025-07",
-      "kernel": "5.15.185"
+      "kernel": "5.15.185",
+      "downloads": {
+        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23687475298"
+      }
     },
     {
       "date": "2025-09",
-      "kernel": "5.15.189"
+      "kernel": "5.15.189",
+      "downloads": {
+        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23687710343"
+      }
     },
     {
       "date": "2025-12",
-      "kernel": "5.15.194"
+      "kernel": "5.15.194",
+      "downloads": {
+        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23687902076"
+      }
     }
   ]
 }
