@@ -244,8 +244,8 @@ async def get_realtime_data(app):
                 else: variant = ksu_meta.split("/")[0] if ksu_meta else "NoKSU"
                 
                 title = variant
-                _cid = _make_custom_id(variant, inputs, j.get("created_at", ""))
-                sub_title = f"{os_str}<br><span style='font-family: monospace; font-size: 0.78rem; color: var(--text-muted); opacity: 0.8;'>ID: {_cid}</span>"
+                run_id_str = str(j.get("run_id")) if j.get("run_id") else "Đang chờ..."
+                sub_title = f"{os_str}<br><span style='font-family: monospace; font-size: 0.78rem; color: var(--text-muted); opacity: 0.8;'>Run ID: {run_id_str}</span>"
                 
                 custom_version = inputs.get("SUFFIX", "")
                 zram_val = str(inputs.get("ZRAM", "0"))
@@ -271,8 +271,8 @@ async def get_realtime_data(app):
                 
                 branch = str(inputs.get("kernelsu_branch", "Stable")).replace("(标准)", "").replace("(开发)", "").strip()
                 if not branch: branch = "Stable"
-                _cid = _make_custom_id(variant, inputs, j.get("created_at", ""))
-                sub_title = f"{os_str}-{branch}<br><span style='font-family: monospace; font-size: 0.78rem; color: var(--text-muted); opacity: 0.8;'>ID: {_cid}</span>"
+                run_id_str = str(j.get("run_id")) if j.get("run_id") else "Đang chờ..."
+                sub_title = f"{os_str}-{branch}<br><span style='font-family: monospace; font-size: 0.78rem; color: var(--text-muted); opacity: 0.8;'>Run ID: {run_id_str}</span>"
                 
                 custom_version = str(inputs.get("version", "")).strip("-")
                 zram = "Bật" if inputs.get("use_zram", True) else "Tắt"
@@ -302,8 +302,8 @@ async def get_realtime_data(app):
                 if not branch: branch = "Stable"
                     
                 title = variant
-                _cid = _make_custom_id(variant, inputs, j.get("created_at", ""))
-                sub_title = f"{os_str}-{branch}<br><span style='font-family: monospace; font-size: 0.78rem; color: var(--text-muted); opacity: 0.8;'>ID: {_cid}</span>"
+                run_id_str = str(j.get("run_id")) if j.get("run_id") else "Đang chờ..."
+                sub_title = f"{os_str}-{branch}<br><span style='font-family: monospace; font-size: 0.78rem; color: var(--text-muted); opacity: 0.8;'>Run ID: {run_id_str}</span>"
                 if inputs.get("supp_op"):
                     sub_title += " (8E)"
                 
