@@ -162,6 +162,9 @@ async def get_realtime_data(app):
 
                 # sub_items: danh sach tung version va status rieng
                 sub_items = []
+                total_batch_seconds = 0
+                import re
+                
                 for bj in bjobs:
                     bj_status_raw = bj.get("status", "queued")
                     bj_conclusion = bj.get("conclusion", "")
@@ -184,6 +187,8 @@ async def get_realtime_data(app):
                         
                     bj_dur = bj.get("gh_duration", "")
                     run_id = str(bj.get("run_id", ""))
+                    is_added_from_cache = False
+                    
                     if run_id in _GH_RUNS_CACHE:
                         r = _GH_RUNS_CACHE[run_id]
                         try:
@@ -193,13 +198,33 @@ async def get_realtime_data(app):
                                 t2_str = r.get("updated_at")
                                 if r.get("status") == "completed" and t2_str:
                                     t2 = datetime.fromisoformat(t2_str.replace("Z", "+00:00"))
+                                    diff = int((t2 - t1).total_seconds())
+                                    if diff > 0:
+                                        total_batch_seconds += diff
+                                        is_added_from_cache = True
+                                        bj_dur = f"{diff//60}m {diff%60}s"
                                 else:
                                     t2 = datetime.now(timezone.utc)
-                                diff = int((t2 - t1).total_seconds())
-                                if diff > 0:
-                                    bj_dur = f"{diff//60}m {diff%60}s"
+                                    diff = int((t2 - t1).total_seconds())
+                                    if diff > 0:
+                                        bj_dur = f"{diff//60}m {diff%60}s"
                         except Exception:
                             pass
+                    
+                    # Parse duration from string if it wasn't fetched from cache and job is completed
+                    if not is_added_from_cache and bj_status_raw == "completed" and bj_dur:
+                        try:
+                            sec = 0
+                            hm = re.search(r'(\d+)\s*h', bj_dur)
+                            if hm: sec += int(hm.group(1)) * 3600
+                            mm = re.search(r'(\d+)\s*m', bj_dur)
+                            if mm: sec += int(mm.group(1)) * 60
+                            sm = re.search(r'(\d+)\s*s', bj_dur)
+                            if sm: sec += int(sm.group(1))
+                            total_batch_seconds += sec
+                        except Exception:
+                            pass
+                            
                     sub_items.append({"ver": bj.get("bs_full_ver", ""), "status": bj_st, "duration": bj_dur})
 
                 # Ẩn card nếu tất cả đã done nhưng không có cái nào success (toàn cancel/fail)
@@ -208,6 +233,17 @@ async def get_realtime_data(app):
                     continue  # Xoá khỏi web, không hiển thị card thất bại/cancel hoàn toàn
 
                 _cid = _make_custom_id(variant, inputs, j.get("created_at", ""))
+                
+                batch_dur_str = ""
+                if total_batch_seconds > 0:
+                    h = total_batch_seconds // 3600
+                    m = (total_batch_seconds % 3600) // 60
+                    s = total_batch_seconds % 60
+                    if h > 0:
+                        batch_dur_str = f"{h}h {m}m {s}s"
+                    else:
+                        batch_dur_str = f"{m}m {s}s"
+                        
                 b = {
                     "id": str(j.get("batch_id", j.get("_id", "TBD"))),
                     "type": "buildsave",
@@ -216,6 +252,7 @@ async def get_realtime_data(app):
                     "custom_version": "",
                     "zram": zram, "kpm": kpm, "bbg": bbg, "susfs": susfs,
                     "status": batch_status,
+                    "duration": batch_dur_str,
                     "date": j.get("created_at"),
                     "user_name": user_name,
                     "github_link": github_link,
