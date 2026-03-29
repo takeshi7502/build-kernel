@@ -34,7 +34,7 @@ from telegram.ext import (
 from telegram.request import HTTPXRequest
 
 import config
-from bot.web_sync import _make_custom_id
+from web_sync import _make_custom_id
 from gki import build_gki_conversation, _del_msg_job, SUB_LEVELS
 from oki import build_oki_conversation
 from buildsave import build_buildsave_conversation
