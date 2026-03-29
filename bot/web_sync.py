@@ -1,8 +1,23 @@
 import json
 import base64
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import config
+
+def _make_custom_id(variant, inputs, created_at_iso):
+    if not created_at_iso:
+        created_at_iso = ""
+    var_cl = str(variant).upper().replace(" ", "").replace("-", "").replace("(", "").replace(")", "")[:6]
+    z_n = "1" if inputs.get("use_zram", True) else "0"
+    b_n = "1" if inputs.get("use_bbg", True) else "0"
+    k_n = "1" if inputs.get("use_kpm", True) else "0"
+    s_n = "0" if inputs.get("cancel_susfs", True) else "1"
+    try:
+        dt = datetime.fromisoformat(created_at_iso.replace("Z", "+00:00")) + timedelta(hours=7)
+        time_str = dt.strftime("%H%M.%d%m%y")
+    except Exception:
+        time_str = "0000.000000"
+    return f"{var_cl}{z_n}{b_n}{k_n}{s_n}.{time_str}"
 
 logger = logging.getLogger("gww-web-sync")
 
@@ -187,11 +202,12 @@ async def get_realtime_data(app):
                 if all_done_batch and completed == 0:
                     continue  # Xoá khỏi web, không hiển thị card thất bại/cancel hoàn toàn
 
+                _cid = _make_custom_id(variant, inputs, j.get("created_at", ""))
                 b = {
                     "id": str(j.get("batch_id", j.get("_id", "TBD"))),
                     "type": "buildsave",
                     "title": variant,
-                    "sub_title": f"{android_label} | Tiến trình {completed}/{total}",
+                    "sub_title": f"{android_label} | Tiến trình {completed}/{total}<br><span style='font-family: monospace; font-size: 0.78rem; color: var(--text-muted); opacity: 0.8;'>ID: {_cid}</span>",
                     "custom_version": "",
                     "zram": zram, "kpm": kpm, "bbg": bbg, "susfs": susfs,
                     "status": batch_status,
@@ -223,7 +239,8 @@ async def get_realtime_data(app):
                 else: variant = ksu_meta.split("/")[0] if ksu_meta else "NoKSU"
                 
                 title = variant
-                sub_title = os_str
+                _cid = _make_custom_id(variant, inputs, j.get("created_at", ""))
+                sub_title = f"{os_str}<br><span style='font-family: monospace; font-size: 0.78rem; color: var(--text-muted); opacity: 0.8;'>ID: {_cid}</span>"
                 
                 custom_version = inputs.get("SUFFIX", "")
                 zram_val = str(inputs.get("ZRAM", "0"))
@@ -249,7 +266,8 @@ async def get_realtime_data(app):
                 
                 branch = str(inputs.get("kernelsu_branch", "Stable")).replace("(标准)", "").replace("(开发)", "").strip()
                 if not branch: branch = "Stable"
-                sub_title = f"{os_str}-{branch}"
+                _cid = _make_custom_id(variant, inputs, j.get("created_at", ""))
+                sub_title = f"{os_str}-{branch}<br><span style='font-family: monospace; font-size: 0.78rem; color: var(--text-muted); opacity: 0.8;'>ID: {_cid}</span>"
                 
                 custom_version = str(inputs.get("version", "")).strip("-")
                 zram = "Bật" if inputs.get("use_zram", True) else "Tắt"
@@ -279,7 +297,8 @@ async def get_realtime_data(app):
                 if not branch: branch = "Stable"
                     
                 title = variant
-                sub_title = f"{os_str}-{branch}"
+                _cid = _make_custom_id(variant, inputs, j.get("created_at", ""))
+                sub_title = f"{os_str}-{branch}<br><span style='font-family: monospace; font-size: 0.78rem; color: var(--text-muted); opacity: 0.8;'>ID: {_cid}</span>"
                 if inputs.get("supp_op"):
                     sub_title += " (8E)"
                 
