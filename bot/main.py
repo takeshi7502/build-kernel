@@ -1762,30 +1762,30 @@ async def cb_dl_variant(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
         
     selected_artifact = None
+    selected_size = 0
     for a in artifacts:
         name = a.get("name", "")
-        # Lấy tên file chính xác, bỏ các bản phụ (như Manager, Rejects, AnyKernel, susfs-release...)
         if name.startswith(variant) and "Rejects" not in name and "Manager" not in name and "susfs-release" not in name and "AnyKernel" not in name:
             selected_artifact = name
+            selected_size = a.get("size_in_bytes", 0)
             break
             
     if not selected_artifact:
         selected_artifact = artifacts[0]["name"]
+        selected_size = artifacts[0].get("size_in_bytes", 0)
         
+    # Link tới trang run (tổng hợp tất cả artifacts)
+    run_url = f"https://nightly.link/{config.GITHUB_OWNER}/{config.GKI_REPO}/actions/runs/{run_id}"
+    # Link tải trực tiếp file zip cụ thể
     dl_url = f"https://nightly.link/{config.GITHUB_OWNER}/{config.GKI_REPO}/actions/runs/{run_id}/{selected_artifact}.zip"
     website_url = "https://kernel.takeshi.dev/"
 
-    # Lấy kích thước file bằng HEAD request — không tải file về VPS
-    size_str = "N/A"
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.head(dl_url, allow_redirects=True, timeout=aiohttp.ClientTimeout(total=10)) as r:
-                cl = r.headers.get("Content-Length")
-                if cl:
-                    mb = int(cl) / (1024 * 1024)
-                    size_str = f"{mb:.1f} MB"
-    except Exception:
-        pass
+    # Kích thước lấy từ GitHub API (đã có sẵn, không cần HEAD)
+    if selected_size:
+        mb = selected_size / (1024 * 1024)
+        size_str = f"{mb:.1f} MB"
+    else:
+        size_str = "N/A"
 
     # Tính cấu hình từ job data (ưu tiên lấy từ inputs, fallback sang root)
     inputs = target_job.get("inputs", {})
@@ -1803,10 +1803,10 @@ async def cb_dl_variant(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     filename = f"{selected_artifact}.zip"
     text = (
-        f"<b>File:</b> <code>{filename}</code>\n"
+        f"<b><a href='{run_url}'>{filename}</a></b>\n"
         f"<b>Size:</b> {size_str}\n"
         f"<b>Cấu hình:</b> {cfg_str}\n"
-        f"<b>Link:</b> <a href='{website_url}'>Website</a> | <a href='{dl_url}'>Download</a>"
+        f"<blockquote><b>Link: <a href='{website_url}'>Website</a> | <a href='{dl_url}'>Download</a></b></blockquote>"
     )
 
     await query.edit_message_text(text, parse_mode="HTML", disable_web_page_preview=True)
