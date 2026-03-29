@@ -1324,11 +1324,69 @@ async def _do_delete_run(event, run_id: int):
         await _reply_temp(event, f"❌ Lỗi xoá: HTTP {res.get('status')}", 10)
 
 
+# Dict lưu trạng thái chờ chọn variant: (chat_id, user_id) -> {fut, variants_list}
+_dl_pending: Dict[tuple, dict] = {}
+
+
+async def _build_dl_card(target_job, variant):
+    """Tạo text card download cho 1 variant job."""
+    run_id = target_job.get("run_id")
+    if not run_id:
+        return None, "❌ Không tìm thấy run_id."
+
+    resp = await gh.list_artifacts_for_run(GKI_REPO, run_id)
+    if resp.get("status") != 200:
+        return None, "❌ Lỗi lấy artifact hoặc bản build đã hết hạn."
+
+    artifacts = resp.get("json", {}).get("artifacts", [])
+    if not artifacts:
+        return None, "❌ Không có file trong bản build này."
+
+    selected_artifact = None
+    selected_size = 0
+    for a in artifacts:
+        name = a.get("name", "")
+        if name.startswith(variant) and "Rejects" not in name and "Manager" not in name and "susfs-release" not in name and "AnyKernel" not in name:
+            selected_artifact = name
+            selected_size = a.get("size_in_bytes", 0)
+            break
+    if not selected_artifact:
+        selected_artifact = artifacts[0]["name"]
+        selected_size = artifacts[0].get("size_in_bytes", 0)
+
+    run_url = f"https://nightly.link/{GITHUB_OWNER}/{GKI_REPO}/actions/runs/{run_id}"
+    dl_url  = f"https://nightly.link/{GITHUB_OWNER}/{GKI_REPO}/actions/runs/{run_id}/{selected_artifact}.zip"
+    web_url = "https://kernel.takeshi.dev/"
+
+    size_str = f"{selected_size / (1024*1024):.1f} MB" if selected_size else "N/A"
+
+    inp = target_job.get("inputs", {})
+    zram  = inp.get("use_zram",      target_job.get("use_zram",  True))
+    bbg   = inp.get("use_bbg",       target_job.get("use_bbg",   True))
+    susfs = not inp.get("cancel_susfs", target_job.get("cancel_susfs", False))
+    kpm   = inp.get("use_kpm",       target_job.get("use_kpm",   False))
+
+    cfg_parts = []
+    if zram:  cfg_parts.append("ZRAM")
+    if bbg:   cfg_parts.append("BBG")
+    if susfs: cfg_parts.append("SUSFS")
+    if kpm:   cfg_parts.append("KPM")
+    cfg_str = " + ".join(cfg_parts) if cfg_parts else "Mặc định"
+
+    filename = f"{selected_artifact}.zip"
+    text = (
+        f"<b><a href='{run_url}'>{filename}</a></b>\n"
+        f"<b>Size:</b> {size_str}\n"
+        f"<b>Cấu hình:</b> {cfg_str}\n"
+        f"<blockquote><b>Link: <a href='{web_url}'>Website</a> | <a href='{dl_url}'>Download</a></b></blockquote>"
+    )
+    return text, None
+
+
 @client.on(events.NewMessage(pattern=r"^\.dl(?:\s+(\S+))?$"))
 async def dl_cmd(event):
     if not _is_allowed_chat(event.chat_id):
         return
-    await _safe_delete(event)
 
     version = event.pattern_match.group(1)
     if not version:
@@ -1348,102 +1406,93 @@ async def dl_cmd(event):
         await _reply_temp(event, f"Chưa có bản build nào cho version {version}", 10)
         return
 
-    async def _build_card(target_job, variant):
-        run_id = target_job.get("run_id")
-        if not run_id:
-            return None, "❌ Không tìm thấy run_id."
-
-        resp = await gh.list_artifacts_for_run(GKI_REPO, run_id)
-        if resp.get("status") != 200:
-            return None, "❌ Lỗi lấy artifact hoặc bản build đã hết hạn."
-
-        artifacts = resp.get("json", {}).get("artifacts", [])
-        if not artifacts:
-            return None, "❌ Không có file trong bản build này."
-
-        selected_artifact = None
-        selected_size = 0
-        for a in artifacts:
-            name = a.get("name", "")
-            if name.startswith(variant) and "Rejects" not in name and "Manager" not in name and "susfs-release" not in name and "AnyKernel" not in name:
-                selected_artifact = name
-                selected_size = a.get("size_in_bytes", 0)
-                break
-        if not selected_artifact:
-            selected_artifact = artifacts[0]["name"]
-            selected_size = artifacts[0].get("size_in_bytes", 0)
-
-        run_url  = f"https://nightly.link/{GITHUB_OWNER}/{GKI_REPO}/actions/runs/{run_id}"
-        dl_url   = f"https://nightly.link/{GITHUB_OWNER}/{GKI_REPO}/actions/runs/{run_id}/{selected_artifact}.zip"
-        web_url  = "https://kernel.takeshi.dev/"
-
-        size_str = f"{selected_size / (1024*1024):.1f} MB" if selected_size else "N/A"
-
-        inp = target_job.get("inputs", {})
-        zram  = inp.get("use_zram",      target_job.get("use_zram",  True))
-        bbg   = inp.get("use_bbg",       target_job.get("use_bbg",   True))
-        susfs = not inp.get("cancel_susfs", target_job.get("cancel_susfs", False))
-        kpm   = inp.get("use_kpm",       target_job.get("use_kpm",   False))
-
-        cfg_parts = []
-        if zram:  cfg_parts.append("ZRAM")
-        if bbg:   cfg_parts.append("BBG")
-        if susfs: cfg_parts.append("SUSFS")
-        if kpm:   cfg_parts.append("KPM")
-        cfg_str = " + ".join(cfg_parts) if cfg_parts else "Mặc định"
-
-        filename = f"{selected_artifact}.zip"
-        text = (
-            f"<b><a href='{run_url}'>{filename}</a></b>\n"
-            f"<b>Size:</b> {size_str}\n"
-            f"<b>Cấu hình:</b> {cfg_str}\n"
-            f"<blockquote><b>Link: <a href='{web_url}'>Website</a> | <a href='{dl_url}'>Download</a></b></blockquote>"
-        )
-        return text, None
-
     variants_list = sorted(variants_map.keys())
 
     if len(variants_list) == 1:
-        # Chỉ 1 variant — gửi card ngay
-        text, err = await _build_card(variants_map[variants_list[0]], variants_list[0])
+        # Chỉ 1 variant — gửi card ngay, không xoá
+        text, err = await _build_dl_card(variants_map[variants_list[0]], variants_list[0])
         if err:
             await _reply_temp(event, err, 10)
         else:
-            await _reply_temp(event, text, 60, html=True)
-    else:
-        # Nhiều variant — hỏi chọn
-        lines = [f"📦 Chọn bản KernelSU cho <b>{version}</b>:\n"]
-        for i, v in enumerate(variants_list, 1):
-            lines.append(f"  <b>{i}.</b> {v}")
-        lines.append("\nGõ số để chọn, 'x' để hủy.")
-        prompt_msg = await _reply(event, "\n".join(lines), html=True)
+            await _reply(event, text, html=True)
+        return
 
+    # Nhiều variant — gửi menu, chờ user chọn
+    lines = [f"📦 Chọn bản KernelSU cho <b>{version}</b>:\n"]
+    for i, v in enumerate(variants_list, 1):
+        lines.append(f"  <b>{i}.</b> {v}")
+    lines.append("\nGõ số để chọn. Tự hủy sau 60s.")
+    prompt_msg = await _reply(event, "\n".join(lines), html=True)
+
+    key = (event.chat_id, event.sender_id)
+    loop = asyncio.get_event_loop()
+    fut: asyncio.Future = loop.create_future()
+    _dl_pending[key] = {"fut": fut, "variants_list": variants_list}
+
+    try:
+        chosen_variant = await asyncio.wait_for(fut, timeout=60)
+    except asyncio.TimeoutError:
+        _dl_pending.pop(key, None)
         try:
-            reply = await client.wait_for_event(
-                events.NewMessage(chats=event.chat_id, from_users=event.sender_id),
-                timeout=30
-            )
-            await _safe_delete(prompt_msg)
-            txt = reply.text.strip().lower()
-            if txt == "x":
-                await _reply_temp(reply, "❌ Đã hủy.", 5)
-                return
-            idx = int(txt)
-            if not (1 <= idx <= len(variants_list)):
-                raise ValueError
-            chosen = variants_list[idx - 1]
-            await _safe_delete(reply)
-            text, err = await _build_card(variants_map[chosen], chosen)
-            if err:
-                await _reply_temp(event, err, 10)
-            else:
-                await _reply_temp(event, text, 60, html=True)
-        except asyncio.TimeoutError:
-            await _safe_delete(prompt_msg)
-            await _reply_temp(event, "⏱ Hết giờ chờ chọn.", 5)
-        except (ValueError, TypeError):
-            await _reply_temp(event, "❌ Lựa chọn không hợp lệ.", 5)
+            await prompt_msg.edit("⏱ Hết giờ, đã tự hủy.")
+            await asyncio.sleep(5)
+            await prompt_msg.delete()
+        except Exception:
+            pass
+        return
 
+    _dl_pending.pop(key, None)
+
+    if chosen_variant is None:
+        # User gửi 'x' — đã cancel từ handler
+        try:
+            await prompt_msg.edit("❌ Đã hủy.")
+            await asyncio.sleep(3)
+            await prompt_msg.delete()
+        except Exception:
+            pass
+        return
+
+    text, err = await _build_dl_card(variants_map[chosen_variant], chosen_variant)
+    if err:
+        try:
+            await prompt_msg.edit(err)
+        except Exception:
+            pass
+    else:
+        try:
+            await prompt_msg.edit(text, parse_mode="html", link_preview=False)
+        except Exception:
+            pass
+
+
+@client.on(events.NewMessage())
+async def _dl_choice_handler(event):
+    """Xử lý tin nhắn chọn variant cho .dl — chỉ can thiệp nếu đang có pending."""
+    if not event.sender_id:
+        return
+    key = (event.chat_id, event.sender_id)
+    if key not in _dl_pending:
+        return
+    pending = _dl_pending[key]
+    fut: asyncio.Future = pending["fut"]
+    if fut.done():
+        return
+
+    txt = (event.text or "").strip().lower()
+
+    if txt == "x":
+        fut.set_result(None)
+        return
+
+    try:
+        idx = int(txt)
+        vlist = pending["variants_list"]
+        if 1 <= idx <= len(vlist):
+            fut.set_result(vlist[idx - 1])
+        # số ngoài range: bỏ qua, vẫn giữ pending
+    except ValueError:
+        pass  # tin nhắn khác — bỏ qua hoàn toàn, không làm gì
 
 @client.on(events.NewMessage(pattern=r"^\.cancel(?:\s+(\d+))?$"))
 async def cancel_cmd(event):
