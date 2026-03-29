@@ -358,13 +358,21 @@ async def update_batch_message(batch_id: str, storage: HybridStorage, bot):
 async def update_rebuild_message(rebuild_msg_id: str, storage, bot):
     """Cập nhật tin nhắn rebuild tiến trình khi có job rebuild_queued hoặc complete."""
     try:
-        # Format: "{msg_id}|{chat_id}|{custom_id}" (dùng | thành separator vì chat_id nhóm âm có dấu -)
-        parts = rebuild_msg_id.split("|")
-        if len(parts) < 2:
-            return
-        msg_id_int = int(parts[0])
-        chat_id_int = int(parts[1])
-        custom_id = parts[2] if len(parts) > 2 else ""
+        # Format mới: "{msg_id}|{chat_id}|{custom_id}" (dùng | để tránh clash với chat_id âm)
+        # Format cũ:  "{msg_id}-{chat_id}" hoặc "{msg_id}--{abs_chat_id}"
+        if "|" in rebuild_msg_id:
+            parts = rebuild_msg_id.split("|")
+            if len(parts) < 2:
+                return
+            msg_id_int = int(parts[0])
+            chat_id_int = int(parts[1])
+            custom_id = parts[2] if len(parts) > 2 else ""
+        else:
+            # Format cũ: lấy phần đầu là msg_id, phần còn lại (kể cả dấu âm) là chat_id
+            dash_idx = rebuild_msg_id.index("-")
+            msg_id_int = int(rebuild_msg_id[:dash_idx])
+            chat_id_int = int(rebuild_msg_id[dash_idx + 1:])
+            custom_id = ""
 
         all_jobs = await storage.get_jobs()
         rjobs = [j for j in all_jobs if j.get("rebuild_msg_id") == rebuild_msg_id and j.get("type") == "buildsave"]
