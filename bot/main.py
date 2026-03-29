@@ -698,12 +698,22 @@ async def cmd_keys(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message:
-        await _send_msg(
+        import time
+        start_time = time.time()
+        msg = await _send_msg(
             update,
             context,
-            "🏓 <b>Pong!</b>\nBot đang hoạt động bình thường.",
+            "🏓 <b>Ping...</b>",
             parse_mode=constants.ParseMode.HTML,
         )
+        end_time = time.time()
+        ping_ms = int((end_time - start_time) * 1000)
+        
+        if msg:
+            await msg.edit_text(
+                f"🏓 <b>Pong!</b>\nBot đang hoạt động bình thường.\nĐộ trễ: {ping_ms}ms",
+                parse_mode=constants.ParseMode.HTML,
+            )
 
 
 async def dm_tracker(update: Update, context: ContextTypes.DEFAULT_TYPE):
