@@ -34,6 +34,7 @@ from telegram.ext import (
 from telegram.request import HTTPXRequest
 
 import config
+from bot.web_sync import _make_custom_id
 from gki import build_gki_conversation, _del_msg_job, SUB_LEVELS
 from oki import build_oki_conversation
 from buildsave import build_buildsave_conversation
@@ -354,6 +355,51 @@ async def update_batch_message(batch_id: str, storage: HybridStorage, bot):
     except Exception as e:
         logger.error(f"update_batch_message error: {e}")
 
+async def update_rebuild_message(rebuild_msg_id: str, storage, bot):
+    """Cập nhật tin nhắn rebuild tiến trình khi có job rebuild_queued hoặc complete."""
+    try:
+        parts = rebuild_msg_id.split("-")
+        if len(parts) < 2:
+            return
+        msg_id_int = int(parts[0])
+        chat_id_int = int(parts[1])
+
+        all_jobs = await storage.get_jobs()
+        rjobs = [j for j in all_jobs if j.get("rebuild_msg_id") == rebuild_msg_id and j.get("type") == "buildsave"]
+        if not rjobs:
+            return
+
+        variant = rjobs[0].get("bs_variant", "")
+        total = len(rjobs)
+        done = sum(1 for j in rjobs if j.get("status") == "completed")
+        success = sum(1 for j in rjobs if j.get("status") == "completed" and j.get("conclusion") == "success")
+        
+        vers = [j.get("bs_full_ver", "") for j in rjobs]
+        if len(vers) > 4:
+            v_str = f"{','.join(vers[:3])}... (+{len(vers)-3})"
+        else:
+            v_str = ", ".join(vers)
+
+        if done == total:
+            text = (
+                f"\u2705 <b>Rebuild ho\u00e0n t\u1ea5t!</b>\n"
+                f"\ud83d\udd28 {variant} \u2014 {v_str}\n"
+                f"\u23f3 Ti\u1ebfn tr\u00ecnh: {done}/{total} ({success} th\u00e0nh c\u00f4ng)"
+            )
+        else:
+            text = (
+                f"\ud83d\udd04 <b>\u0110ang Rebuild... {variant}</b>\n"
+                f"\ud83d\udd28 {v_str}\n"
+                f"\u23f3 Ti\u1ebfn tr\u00ecnh: {done}/{total}"
+            )
+
+        await bot.edit_message_text(
+            text=text, chat_id=chat_id_int, message_id=msg_id_int,
+            parse_mode="HTML", disable_web_page_preview=True
+        )
+    except Exception as e:
+        logger.error(f"update_rebuild_message error: {e}")
+
 async def poller(app):
     gh: GitHubAPI = app.bot_data["gh"]
     storage: HybridStorage = app.bot_data["storage"]
@@ -403,11 +449,21 @@ async def poller(app):
             active_bs = await storage.get_active_buildsave_count()
             if active_bs == 0:
                 next_bs = await storage.get_next_queued_buildsave()
+
+                # --- Thử lấy job rebuild_queued nếu không có job queued thường ---
+                if not next_bs:
+                    all_j = await storage.get_jobs()
+                    rb_pending = [j for j in all_j if j.get("type") == "buildsave" and j.get("status") == "rebuild_queued"]
+                    if rb_pending:
+                        rb_pending.sort(key=lambda x: x.get("created_at", ""))
+                        next_bs = rb_pending[0]
+                        next_bs["_is_rebuild"] = True  # Flag nội bộ để bỏ check cancelled-sibling
+
                 if next_bs:
-                    # Kiểm tra batch đã bị huỷ chưa (có job nào trong batch bị cancelled chưa)
                     _batch_id = next_bs.get("batch_id")
                     _skip = False
-                    if _batch_id:
+                    # Chỉ kiểm tra cancelled-sibling cho job quţ queue mới, đặt biệt chunk
+                    if _batch_id and not next_bs.get("_is_rebuild"):
                         _siblings = await storage.get_jobs_by_batch(_batch_id)
                         if any(j.get("conclusion") == "cancelled" for j in _siblings):
                             # Batch đã huỷ → bỏ qua, đánh dấu cancelled luôn
@@ -429,6 +485,9 @@ async def poller(app):
                         if res.get("status") in (201, 202, 204):
                             await storage.update_job(next_bs["_id"], {
                                 "status": "dispatched",
+                                "run_id": None,
+                                "conclusion": None,
+                                "notified": False,
                                 "created_at": now_iso
                             })
                         else:
@@ -441,6 +500,8 @@ async def poller(app):
                         batch_id = next_bs.get("batch_id")
                         if batch_id:
                             await update_batch_message(batch_id, storage, app.bot)
+                        if next_bs.get("rebuild_msg_id"):
+                            await update_rebuild_message(next_bs["rebuild_msg_id"], storage, app.bot)
 
             
             # 2. Polling for unnotified jobs
@@ -491,6 +552,8 @@ async def poller(app):
                         })
                         if job.get("batch_id"):
                             await update_batch_message(job["batch_id"], storage, app.bot)
+                        if job.get("rebuild_msg_id"):
+                            await update_rebuild_message(job["rebuild_msg_id"], storage, app.bot)
                         continue
                     elif rn["status"] != 200:
                         continue
@@ -598,6 +661,8 @@ async def poller(app):
                             # Cập nhật message dạng batch nếu là buildsave
                             if job.get("type") == "buildsave" and job.get("batch_id"):
                                 await update_batch_message(job["batch_id"], storage, app.bot)
+                            if job.get("rebuild_msg_id"):
+                                await update_rebuild_message(job["rebuild_msg_id"], storage, app.bot)
 
                         except Exception as e:
                             logger.error("Send notification / Post completion failed: %s", e)
@@ -1509,6 +1574,50 @@ async def cmd_cancel_batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if update.message:
             context.job_queue.run_once(_del_msg_job, when=12, chat_id=update.message.chat_id, data=update.message.message_id)
 
+async def cmd_rebuild(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Rebuild (các) job thất bại/hủy theo Custom ID."""
+    await _safe_delete_user_msg(update, context)
+    user = update.effective_user
+    storage: HybridStorage = context.application.bot_data["storage"]
+    if not await is_admin(user.id, storage): return
+
+    text = update.message.text.strip()
+    parts = text.split()
+    if len(parts) < 2:
+        return await _send_msg(update, context, "❌ Sai cú pháp. Dùng `/rb <ID>` (VD: `/rb NEXT0100.2227.280326`).")
+    custom_id = parts[1].split(":")[0].strip()
+    
+    jobs = await storage.get_jobs()
+    target_batch_id = None
+    for j in jobs:
+        if j.get("type") == "buildsave" and j.get("batch_id"):
+            cid = _make_custom_id(j.get("bs_variant", "SukiSU"), j.get("inputs", {}), j.get("created_at", ""))
+            if cid == custom_id:
+                target_batch_id = j["batch_id"]
+                break
+                
+    if not target_batch_id:
+        return await _send_msg(update, context, f"❌ Không tìm thấy lô build khớp với ID <b>{custom_id}</b>.", delete_after=10)
+        
+    batch_jobs = [j for j in jobs if j.get("batch_id") == target_batch_id and j.get("status") == "completed" and j.get("conclusion") in ("failed", "cancelled", "stale")]
+    if not batch_jobs:
+        return await _send_msg(update, context, "✅ Không có dòng nào bị lỗi trong lô thẻ này để build lại.", delete_after=10)
+        
+    total = len(batch_jobs)
+    msg = await _send_msg(update, context, f"🔄 <b>Đang Rebuild... {custom_id}</b>\n⏳ Tiến trình: 0/{total}", delete_after=0)
+    rebuild_msg_id = f"{msg.message_id}-{msg.chat_id}"
+    
+    for j in batch_jobs:
+        await storage.update_job(j["_id"], {
+            "status": "rebuild_queued",
+            "rebuild_msg_id": rebuild_msg_id
+        })
+        
+    try:
+        from bot.web_sync import generate_web_json
+        await generate_web_json(storage)
+    except: pass
+
 async def cmd_cancel_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _safe_delete_user_msg(update, context)
     user = update.effective_user
@@ -1848,6 +1957,8 @@ def main():
     app.add_handler(CallbackQueryHandler(cb_save_run, pattern=r"^saverun:\d+$"))
     app.add_handler(MessageHandler(filters.Regex(r"^/cancel_\d+(?:@[\w_]+)?$"), cmd_cancel_run))
     app.add_handler(MessageHandler(filters.Regex(r"^/cancelbatch_[\w-]+(?:@[\w_]+)?$"), cmd_cancel_batch))
+    app.add_handler(CommandHandler("rb", cmd_rebuild))
+    app.add_handler(CommandHandler("rebuild", cmd_rebuild))
     app.add_handler(MessageHandler(filters.Regex(r"^/delete_\d+(?:@[\w_]+)?$"), cmd_delete_run))
 
     app.add_handler(CommandHandler("dl", cmd_dl))

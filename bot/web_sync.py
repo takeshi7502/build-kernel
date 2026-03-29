@@ -149,7 +149,7 @@ async def get_realtime_data(app):
                         batch_status = "failed"
                     else:
                         batch_status = "partial"  # Một số thành công, một số lỗi
-                elif any(bj.get("status") == "queued" for bj in bjobs):
+                elif any(bj.get("status") in ("queued", "rebuild_queued") for bj in bjobs):
                     batch_status = "building"  # Vẫn còn đang chờ
                 else:
                     batch_status = "building"
@@ -174,6 +174,11 @@ async def get_realtime_data(app):
                             bj_st = "failed"
                     elif bj_status_raw in ("dispatched", "in_progress", "running"):
                         bj_st = "building"
+                    elif bj_status_raw == "rebuild_queued":
+                        if bj_conclusion in ("cancelled", "stale"):
+                            bj_st = "cancelled"
+                        else:
+                            bj_st = "failed"
                     else:
                         bj_st = "queued"
                         
