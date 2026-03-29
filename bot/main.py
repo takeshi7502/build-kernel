@@ -481,7 +481,18 @@ async def poller(app):
                         continue
 
                     rn = await gh.get_run(repo, int(run_id))
-                    if rn["status"] != 200:
+                    
+                    if rn["status"] == 404:
+                        logger.warning("Run %s not found (deleted?), marking cancelled", run_id)
+                        await storage.update_job(job["_id"], {
+                            "status": "completed",
+                            "conclusion": "cancelled",
+                            "notified": True
+                        })
+                        if job.get("batch_id"):
+                            await update_batch_message(job["batch_id"], storage, app.bot)
+                        continue
+                    elif rn["status"] != 200:
                         continue
 
                     status = rn["json"].get("status")
@@ -850,7 +861,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "<b>/st</b> — Xem build đang chạy\n"
             "<b>/list</b> — Lịch sử build thành công\n"
             "<b>/chat</b> <code>&lt;nội dung&gt;</code> — Broadcast cho all user\n"
-            "<b>/fixqueue</b> — Gỡ kẹt hàng đợi Bot\n"
+
             "</blockquote>"
         )
 
@@ -1517,7 +1528,7 @@ async def cmd_cancel_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await _send_msg(update, context, f"⏳ Đang gửi lệnh hủy Run #{run_id} lên GitHub...")
     res = await gh.cancel_run(config.GKI_REPO, run_id)
     
-    if res["status"] in (202, 204):
+    if res["status"] in (202, 204, 404, 409):
         job = await storage.get_job_by_run_id(run_id)
         if job:
             await storage.update_job(job["_id"], {"status": "completed", "conclusion": "cancelled", "notified": True})
@@ -1543,58 +1554,6 @@ async def cmd_cancel_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if update.message:
             context.job_queue.run_once(_del_msg_job, when=10, chat_id=update.message.chat_id, data=update.message.message_id)
 
-async def cmd_fix_queue(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Force-reset stuck/ghost buildsave jobs so queue unblocks."""
-    await _safe_delete_user_msg(update, context)
-    user = update.effective_user
-    storage: HybridStorage = context.application.bot_data["storage"]
-    if not await is_admin(user.id, storage):
-        return
-
-    jobs = await storage.get_jobs()
-    now = datetime.now(timezone.utc)
-    fixed = 0
-    for j in jobs:
-        if j.get("type") != "buildsave":
-            continue
-        status = j.get("status", "")
-        if status not in ("dispatched", "in_progress", "running", "queued"):
-            continue
-
-        # Ghost: dispatched/running nhưng không có run_id, hoặc đã qú 30 phút
-        run_id = j.get("run_id")
-        is_ghost = False
-        try:
-            cat = datetime.fromisoformat(j.get("created_at", "").replace("Z", "+00:00"))
-            age_min = (now - cat).total_seconds() / 60
-            if status == "queued" and age_min > 30:
-                is_ghost = True
-            elif status in ("dispatched", "in_progress", "running") and not run_id and age_min > 5:
-                is_ghost = True
-            elif status in ("dispatched", "in_progress", "running") and age_min > 90:
-                is_ghost = True
-        except Exception:
-            is_ghost = True
-
-        if is_ghost:
-            await storage.update_job(j["_id"], {
-                "status": "completed",
-                "conclusion": "cancelled",
-                "notified": True,
-            })
-            bid = j.get("batch_id")
-            if bid:
-                await update_batch_message(bid, storage, context.application.bot)
-            fixed += 1
-
-    msg = await context.application.bot.send_message(
-        chat_id=update.effective_chat.id,
-        text=f"✅ Đã xóa <b>{fixed}</b> ghost/stuck job khỏi queue. Hàng đợi đã được giải phóng."
-             if fixed else "✅ Không có job bị kẹt. Queue đang hoạt động bình thường.",
-        parse_mode="HTML"
-    )
-    if context.job_queue:
-        context.job_queue.run_once(_del_msg_job, when=15, chat_id=msg.chat_id, data=msg.message_id)
 
 async def cmd_delete_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _safe_delete_user_msg(update, context)
@@ -1890,7 +1849,7 @@ def main():
     app.add_handler(MessageHandler(filters.Regex(r"^/cancel_\d+(?:@[\w_]+)?$"), cmd_cancel_run))
     app.add_handler(MessageHandler(filters.Regex(r"^/cancelbatch_[\w-]+(?:@[\w_]+)?$"), cmd_cancel_batch))
     app.add_handler(MessageHandler(filters.Regex(r"^/delete_\d+(?:@[\w_]+)?$"), cmd_delete_run))
-    app.add_handler(CommandHandler("fixqueue", cmd_fix_queue))
+
     app.add_handler(CommandHandler("dl", cmd_dl))
     app.add_handler(CallbackQueryHandler(cb_dl_variant, pattern=r"^dl_var:"))
 
