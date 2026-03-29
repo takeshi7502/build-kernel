@@ -62,10 +62,20 @@ class HybridStorage:
     def _can_pull(self) -> bool:
         return self._resolved_sync_mode() in {"push", "pull"}
 
-    async def _push_cloud(self, data: Dict[str, Any]):
+    async def _push_cloud(self, data: Dict[str, Any], cloud_job_count: int = 0):
         if self.collection is None:
             return
         try:
+            local_job_count = len(data.get("jobs", []))
+            # Safety guard: never overwrite cloud with fewer jobs than cloud already has.
+            # This prevents an empty/stale local from wiping cloud data.
+            if cloud_job_count > 0 and local_job_count < cloud_job_count:
+                logger.warning(
+                    "Push blocked: local has %d jobs but cloud has %d. "
+                    "Refusing to overwrite cloud with fewer data.",
+                    local_job_count, cloud_job_count
+                )
+                return
             payload = {"_id": "master_data", **data}
             await self.collection.replace_one(
                 {"_id": "master_data"},
@@ -128,7 +138,10 @@ class HybridStorage:
             self._synced = True
             
             if self._can_push():
-                await self._push_cloud(local_data)
+                # Always push the MERGED data (local_data was mutated above),
+                # and pass cloud_job_count as a safety guard to prevent overwrites.
+                cloud_job_count = len(cloud_doc.get("jobs", [])) if cloud_doc else 0
+                await self._push_cloud(local_data, cloud_job_count=cloud_job_count)
         except Exception as e:
             logger.error("MongoDB Sync Error: %s", e)
 
