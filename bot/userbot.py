@@ -1095,6 +1095,7 @@ async def help_cmd(event):
         "📌 <b>Ai cũng dùng được:</b>\n"
         "<blockquote>"
         "<b>.gki</b> <code>&lt;key&gt;</code> — Build GKI Kernel (cần key hợp lệ)\n"
+        "<b>.dl</b> <code>&lt;version&gt;</code> — Lấy link tải Kernel\n"
         "<b>.ping</b> — Kiểm tra userbot hoạt động\n"
         "<b>.help</b> — Hiện hướng dẫn này\n"
         "</blockquote>"
@@ -1321,6 +1322,127 @@ async def _do_delete_run(event, run_id: int):
         await _reply_temp(event, f"✅ Run #{run_id} không tồn tại trên GitHub. Đã xoá khỏi data.", 10)
     else:
         await _reply_temp(event, f"❌ Lỗi xoá: HTTP {res.get('status')}", 10)
+
+
+@client.on(events.NewMessage(pattern=r"^\.dl(?:\s+(\S+))?$"))
+async def dl_cmd(event):
+    if not _is_allowed_chat(event.chat_id):
+        return
+    await _safe_delete(event)
+
+    version = event.pattern_match.group(1)
+    if not version:
+        await _reply_temp(event, "Sử dụng: .dl <version>\nVí dụ: .dl 5.10.149", 10)
+        return
+
+    all_jobs = await storage.get_jobs()
+    variants_map = {}
+    for job in sorted(all_jobs, key=lambda x: x.get("created_at", "")):
+        if job.get("type") == "buildsave" and job.get("status") == "completed" and job.get("conclusion") == "success":
+            if job.get("bs_full_ver") == version:
+                var = job.get("bs_variant")
+                if var:
+                    variants_map[var] = job
+
+    if not variants_map:
+        await _reply_temp(event, f"Chưa có bản build nào cho version {version}", 10)
+        return
+
+    async def _build_card(target_job, variant):
+        run_id = target_job.get("run_id")
+        if not run_id:
+            return None, "❌ Không tìm thấy run_id."
+
+        resp = await gh.list_artifacts_for_run(GKI_REPO, run_id)
+        if resp.get("status") != 200:
+            return None, "❌ Lỗi lấy artifact hoặc bản build đã hết hạn."
+
+        artifacts = resp.get("json", {}).get("artifacts", [])
+        if not artifacts:
+            return None, "❌ Không có file trong bản build này."
+
+        selected_artifact = None
+        selected_size = 0
+        for a in artifacts:
+            name = a.get("name", "")
+            if name.startswith(variant) and "Rejects" not in name and "Manager" not in name and "susfs-release" not in name and "AnyKernel" not in name:
+                selected_artifact = name
+                selected_size = a.get("size_in_bytes", 0)
+                break
+        if not selected_artifact:
+            selected_artifact = artifacts[0]["name"]
+            selected_size = artifacts[0].get("size_in_bytes", 0)
+
+        run_url  = f"https://nightly.link/{GITHUB_OWNER}/{GKI_REPO}/actions/runs/{run_id}"
+        dl_url   = f"https://nightly.link/{GITHUB_OWNER}/{GKI_REPO}/actions/runs/{run_id}/{selected_artifact}.zip"
+        web_url  = "https://kernel.takeshi.dev/"
+
+        size_str = f"{selected_size / (1024*1024):.1f} MB" if selected_size else "N/A"
+
+        inp = target_job.get("inputs", {})
+        zram  = inp.get("use_zram",      target_job.get("use_zram",  True))
+        bbg   = inp.get("use_bbg",       target_job.get("use_bbg",   True))
+        susfs = not inp.get("cancel_susfs", target_job.get("cancel_susfs", False))
+        kpm   = inp.get("use_kpm",       target_job.get("use_kpm",   False))
+
+        cfg_parts = []
+        if zram:  cfg_parts.append("ZRAM")
+        if bbg:   cfg_parts.append("BBG")
+        if susfs: cfg_parts.append("SUSFS")
+        if kpm:   cfg_parts.append("KPM")
+        cfg_str = " + ".join(cfg_parts) if cfg_parts else "Mặc định"
+
+        filename = f"{selected_artifact}.zip"
+        text = (
+            f"<b><a href='{run_url}'>{filename}</a></b>\n"
+            f"<b>Size:</b> {size_str}\n"
+            f"<b>Cấu hình:</b> {cfg_str}\n"
+            f"<blockquote><b>Link: <a href='{web_url}'>Website</a> | <a href='{dl_url}'>Download</a></b></blockquote>"
+        )
+        return text, None
+
+    variants_list = sorted(variants_map.keys())
+
+    if len(variants_list) == 1:
+        # Chỉ 1 variant — gửi card ngay
+        text, err = await _build_card(variants_map[variants_list[0]], variants_list[0])
+        if err:
+            await _reply_temp(event, err, 10)
+        else:
+            await _reply_temp(event, text, 60, html=True)
+    else:
+        # Nhiều variant — hỏi chọn
+        lines = [f"📦 Chọn bản KernelSU cho <b>{version}</b>:\n"]
+        for i, v in enumerate(variants_list, 1):
+            lines.append(f"  <b>{i}.</b> {v}")
+        lines.append("\nGõ số để chọn, 'x' để hủy.")
+        prompt_msg = await _reply(event, "\n".join(lines), html=True)
+
+        try:
+            reply = await client.wait_for_event(
+                events.NewMessage(chats=event.chat_id, from_users=event.sender_id),
+                timeout=30
+            )
+            await _safe_delete(prompt_msg)
+            txt = reply.text.strip().lower()
+            if txt == "x":
+                await _reply_temp(reply, "❌ Đã hủy.", 5)
+                return
+            idx = int(txt)
+            if not (1 <= idx <= len(variants_list)):
+                raise ValueError
+            chosen = variants_list[idx - 1]
+            await _safe_delete(reply)
+            text, err = await _build_card(variants_map[chosen], chosen)
+            if err:
+                await _reply_temp(event, err, 10)
+            else:
+                await _reply_temp(event, text, 60, html=True)
+        except asyncio.TimeoutError:
+            await _safe_delete(prompt_msg)
+            await _reply_temp(event, "⏱ Hết giờ chờ chọn.", 5)
+        except (ValueError, TypeError):
+            await _reply_temp(event, "❌ Lựa chọn không hợp lệ.", 5)
 
 
 @client.on(events.NewMessage(pattern=r"^\.cancel(?:\s+(\d+))?$"))
