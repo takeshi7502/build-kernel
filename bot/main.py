@@ -358,11 +358,13 @@ async def update_batch_message(batch_id: str, storage: HybridStorage, bot):
 async def update_rebuild_message(rebuild_msg_id: str, storage, bot):
     """Cập nhật tin nhắn rebuild tiến trình khi có job rebuild_queued hoặc complete."""
     try:
-        parts = rebuild_msg_id.split("-")
+        # Format: "{msg_id}|{chat_id}|{custom_id}" (dùng | thành separator vì chat_id nhóm âm có dấu -)
+        parts = rebuild_msg_id.split("|")
         if len(parts) < 2:
             return
         msg_id_int = int(parts[0])
         chat_id_int = int(parts[1])
+        custom_id = parts[2] if len(parts) > 2 else ""
 
         all_jobs = await storage.get_jobs()
         rjobs = [j for j in all_jobs if j.get("rebuild_msg_id") == rebuild_msg_id and j.get("type") == "buildsave"]
@@ -374,23 +376,31 @@ async def update_rebuild_message(rebuild_msg_id: str, storage, bot):
         done = sum(1 for j in rjobs if j.get("status") == "completed")
         success = sum(1 for j in rjobs if j.get("status") == "completed" and j.get("conclusion") == "success")
         
-        vers = [j.get("bs_full_ver", "") for j in rjobs]
-        if len(vers) > 4:
-            v_str = f"{','.join(vers[:3])}... (+{len(vers)-3})"
+        # Lấy run_id của job đang chạy để taoj link Github động
+        active_run_id = None
+        for rj in rjobs:
+            if rj.get("status") in ("dispatched", "in_progress", "running") and rj.get("run_id"):
+                active_run_id = rj.get("run_id")
+                break
+        repo_name = rjobs[0].get("repo", config.GKI_REPO) if rjobs else config.GKI_REPO
+        if active_run_id:
+            github_url = f"https://github.com/{config.GITHUB_OWNER}/{repo_name}/actions/runs/{active_run_id}"
         else:
-            v_str = ", ".join(vers)
+            github_url = f"https://github.com/{config.GITHUB_OWNER}/{repo_name}/actions"
+
+        link_line = f"<blockquote>Xem: <a href='{github_url}'><b>Github</b></a> | <a href='https://kernel.takeshi.dev/'><b>Dashboard</b></a></blockquote>"
 
         if done == total:
             text = (
-                f"\u2705 <b>Rebuild ho\u00e0n t\u1ea5t!</b>\n"
-                f"\ud83d\udd28 {variant} \u2014 {v_str}\n"
-                f"\u23f3 Ti\u1ebfn tr\u00ecnh: {done}/{total} ({success} th\u00e0nh c\u00f4ng)"
+                f"\u2705 <b>Rebuild ho\u00e0n t\u1ea5t! {custom_id}</b>\n"
+                f"<b>\u23f3 Ti\u1ebfn tr\u00ecnh: {done}/{total} ({success} th\u00e0nh c\u00f4ng)</b>\n"
+                + link_line
             )
         else:
             text = (
-                f"\ud83d\udd04 <b>\u0110ang Rebuild... {variant}</b>\n"
-                f"\ud83d\udd28 {v_str}\n"
-                f"\u23f3 Ti\u1ebfn tr\u00ecnh: {done}/{total}"
+                f"\ud83d\udd04 <b>\u0110ang Rebuild... {custom_id}</b>\n"
+                f"<b>\u23f3 Ti\u1ebfn tr\u00ecnh: {done}/{total}</b>\n"
+                + link_line
             )
 
         await bot.edit_message_text(
@@ -1609,10 +1619,10 @@ async def cmd_rebuild(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await context.bot.send_message(
         chat_id=chat_id,
         message_thread_id=thread_id,
-        text=f"🔄 <b>Đang Rebuild... {custom_id}</b>\n⏳ Tiến trình: 0/{total}",
+        text=f"🔄 <b>Đang Rebuild... {custom_id}</b>\n<b>⏳ Tiến trình: 0/{total}</b>\n<blockquote>Xem: <a href='https://github.com/{config.GITHUB_OWNER}/{config.GKI_REPO}/actions'><b>Github</b></a> | <a href='https://kernel.takeshi.dev/'><b>Dashboard</b></a></blockquote>",
         parse_mode="HTML"
     )
-    rebuild_msg_id = f"{msg.message_id}-{msg.chat_id}"
+    rebuild_msg_id = f"{msg.message_id}|{msg.chat_id}|{custom_id}"
     
     for j in batch_jobs:
         await storage.update_job(j["_id"], {
@@ -1621,7 +1631,7 @@ async def cmd_rebuild(update: Update, context: ContextTypes.DEFAULT_TYPE):
         })
         
     try:
-        from bot.web_sync import generate_web_json
+        from web_sync import generate_web_json
         await generate_web_json(storage)
     except: pass
 
