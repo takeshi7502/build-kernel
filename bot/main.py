@@ -5,6 +5,17 @@ os.environ.pop("HTTP_PROXY", None)
 os.environ.pop("ALL_PROXY", None)
 os.environ["AIOHTTP_NO_EXTENSIONS"] = "1"
 
+import socket
+
+# Force IPv4 globally to prevent 10-second request timeouts on VPS with broken IPv6
+old_getaddrinfo = socket.getaddrinfo
+def new_getaddrinfo(*args, **kwargs):
+    responses = old_getaddrinfo(*args, **kwargs)
+    # Filter to only IPv4 (AF_INET) to prevent timeout fallbacks
+    ipv4_responses = [r for r in responses if r[0] == socket.AF_INET]
+    return ipv4_responses if ipv4_responses else responses
+socket.getaddrinfo = new_getaddrinfo
+
 import aiohttp
 import asyncio
 import json
