@@ -833,6 +833,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<blockquote>"
         "<b>/gki</b> <code>&lt;key&gt;</code> — Build GKI Kernel\n"
         "<b>/oki</b> <code>&lt;key&gt;</code> — Build OKI Kernel\n"
+        "<b>/dl</b> <code>&lt;version&gt;</code> — Lấy link tải Kernel\n"
         "<b>/ping</b> — Kiểm tra bot hoạt động\n"
         "<b>/help</b> — Hiện hướng dẫn này\n"
         "</blockquote>"
@@ -842,12 +843,14 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += (
             "\n🔒 <b>Admin:</b>\n"
             "<blockquote>"
+            "<b>/build</b> — Build Kernel lưu trữ trên Web\n"
             "<b>/key</b> <code>&lt;code&gt; &lt;uses&gt;</code> — Tạo/sửa key\n"
             "<b>/keyvip</b> <code>&lt;code&gt; &lt;uses&gt;</code> — Tạo VIP key\n"
             "<b>/keys</b> — Xem danh sách key\n"
             "<b>/st</b> — Xem build đang chạy\n"
             "<b>/list</b> — Lịch sử build thành công\n"
             "<b>/chat</b> <code>&lt;nội dung&gt;</code> — Broadcast cho all user\n"
+            "<b>/fixqueue</b> — Gỡ kẹt hàng đợi Bot\n"
             "</blockquote>"
         )
 
@@ -856,10 +859,14 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<a href='https://kernel.takeshi.dev/'>kernel.takeshi.dev</a>"
     )
 
-    await _send_msg(update, context, text,
+    msg = await _send_msg(update, context, text,
         parse_mode=constants.ParseMode.HTML,
         disable_web_page_preview=True
     )
+    if context.job_queue:
+        context.job_queue.run_once(_del_msg_job, when=60, chat_id=update.effective_chat.id, data=msg.message_id)
+        if update.message:
+            context.job_queue.run_once(_del_msg_job, when=60, chat_id=update.effective_chat.id, data=update.message.message_id)
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE, message_to_edit=None, cmd_msg_id=0):
     if not message_to_edit:
