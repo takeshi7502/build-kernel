@@ -1584,7 +1584,7 @@ async def cmd_rebuild(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     parts = text.split()
     if len(parts) < 2:
-        return await _send_msg(update, context, "❌ Sai cú pháp. Dùng `/rb <ID>` (VD: `/rb NEXT0100.2227.280326`).")
+        return await _send_msg(update, context, "❌ Sai cú pháp. Dùng <code>/rb ID</code> (VD: <code>/rb NEXT0100.2227.280326</code>).", parse_mode="HTML")
     custom_id = parts[1].split(":")[0].strip()
     
     jobs = await storage.get_jobs()
@@ -1597,14 +1597,21 @@ async def cmd_rebuild(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 break
                 
     if not target_batch_id:
-        return await _send_msg(update, context, f"❌ Không tìm thấy lô build khớp với ID <b>{custom_id}</b>.", delete_after=10)
+        return await _send_msg(update, context, f"❌ Không tìm thấy lô build khớp với ID <b>{custom_id}</b>.", parse_mode="HTML")
         
     batch_jobs = [j for j in jobs if j.get("batch_id") == target_batch_id and j.get("status") == "completed" and j.get("conclusion") in ("failed", "cancelled", "stale")]
     if not batch_jobs:
-        return await _send_msg(update, context, "✅ Không có dòng nào bị lỗi trong lô thẻ này để build lại.", delete_after=10)
+        return await _send_msg(update, context, "✅ Không có dòng nào bị lỗi trong lô thẻ này để build lại.", parse_mode="HTML")
         
     total = len(batch_jobs)
-    msg = await _send_msg(update, context, f"🔄 <b>Đang Rebuild... {custom_id}</b>\n⏳ Tiến trình: 0/{total}", delete_after=0)
+    chat_id = update.effective_chat.id
+    thread_id = update.effective_message.message_thread_id if (update.effective_message and update.effective_message.is_topic_message) else None
+    msg = await context.bot.send_message(
+        chat_id=chat_id,
+        message_thread_id=thread_id,
+        text=f"🔄 <b>Đang Rebuild... {custom_id}</b>\n⏳ Tiến trình: 0/{total}",
+        parse_mode="HTML"
+    )
     rebuild_msg_id = f"{msg.message_id}-{msg.chat_id}"
     
     for j in batch_jobs:
