@@ -154,7 +154,10 @@ function createWebBuildCard(build) {
                     <h3 style="margin:0 0 4px 0;font-size:1.1rem;font-weight:600;color:var(--text-primary);">${build.title || 'Unknown'}</h3>
                     <div style="font-size:0.83rem;font-weight:500;color:var(--text-muted);">${build.sub_title || ''}</div>
                 </div>
-                <div style="flex-shrink:0;">${badge}</div>
+                <div style="flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;">
+                    ${badge}
+                    ${build.duration ? `<span style="font-size:0.75rem;color:var(--text-muted);margin-top:5px;font-weight:500;">⏱ ${build.duration}</span>` : ''}
+                </div>
             </div>
 
             <div style="color:var(--text-muted);font-size:0.82rem;display:flex;align-items:center;margin-bottom:14px;">
