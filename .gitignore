@@ -39,3 +39,9 @@ workflows_patch/
 node_modules/
 
 patch_*.py
+
+# Bỏ theo dõi toàn bộ Data
+data.json
+bot/data.json
+web/data/**/*.json
+
