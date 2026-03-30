@@ -1789,12 +1789,23 @@ async def _update_buildsave_download_link(job: dict, run_id, app):
                 if os.path.exists("web/data"): shutil.copytree("web/data", "temp_backup/web_data")
                 shutil.make_archive("auto_backup", "zip", "temp_backup")
                 shutil.rmtree("temp_backup")
+                
+                # Cố gắng xoá file backup cũ
+                old_msg_id = app.bot_data.get("last_backup_msg_id")
+                if old_msg_id:
+                    try:
+                        await app.bot.delete_message(chat_id=config.OWNER_ID, message_id=old_msg_id)
+                    except Exception:
+                        pass
+
                 with open("auto_backup.zip", "rb") as bf:
-                    await app.bot.send_document(
+                    sent_msg = await app.bot.send_document(
                         chat_id=config.OWNER_ID, document=bf,
                         caption=f"📦 **AUTO-BACKUP DATA**\n*(Tạo do bản build {variant} | {full_ver} hoàn tất)*",
                         parse_mode="HTML"
                     )
+                    # Lưu lại ID để lần sau xoá
+                    app.bot_data["last_backup_msg_id"] = sent_msg.message_id
                 os.remove("auto_backup.zip")
             except Exception as e:
                 logger.error("Auto backup send failed: %s", e)
