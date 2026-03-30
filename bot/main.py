@@ -1794,7 +1794,7 @@ async def _update_buildsave_download_link(job: dict, run_id, app):
     try:
         async def _delayed_backup():
             import shutil, os, asyncio
-            await asyncio.sleep(8)  # Debounce: Chờ vài giây để gom các job xong cùng lúc
+            await asyncio.sleep(30)  # Debounce 30s: đảm bảo ALL JSON đã ghi xong trước khi backup
             if app.bot_data.get("_auto_backup_running"): return
             app.bot_data["_auto_backup_running"] = True
             try:
