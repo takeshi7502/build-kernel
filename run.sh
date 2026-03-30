@@ -4,7 +4,7 @@ echo "================================================="
 echo "       GKI BOT - STARTUP SCRIPT VỚI PM2          "
 echo "================================================="
 
-# 1. Kiểm tra xem file .env có tồn tại không
+# ─── BƯỚC 1: Kiểm tra file .env ───────────────────────────────────────────────
 if [ ! -f ".env" ]; then
     echo "❌ LỖI NGHIÊM TRỌNG: Không tìm thấy file '.env'!"
     echo "   Bạn chưa cấu hình token cho Bot."
@@ -14,7 +14,24 @@ if [ ! -f ".env" ]; then
     exit 1
 fi
 
-# 2. Cài đặt pm2 nếu chưa có
+# ─── BƯỚC 2: Tạo cấu trúc thư mục Data nếu chưa có ───────────────────────────
+echo "📁 Kiểm tra cấu trúc thư mục dữ liệu..."
+for dir in web/data/android12 web/data/android13 web/data/android14 web/data/android15 web/data/android16; do
+    if [ ! -d "$dir" ]; then
+        mkdir -p "$dir"
+        echo "   >> Đã tạo thư mục: $dir"
+    fi
+done
+
+# Tạo file JSON rỗng nếu chưa tồn tại (tránh crash khi bot đọc lần đầu)
+for f in web/data/android12/5.10.json web/data/android13/5.15.json web/data/android14/6.1.json web/data/android15/6.6.json web/data/android16/6.12.json web/data/announcement.json; do
+    if [ ! -f "$f" ]; then
+        echo '{"entries":[]}' > "$f"
+        echo "   >> Đã tạo file mẫu: $f"
+    fi
+done
+
+# ─── BƯỚC 3: Cài đặt PM2 nếu chưa có ────────────────────────────────────────
 if ! command -v pm2 &> /dev/null; then
     echo "⚙️  Phát hiện VPS chưa cài đặt PM2. Đang tự động cài PM2..."
     sudo apt update && sudo apt install -y nodejs npm
@@ -22,7 +39,7 @@ if ! command -v pm2 &> /dev/null; then
     echo "✅ Đã cài đặt xong PM2!"
 fi
 
-# 3. Cài đặt thư viện Python qua Virtual Environment (venv)
+# ─── BƯỚC 4: Thiết lập Python Virtual Environment ────────────────────────────
 echo "📦 Đang thiết lập môi trường Python..."
 if [ ! -d "venv" ]; then
     echo "   >> Đang tạo thư mục venv..."
@@ -31,27 +48,26 @@ if [ ! -d "venv" ]; then
 fi
 
 echo "   >> Đang nạp các thư viện từ requirements.txt..."
-./venv/bin/pip install -r requirements.txt
+./venv/bin/pip install -q -r requirements.txt
+echo "   ✅ Thư viện đã sẵn sàng!"
 
-# 3. Cho người dùng chọn chế độ
+# ─── BƯỚC 5: Chọn chế độ chạy ────────────────────────────────────────────────
 echo ""
 echo "Vui lòng chọn chế độ chạy Bot:"
-echo "  [1] Chỉ chạy Bot Telegram (main.py) - MẶC ĐỊNH"
-echo "  [2] Chỉ chạy Userbot (userbot.py)"
-echo "  [3] Chạy CẢ HAI (Bot và Userbot)"
+echo "  [1] Chỉ chạy Bot Telegram (main.py)           — Tiêu chuẩn"
+echo "  [2] Chỉ chạy Userbot (userbot.py)             — Tính năng cá nhân"
+echo "  [3] Chạy CẢ HAI (Bot + Userbot)               — Đầy đủ tính năng ✨"
 read -p "Nhập lựa chọn của bạn (1/2/3) [Mặc định là 1]: " choice
 
-# Nếu người dùng bấm Enter (bỏ trống), gán choice = 1
 choice=${choice:-1}
 
 echo ""
 echo "🚀 Đang khởi động tiến trình theo lựa chọn [$choice]..."
 
-# Xoá các tiến trình cũ (nếu có) để tránh chạy đè/trùng lặp
+# Dọn dẹp tiến trình cũ (nếu có)
 pm2 stop gki-bot gki-userbot > /dev/null 2>&1
 pm2 delete gki-bot gki-userbot > /dev/null 2>&1
 
-# 5. Chạy bot bằng pm2 với interpreter là Python trong venv
 INTERPRETER="./venv/bin/python"
 
 if [ "$choice" == "1" ]; then
@@ -66,10 +82,10 @@ else
     exit 1
 fi
 
-# Lưu cấu hình PM2
+# Lưu cấu hình PM2 và thiết lập khởi động cùng hệ thống
 pm2 save > /dev/null 2>&1
 
-# 5. Hiển thị kết quả và lệnh quản lý
+# ─── BƯỚC 6: Hiển thị kết quả ─────────────────────────────────────────────────
 echo ""
 echo "================================================="
 echo "✅ HOÀN TẤT KHỞI ĐỘNG!"
@@ -77,25 +93,31 @@ echo "Bảng trạng thái các Bot đang chạy ngầm trên VPS:"
 pm2 status
 
 echo ""
-echo "📌 CÁC LỆNH QUẢN LÝ PM2 BẠN CẦN BIẾT:"
-echo " - Xem log (tin nhắn/lỗi):   pm2 logs"
-echo " - Xem log riêng 1 bot:      pm2 logs gki-bot"
-echo " - Dừng một bot:             pm2 stop gki-bot"
-echo " - Khởi động lại bot:        pm2 restart gki-bot"
-echo " - Tắt hẳn và xoá bot:       pm2 delete gki-bot"
-echo " - Theo dõi tài nguyên:      pm2 monit"
+echo "📌 CÁC LỆNH PM2 CẦN BIẾT:"
+echo "   pm2 list                  — Xem bảng điều khiển"
+echo "   pm2 log gki-bot           — Xem log thời gian thực"
+echo "   pm2 restart gki-bot       — Khởi động lại bot"
+echo "   pm2 restart all           — Khởi động lại tất cả"
+echo "   pm2 flush                 — Xoá trắng log cũ"
+echo "   pm2 startup               — Tự bật bot khi VPS reboot"
 echo ""
+echo "🔄 CẬP NHẬT CODE MỚI NHẤT:"
+echo "   git fetch --all && git reset --hard origin/main && pm2 restart all"
 echo ""
-echo "🔹 (Mẹo: Nếu muốn VPS tự bật bot khi bị khởi động lại (Reboot),"
-echo "    hãy gõ lệnh: pm2 startup)"
+echo "💾 BACKUP & KHÔI PHỤC DATA:"
+echo "   Gõ .backup (trong Telegram) để tải file zip backup về máy"
+echo "   Reply file zip đó rồi gõ /data để khôi phục data lên VPS mới"
 echo "================================================="
 
 WEB_PORT=$(grep "WEB_PORT" .env | cut -d '=' -f2)
 WEB_PORT=${WEB_PORT:-5000}
 if command -v curl &> /dev/null; then
-    VPS_IP=$(curl -4 -s ifconfig.me)
-    echo "================================================="
-    echo "🌐 BẢNG ĐIỀU KHIỂN WEB (REAL-TIME)"
-    echo "Truy cập ngay vào: http://${VPS_IP}:${WEB_PORT}"
-    echo "================================================="
+    VPS_IP=$(curl -4 -s --max-time 3 ifconfig.me 2>/dev/null)
+    if [ -n "$VPS_IP" ]; then
+        echo ""
+        echo "================================================="
+        echo "🌐 BẢNG ĐIỀU KHIỂN WEB (REAL-TIME)"
+        echo "Truy cập ngay vào: http://${VPS_IP}:${WEB_PORT}"
+        echo "================================================="
+    fi
 fi
