@@ -1080,8 +1080,39 @@ async def ping_cmd(event):
         return
     await _safe_delete(event)
     await _reply_temp(event, "🏓 Pong! Userbot đang hoạt động.", 10)
+import shutil
+import os
 
-
+@client.on(events.NewMessage(pattern=r"^\.backup$"))
+async def backup_cmd(event):
+    if not _is_admin(event):
+        return
+    await _safe_delete(event)
+    status_msg = await _reply(event, "⏳ Đang nén dữ liệu Data...")
+    try:
+        if os.path.exists("backup.zip"):
+            os.remove("backup.zip")
+        
+        # Tạo thư mục tạm để nén
+        os.makedirs("temp_backup", exist_ok=True)
+        if os.path.exists("data.json"):
+            shutil.copy("data.json", "temp_backup/data.json")
+        if os.path.exists("web/data"):
+            shutil.copytree("web/data", "temp_backup/web_data")
+            
+        shutil.make_archive("backup", 'zip', "temp_backup")
+        shutil.rmtree("temp_backup")
+        
+        await client.send_file(
+            entity=event.chat_id,
+            file="backup.zip",
+            caption="📦 **GKI Database Backup**\nChứa <code>data.json</code> và thư mục <code>web/data</code>.",
+            parse_mode="html"
+        )
+        await status_msg.delete()
+        os.remove("backup.zip")
+    except Exception as e:
+        await status_msg.edit(f"❌ Lỗi khi nén backup: {e}")
 
 @client.on(events.NewMessage(pattern=r"^\.help$"))
 async def help_cmd(event):
@@ -1112,6 +1143,7 @@ async def help_cmd(event):
             "<b>.keys</b> — Xem danh sách key\n"
             "<b>.auth</b> — Cấp quyền hoạt động.\n"
             "<b>.ua</b> — Xóa quyền hoạt động.\n"
+            "<b>.backup</b> — Sao lưu Data gửi qua Telegram.\n"
             "</blockquote>"
         )
         
