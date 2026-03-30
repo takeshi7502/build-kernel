@@ -12,7 +12,8 @@
       "kernel": "5.15.74",
       "downloads": {
         "ReSukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23700631129",
-        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23684325108"
+        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23684325108",
+        "MKSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23751036834"
       }
     },
     {
@@ -20,7 +21,8 @@
       "kernel": "5.15.78",
       "downloads": {
         "ReSukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23700788626",
-        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23684495571"
+        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23684495571",
+        "MKSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23751553609"
       }
     },
     {
@@ -28,7 +30,8 @@
       "kernel": "5.15.94",
       "downloads": {
         "ReSukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23700962514",
-        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23684667078"
+        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23684667078",
+        "MKSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23752139792"
       }
     },
     {
@@ -36,7 +39,8 @@
       "kernel": "5.15.104",
       "downloads": {
         "ReSukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23701129888",
-        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23684842570"
+        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23684842570",
+        "MKSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23752636234"
       }
     },
     {
@@ -44,7 +48,8 @@
       "kernel": "5.15.119",
       "downloads": {
         "ReSukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23701321120",
-        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23685248189"
+        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23685248189",
+        "MKSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23753134160"
       }
     },
     {
@@ -52,7 +57,8 @@
       "kernel": "5.15.123",
       "downloads": {
         "ReSukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23701467215",
-        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23685420447"
+        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23685420447",
+        "MKSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23753619969"
       }
     },
     {
@@ -60,7 +66,8 @@
       "kernel": "5.15.137",
       "downloads": {
         "ReSukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23701617065",
-        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23685584918"
+        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23685584918",
+        "MKSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23754084018"
       }
     },
     {
@@ -68,7 +75,8 @@
       "kernel": "5.15.144",
       "downloads": {
         "ReSukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23701763536",
-        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23685735369"
+        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23685735369",
+        "MKSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23754555570"
       }
     },
     {
@@ -76,7 +84,8 @@
       "kernel": "5.15.148",
       "downloads": {
         "ReSukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23701941199",
-        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23685943155"
+        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23685943155",
+        "MKSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23755074303"
       }
     },
     {
@@ -84,7 +93,8 @@
       "kernel": "5.15.149",
       "downloads": {
         "ReSukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23702091659",
-        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23686106742"
+        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23686106742",
+        "MKSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23756133402"
       }
     },
     {
@@ -92,7 +102,8 @@
       "kernel": "5.15.151",
       "downloads": {
         "ReSukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23702237968",
-        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23686318707"
+        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23686318707",
+        "MKSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23757258179"
       }
     },
     {
@@ -100,7 +111,8 @@
       "kernel": "5.15.153",
       "downloads": {
         "ReSukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23702397332",
-        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23686490144"
+        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23686490144",
+        "MKSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23757682968"
       }
     },
     {
@@ -108,7 +120,8 @@
       "kernel": "5.15.167",
       "downloads": {
         "ReSukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23702547138",
-        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23686659533"
+        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23686659533",
+        "MKSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23758130213"
       }
     },
     {
@@ -116,7 +129,8 @@
       "kernel": "5.15.170",
       "downloads": {
         "ReSukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23702902539",
-        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23686842883"
+        "SukiSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23686842883",
+        "MKSU": "https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/23758614908"
       }
     },
     {
