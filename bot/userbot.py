@@ -1415,6 +1415,7 @@ async def dl_cmd(event):
             await _reply_temp(event, err, 10)
         else:
             await _reply(event, text, html=True)
+            await _safe_delete(event)
         return
 
     # Nhiều variant — gửi menu, chờ user chọn
@@ -1462,6 +1463,7 @@ async def dl_cmd(event):
     else:
         try:
             await prompt_msg.edit(text, parse_mode="html", link_preview=False)
+            await _safe_delete(event)
         except Exception:
             pass
 
@@ -1490,6 +1492,7 @@ async def _dl_choice_handler(event):
         vlist = pending["variants_list"]
         if 1 <= idx <= len(vlist):
             fut.set_result(vlist[idx - 1])
+            await _safe_delete(event)
         # số ngoài range: bỏ qua, vẫn giữ pending
     except ValueError:
         pass  # tin nhắn khác — bỏ qua hoàn toàn, không làm gì
