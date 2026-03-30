@@ -1,5 +1,6 @@
 #!/bin/bash
 
+echo ""
 echo "================================================="
 echo "       GKI BOT - STARTUP SCRIPT VỚI PM2          "
 echo "================================================="
@@ -23,7 +24,6 @@ for dir in web/data/android12 web/data/android13 web/data/android14 web/data/and
     fi
 done
 
-# Tạo file JSON rỗng nếu chưa tồn tại (tránh crash khi bot đọc lần đầu)
 for f in web/data/android12/5.10.json web/data/android13/5.15.json web/data/android14/6.1.json web/data/android15/6.6.json web/data/android16/6.12.json web/data/announcement.json; do
     if [ ! -f "$f" ]; then
         echo '{"entries":[]}' > "$f"
@@ -51,7 +51,82 @@ echo "   >> Đang nạp các thư viện từ requirements.txt..."
 ./venv/bin/pip install -q -r requirements.txt
 echo "   ✅ Thư viện đã sẵn sàng!"
 
-# ─── BƯỚC 5: Chọn chế độ chạy ────────────────────────────────────────────────
+# ─── BƯỚC 5: Cài đặt SSL (Nginx + Certbot) ───────────────────────────────────
+echo ""
+echo "🔐 Thiết lập SSL cho Web Dashboard..."
+echo ""
+read -p "   Bạn có muốn cài SSL (HTTPS) cho Web Dashboard không? [y/N]: " ssl_choice
+ssl_choice=${ssl_choice:-n}
+
+if [[ "$ssl_choice" =~ ^[Yy]$ ]]; then
+    read -p "   Nhập tên miền của bạn (VD: kernel.takeshi.dev): " DOMAIN
+    DOMAIN=$(echo "$DOMAIN" | tr -d ' ')
+
+    if [ -z "$DOMAIN" ]; then
+        echo "   ⚠️  Bỏ qua cài SSL (không có tên miền)."
+    else
+        WEB_PORT=$(grep "WEB_PORT" .env | cut -d '=' -f2)
+        WEB_PORT=${WEB_PORT:-5000}
+
+        echo ""
+        echo "   ⚙️  Đang cài Nginx & Certbot..."
+        sudo apt update -qq
+        sudo apt install -y nginx certbot python3-certbot-nginx > /dev/null 2>&1
+        echo "   ✅ Cài xong!"
+
+        # Tạo config Nginx cho domain
+        echo "   ⚙️  Đang cấu hình Nginx reverse proxy cho $DOMAIN..."
+        sudo tee /etc/nginx/sites-available/gki-bot > /dev/null <<EOF
+server {
+    listen 80;
+    server_name $DOMAIN;
+
+    location / {
+        proxy_pass http://127.0.0.1:$WEB_PORT;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_cache_bypass \$http_upgrade;
+    }
+}
+EOF
+
+        # Kích hoạt site
+        sudo ln -sf /etc/nginx/sites-available/gki-bot /etc/nginx/sites-enabled/gki-bot
+        sudo rm -f /etc/nginx/sites-enabled/default 2>/dev/null
+        sudo nginx -t && sudo systemctl reload nginx
+        echo "   ✅ Nginx đã chạy!"
+
+        # Lấy chứng chỉ SSL từ Let's Encrypt
+        echo ""
+        echo "   🔐 Đang xin chứng chỉ SSL từ Let's Encrypt cho $DOMAIN..."
+        echo "   (Yêu cầu: DNS của $DOMAIN phải đang trỏ đúng về IP VPS này!)"
+        echo ""
+        sudo certbot --nginx -d "$DOMAIN" --redirect --agree-tos --register-unsafely-without-email --non-interactive
+
+        if [ $? -eq 0 ]; then
+            echo ""
+            echo "   ✅ SSL đã được cài thành công!"
+            echo "   🌐 Web Dashboard: https://$DOMAIN"
+            echo "   🔄 Chứng chỉ sẽ tự gia hạn (auto-renew) qua cron."
+            # Thêm auto-renew vào cron nếu chưa có
+            (crontab -l 2>/dev/null | grep -q "certbot renew") || \
+                (crontab -l 2>/dev/null; echo "0 3 * * * certbot renew --quiet && systemctl reload nginx") | crontab -
+        else
+            echo ""
+            echo "   ⚠️  Certbot thất bại! Có thể DNS chưa trỏ đúng."
+            echo "   👉 Thử lại sau bằng lệnh: sudo certbot --nginx -d $DOMAIN --redirect"
+        fi
+    fi
+else
+    echo "   ⏭️  Bỏ qua cài SSL."
+fi
+
+# ─── BƯỚC 6: Chọn chế độ chạy ────────────────────────────────────────────────
 echo ""
 echo "Vui lòng chọn chế độ chạy Bot:"
 echo "  [1] Chỉ chạy Bot Telegram (main.py)           — Tiêu chuẩn"
@@ -64,7 +139,6 @@ choice=${choice:-1}
 echo ""
 echo "🚀 Đang khởi động tiến trình theo lựa chọn [$choice]..."
 
-# Dọn dẹp tiến trình cũ (nếu có)
 pm2 stop gki-bot gki-userbot > /dev/null 2>&1
 pm2 delete gki-bot gki-userbot > /dev/null 2>&1
 
@@ -82,16 +156,14 @@ else
     exit 1
 fi
 
-# Lưu cấu hình PM2 và thiết lập khởi động cùng hệ thống
 pm2 save > /dev/null 2>&1
 
-# ─── BƯỚC 6: Hiển thị kết quả ─────────────────────────────────────────────────
+# ─── BƯỚC 7: Tổng kết ─────────────────────────────────────────────────────────
 echo ""
 echo "================================================="
 echo "✅ HOÀN TẤT KHỞI ĐỘNG!"
-echo "Bảng trạng thái các Bot đang chạy ngầm trên VPS:"
+echo ""
 pm2 status
-
 echo ""
 echo "📌 CÁC LỆNH PM2 CẦN BIẾT:"
 echo "   pm2 list                  — Xem bảng điều khiển"
@@ -101,12 +173,12 @@ echo "   pm2 restart all           — Khởi động lại tất cả"
 echo "   pm2 flush                 — Xoá trắng log cũ"
 echo "   pm2 startup               — Tự bật bot khi VPS reboot"
 echo ""
-echo "🔄 CẬP NHẬT CODE MỚI NHẤT:"
-echo "   git fetch --all && git reset --hard origin/main && pm2 restart all"
+echo "🔄 CẬP NHẬT CODE:"
+echo "   bash run.sh   (chọn option 1)"
 echo ""
 echo "💾 BACKUP & KHÔI PHỤC DATA:"
-echo "   Gõ .backup (trong Telegram) để tải file zip backup về máy"
-echo "   Reply file zip đó rồi gõ /data để khôi phục data lên VPS mới"
+echo "   .backup (trong Telegram) → gửi file zip về thiết bị bác"
+echo "   Reply file zip + /data   → khôi phục lên VPS mới"
 echo "================================================="
 
 WEB_PORT=$(grep "WEB_PORT" .env | cut -d '=' -f2)
@@ -115,9 +187,11 @@ if command -v curl &> /dev/null; then
     VPS_IP=$(curl -4 -s --max-time 3 ifconfig.me 2>/dev/null)
     if [ -n "$VPS_IP" ]; then
         echo ""
-        echo "================================================="
-        echo "🌐 BẢNG ĐIỀU KHIỂN WEB (REAL-TIME)"
-        echo "Truy cập ngay vào: http://${VPS_IP}:${WEB_PORT}"
+        echo "🌐 TRUY CẬP WEB DASHBOARD:"
+        echo "   HTTP  : http://${VPS_IP}:${WEB_PORT}"
+        if [ -n "$DOMAIN" ]; then
+            echo "   HTTPS : https://${DOMAIN}"
+        fi
         echo "================================================="
     fi
 fi
