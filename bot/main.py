@@ -353,7 +353,8 @@ async def update_batch_message(batch_id: str, storage: HybridStorage, bot):
             disable_web_page_preview=True
         )
     except Exception as e:
-        logger.error(f"update_batch_message error: {e}")
+        if "is not modified" not in str(e):
+            logger.error(f"update_batch_message error: {e}")
 
 async def update_rebuild_message(rebuild_msg_id: str, storage, bot):
     """Cập nhật tin nhắn rebuild tiến trình khi có job rebuild_queued hoặc complete."""
@@ -416,7 +417,8 @@ async def update_rebuild_message(rebuild_msg_id: str, storage, bot):
             parse_mode="HTML", disable_web_page_preview=True
         )
     except Exception as e:
-        logger.error(f"update_rebuild_message error: {e}")
+        if "is not modified" not in str(e):
+            logger.error(f"update_rebuild_message error: {e}")
 
 async def poller(app):
     gh: GitHubAPI = app.bot_data["gh"]
@@ -1778,8 +1780,8 @@ async def _update_buildsave_download_link(job: dict, run_id, app):
     
     # --- AUTO BACKUP ---
     try:
-        import shutil, os, asyncio
         async def _delayed_backup():
+            import shutil, os, asyncio
             await asyncio.sleep(8)  # Debounce: Chờ vài giây để gom các job xong cùng lúc
             if app.bot_data.get("_auto_backup_running"): return
             app.bot_data["_auto_backup_running"] = True
