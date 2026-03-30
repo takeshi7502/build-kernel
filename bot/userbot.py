@@ -1106,7 +1106,7 @@ async def backup_cmd(event):
         await client.send_file(
             entity=event.chat_id,
             file="backup.zip",
-            caption="📦 **GKI Database Backup**\nChứa <code>data.json</code> và thư mục <code>web/data</code>.",
+            caption="📦 <b>GKI Database Backup</b>\nChứa <code>data.json</code> và thư mục <code>web/data</code>.\n\n💡 Reply file này với lệnh /data để khôi phục.",
             parse_mode="html"
         )
         await status_msg.delete()

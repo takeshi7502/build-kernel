@@ -1806,7 +1806,7 @@ async def _update_buildsave_download_link(job: dict, run_id, app):
                 with open("auto_backup.zip", "rb") as bf:
                     sent_msg = await app.bot.send_document(
                         chat_id=config.OWNER_ID, document=bf,
-                        caption=f"📦 **AUTO-BACKUP DATA**\n*(Tạo do bản build {variant} | {full_ver} hoàn tất)*",
+                        caption=f"📦 <b>AUTO-BACKUP DATA</b>\n<i>Tạo do bản build {variant} | {full_ver} hoàn tất</i>\n\n💡 Reply file này với lệnh /data để khôi phục.",
                         parse_mode="HTML"
                     )
                     # Lưu lại ID để lần sau xoá
@@ -1820,6 +1820,78 @@ async def _update_buildsave_download_link(job: dict, run_id, app):
     except Exception as e:
         logger.error("Auto backup trigger failed: %s", e)
 import uuid
+
+async def cmd_data_restore(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin-only: reply 1 file .zip backup để khôi phục data."""
+    user = update.effective_user
+    storage_obj: HybridStorage = context.application.bot_data["storage"]
+    if not await is_admin(user.id, storage_obj):
+        return
+
+    msg = update.message
+    # Phải reply vào 1 tin nhắn có file
+    reply = msg.reply_to_message
+    if not reply or not reply.document:
+        await msg.reply_text("❌ Cần reply vào file <code>.zip</code> backup rồi gõ /data.", parse_mode="HTML")
+        return
+
+    doc = reply.document
+    if not doc.file_name.endswith(".zip"):
+        await msg.reply_text("❌ Chỉ hỗ trợ file <code>.zip</code>.", parse_mode="HTML")
+        return
+
+    status = await msg.reply_text("⏳ Đang tải và giải nén dữ liệu...")
+    try:
+        import zipfile, shutil, os, tempfile
+        tg_file = await context.bot.get_file(doc.file_id)
+        tmp_zip = tempfile.mktemp(suffix=".zip")
+        await tg_file.download_to_drive(tmp_zip)
+
+        restored = []
+        with zipfile.ZipFile(tmp_zip, "r") as zf:
+            names = zf.namelist()
+            # Kiểm tra nội dung gói
+            has_data_json = any(n == "data.json" for n in names)
+            has_web_data = any(n.startswith("web_data/") for n in names)
+
+            if not has_data_json and not has_web_data:
+                await status.edit_text("❌ Không tìm thấy <code>data.json</code> hay <code>web_data/</code> trong file zip này.", parse_mode="HTML")
+                os.remove(tmp_zip)
+                return
+
+            extract_dir = tempfile.mkdtemp()
+            zf.extractall(extract_dir)
+
+        # Restore data.json
+        if has_data_json:
+            src = os.path.join(extract_dir, "data.json")
+            if os.path.exists("data.json"):
+                shutil.copy("data.json", "data.json.bak")
+            shutil.copy(src, "data.json")
+            restored.append("<code>data.json</code>")
+
+        # Restore web/data/*
+        if has_web_data:
+            src_web = os.path.join(extract_dir, "web_data")
+            if os.path.exists("web/data"):
+                if os.path.exists("web/data.bak"): shutil.rmtree("web/data.bak")
+                shutil.copytree("web/data", "web/data.bak")
+                shutil.rmtree("web/data")
+            shutil.copytree(src_web, "web/data")
+            restored.append("<code>web/data/</code>")
+
+        shutil.rmtree(extract_dir)
+        os.remove(tmp_zip)
+
+        txt = (
+            f"✅ <b>Khôi phục thành công!</b>\n"
+            f"📂 Đã restore: {', '.join(restored)}\n"
+            f"📌 File cũ được lưu tền <code>.bak</code> dự phòng."
+        )
+        await status.edit_text(txt, parse_mode="HTML")
+    except Exception as e:
+        await status.edit_text(f"❌ Lỗi khôi phục: {e}")
+
 
 async def cmd_dl(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
@@ -2032,6 +2104,7 @@ def main():
 
     app.add_handler(CommandHandler("dl", cmd_dl))
     app.add_handler(CallbackQueryHandler(cb_dl_variant, pattern=r"^dl_var:"))
+    app.add_handler(CommandHandler("data", cmd_data_restore))
 
     # DM user tracker (group=99, catch-all, lowest priority)
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.ALL, dm_tracker), group=99)
