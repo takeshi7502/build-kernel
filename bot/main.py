@@ -18,6 +18,9 @@ socket.getaddrinfo = new_getaddrinfo
 
 import aiohttp
 import asyncio
+import warnings
+from telegram.warnings import PTBUserWarning
+warnings.filterwarnings("ignore", category=PTBUserWarning)
 import json
 import logging
 from datetime import datetime, timezone, timedelta
@@ -2070,9 +2073,20 @@ def main():
         app_.create_task(start_web_server(app_))
     app.post_init = _post_init
 
-    logger.info("Bot started")
-    app.run_polling()
+    print("\n" + "="*60)
+    print("🚀 GKI BOT ĐÃ KHỞI ĐỘNG THÀNH CÔNG!")
+    print("✅ Hệ thống đang lắng nghe tin nhắn Telegram...")
+    print("✅ Express Web Server đang chạy ngầm...")
+    print("-" * 60)
+    print("💡 MỘT SỐ LỆNH PM2 CƠ BẢN DÀNH CHO BÁC:")
+    print("   👉 Xem bảng điều khiển: pm2 list")
+    print("   👉 Xem Log thời gian thực: pm2 log gki-bot")
+    print("   👉 Khởi động lại toàn bộ: pm2 restart all")
+    print("   👉 Xoá trắng rác Log cũ: pm2 flush")
+    print("="*60 + "\n")
 
+    logger.info("Bot is polling...")
+    app.run_polling()
 
 if __name__ == "__main__":
     main()
