@@ -356,7 +356,7 @@ async def update_batch_message(batch_id: str, storage: HybridStorage, bot):
             disable_web_page_preview=True
         )
     except Exception as e:
-        if "is not modified" not in str(e):
+        if "is not modified" not in str(e) and "not found" not in str(e).lower():
             logger.error(f"update_batch_message error: {e}")
 
 async def update_rebuild_message(rebuild_msg_id: str, storage, bot):
@@ -1770,8 +1770,17 @@ async def _update_buildsave_download_link(job: dict, run_id, app):
             # Không break — có thể có nhiều entry cùng kernel ver (khác date)
 
     if not updated:
-        logger.warning("buildsave: không tìm thấy entry kernel=%s trong %s", full_ver, json_path)
-        return
+        # Không tìm thấy entry → tự động tạo mới entry cho kernel version này
+        logger.warning("buildsave: entry kernel=%s chưa có trong %s → tự tạo mới", full_ver, json_path)
+        new_entry = {
+            "kernel": full_ver,
+            "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "downloads": {variant: nightly_link}
+        }
+        if "entries" not in data:
+            data["entries"] = []
+        data["entries"].insert(0, new_entry)  # Thêm lên đầu danh sách (mới nhất)
+        updated = True
 
     with open(json_path, "w", encoding="utf-8") as f:
         _json.dump(data, f, ensure_ascii=False, indent=2)

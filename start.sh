@@ -74,6 +74,16 @@ if [[ "$ssl_choice" =~ ^[Yy]$ ]]; then
         sudo apt install -y nginx certbot python3-certbot-nginx > /dev/null 2>&1
         echo "   ✅ Cài xong!"
 
+        # Mở firewall — bắt buộc để Certbot xác minh và Nginx hoạt động
+        echo "   🔓 Đang mở Firewall (UFW) cho các port cần thiết..."
+        sudo ufw allow 22/tcp    > /dev/null 2>&1   # SSH - tránh bị khóa ra ngoài
+        sudo ufw allow 80/tcp    > /dev/null 2>&1   # HTTP - Certbot cần để xác minh
+        sudo ufw allow 443/tcp   > /dev/null 2>&1   # HTTPS
+        sudo ufw allow "$WEB_PORT/tcp" > /dev/null 2>&1  # Web dashboard port
+        sudo ufw --force enable  > /dev/null 2>&1
+        echo "   ✅ Đã mở port 22, 80, 443, $WEB_PORT!"
+
+
         # Tạo config Nginx cho domain
         echo "   ⚙️  Đang cấu hình Nginx reverse proxy cho $DOMAIN..."
         sudo tee /etc/nginx/sites-available/gki-bot > /dev/null <<EOF
