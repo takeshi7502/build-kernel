@@ -1775,6 +1775,34 @@ async def _update_buildsave_download_link(job: dict, run_id, app):
     # Không gửi thông báo riêng lẻ từng sub
     # Thông báo tổng hợp sẽ do update_batch_message xử lý khi tất cả xong
     logger.info("buildsave: da cap nhat JSON cho %s %s", variant, full_ver)
+    
+    # --- AUTO BACKUP ---
+    try:
+        import shutil, os, asyncio
+        async def _delayed_backup():
+            await asyncio.sleep(8)  # Debounce: Chờ vài giây để gom các job xong cùng lúc
+            if app.bot_data.get("_auto_backup_running"): return
+            app.bot_data["_auto_backup_running"] = True
+            try:
+                os.makedirs("temp_backup", exist_ok=True)
+                if os.path.exists("data.json"): shutil.copy("data.json", "temp_backup/data.json")
+                if os.path.exists("web/data"): shutil.copytree("web/data", "temp_backup/web_data")
+                shutil.make_archive("auto_backup", "zip", "temp_backup")
+                shutil.rmtree("temp_backup")
+                with open("auto_backup.zip", "rb") as bf:
+                    await app.bot.send_document(
+                        chat_id=config.OWNER_ID, document=bf,
+                        caption=f"📦 **AUTO-BACKUP DATA**\n*(Tạo do bản build {variant} | {full_ver} hoàn tất)*",
+                        parse_mode="HTML"
+                    )
+                os.remove("auto_backup.zip")
+            except Exception as e:
+                logger.error("Auto backup send failed: %s", e)
+            app.bot_data["_auto_backup_running"] = False
+            
+        asyncio.create_task(_delayed_backup())
+    except Exception as e:
+        logger.error("Auto backup trigger failed: %s", e)
 import uuid
 
 async def cmd_dl(update: Update, context: ContextTypes.DEFAULT_TYPE):
