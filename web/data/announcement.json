@@ -1,0 +1,27 @@
+{
+  "items": [
+    {
+      "date": "30-03-2026",
+      "content_md": [
+        "## GKI Kernel Tracker",
+        "",
+        "Trang web theo dõi build kernel cho bot. Ở đây cũng có kernel build sẵn cho tất cả các phiên bản.",
+        "",
+        "- Hỗ trợ Android 12/13/14/15/16.",
+        "- Cập nhật phiên bản kernel mới nếu có.",
+        "",
+        "MIRROR GROUP: [Tham gia ngay](https://t.me/takeshi_updrive)"
+      ],
+      "content_zh_md": [
+        "## GKI 内核版本追踪器",
+        "",
+        "页面已上线，可在同一处查看所有维护分支。",
+        "",
+        "- 支持 Android 12/13/14/15",
+        "- 每周自动增量更新",
+        "",
+        "详情：[GitHub 仓库](https://github.com/zzh20188/GKI_KernelSU_SUSFS)"
+      ]
+    }
+  ]
+}

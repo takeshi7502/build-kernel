@@ -40,8 +40,9 @@ node_modules/
 
 patch_*.py
 
-# Bỏ theo dõi toàn bộ Data
+# Bỏ theo dõi toàn bộ Data động (do bot tự ghi)
 data.json
 bot/data.json
 web/data/**/*.json
-
+# Ngoại lệ: announcement.json là content tĩnh do admin viết → track git bình thường
+!web/data/announcement.json
