@@ -43,6 +43,8 @@ async def get_realtime_data(app):
         # Sắp xếp mới nhất lên đầu
         jobs = sorted(jobs, key=lambda x: x.get("_id", 0), reverse=True)
         
+        active_gh_builds = 0
+
         # -------- BẮT ĐẦU ĐỒNG BỘ VỚI GITHUB --------
         if gh:
             now = int(datetime.now(timezone.utc).timestamp())
@@ -83,6 +85,12 @@ async def get_realtime_data(app):
                         j["conclusion"] = gh_run.get("conclusion")
                     active_jobs.append(j)
                 jobs = active_jobs
+            
+            # Đếm số tiến trình đang chạy (active_builds)
+            if _GH_RUNS_CACHE:
+                active_gh_builds = sum(1 for r in _GH_RUNS_CACHE.values() if r.get("status") in ("in_progress", "queued", "waiting"))
+
+        data["active_builds"] = active_gh_builds
         # -------- KẾT THÚC ĐỒNG BỘ VỚI GITHUB --------
         
         # Gom nhóm buildsave jobs cùng batch_id thành 1 card

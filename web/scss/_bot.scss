@@ -167,14 +167,14 @@
 .status-btn {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 0.3rem;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 20px;
   color: var(--text-secondary);
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   font-weight: 500;
-  padding: 0.35rem 0.65rem;
+  padding: 0.35rem 0.7rem;
   cursor: default;
   transition: all 0.2s;
   

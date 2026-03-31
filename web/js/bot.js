@@ -302,6 +302,18 @@ async function loadData() {
         currentWebBuilds = allBuilds.filter(b => b.type === 'buildsave');
 
         updateStatusBadge(data.status, data.last_ping);
+        
+        const activeBuildsBadge = document.getElementById('activeBuildsBadge');
+        const activeBuildsText = document.getElementById('activeBuildsText');
+        if (activeBuildsBadge && activeBuildsText) {
+            if (data.active_builds > 0) {
+                activeBuildsText.innerText = `Building ${data.active_builds}`;
+                activeBuildsBadge.style.display = 'flex';
+            } else {
+                activeBuildsBadge.style.display = 'none';
+            }
+        }
+        
         renderBuilds();
     } catch (err) {
         console.error("Lỗi lấy dữ liệu:", err);
