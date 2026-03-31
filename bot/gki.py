@@ -973,4 +973,5 @@ def build_gki_conversation(gh, storage, config):
         allow_reentry=True,
         name="gki_conversation",
         persistent=False,
+        conversation_timeout=300,  # 5 phút → tự dọn state treo
     )
