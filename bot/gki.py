@@ -19,7 +19,7 @@ from config import send_admin_notification
     GKI_CONFIRM
 ) = range(8)
 
-VARIANTS = ["SukiSU", "ReSukiSU", "Official", "Next", "MKSU"]
+VARIANTS = ["SukiSU", "ReSukiSU", "Official", "MKSU"]  # Next đã bị upstream loại bỏ
 BRANCHES = ["Stable(标准)", "Dev(开发)"]
 RELEASE_TYPES = ["Actions", "Pre-Release", "Release"]
 BUILD_TARGETS = [
@@ -71,8 +71,8 @@ SUB_LEVEL_META: Dict[str, Dict[str, tuple]] = {
         "X":("lts",""),
     },
     "build_a15_6_6": {
-        "50":("2024-06",""),"56":("2024-09",""),"57":("2024-10",""),
-        "58":("2024-11",""),"66":("2025-01",""),"77":("2025-03",""),
+        "50":("2024-10",""),"56":("2024-11",""),"57":("2024-12",""),
+        "58":("2025-01",""),"66":("2025-02",""),"77":("2025-03",""),
         "82":("2025-04",""),"87":("2025-05",""),"89":("2025-06",""),
         "92":("2025-07",""),"98":("2025-09",""),"102":("2025-10",""),
         "118":("2026-01",""),"X":("lts",""),
@@ -154,11 +154,12 @@ def _build_target_keyboard(back_cb: str = ""):
 
 
 TOGGLE_FEATURES = [
-    ("ZRAM",  "use_zram",       "gkitog:zram"),
-    ("BBG",   "use_bbg",        "gkitog:bbg"),
-    ("KPM",   "use_kpm",        "gkitog:kpm"),
-    ("SUSFS", "cancel_susfs",   "gkitog:susfs"),
-    ("Support 1+ 8E", "supp_op",        "gkitog:supp_op"),
+    ("ZRAM",           "use_zram",     "gkitog:zram"),
+    ("BBG",            "use_bbg",      "gkitog:bbg"),
+    ("KPM",            "use_kpm",      "gkitog:kpm"),
+    ("Re-Kernel",      "use_rekernel", "gkitog:rekernel"),
+    ("SUSFS",          "cancel_susfs", "gkitog:susfs"),
+    ("Support 1+ 8E",  "supp_op",      "gkitog:supp_op"),
 ]
 
 def _toggles_keyboard(inputs: dict, back_cb: str = "", selected_target: str = "") -> InlineKeyboardMarkup:
@@ -541,11 +542,12 @@ class GKIFlow:
 
         # Toggle feature
         toggle_map = {
-            "zram":    "use_zram",
-            "bbg":     "use_bbg",
-            "kpm":     "use_kpm",
-            "susfs":   "cancel_susfs",
-            "supp_op": "supp_op",
+            "zram":      "use_zram",
+            "bbg":       "use_bbg",
+            "kpm":       "use_kpm",
+            "rekernel":  "use_rekernel",
+            "susfs":     "cancel_susfs",
+            "supp_op":   "supp_op",
         }
         input_key = toggle_map.get(key)
         if input_key:
@@ -874,6 +876,7 @@ class GKIFlow:
                 "use_zram":         inputs.get("use_zram", False),
                 "use_bbg":          inputs.get("use_bbg", False),
                 "use_kpm":          inputs.get("use_kpm", False),
+                "use_rekernel":     inputs.get("use_rekernel", False),
                 "cancel_susfs":     inputs.get("cancel_susfs", True),
                 "supp_op":          inputs.get("supp_op", False) if t_key in SUPP_OP_TARGETS else False,
             }
@@ -882,7 +885,7 @@ class GKIFlow:
             _MAIN_WF_ALLOWED = {
                 "build_all", "build_a12_5_10", "build_a13_5_15", "build_a14_6_1",
                 "build_a15_6_6", "build_a16_6_12", "kernelsu_variant", "kernelsu_branch",
-                "version", "use_zram", "use_bbg", "use_kpm", "cancel_susfs",
+                "version", "use_zram", "use_bbg", "use_kpm", "use_rekernel", "cancel_susfs",
                 "sub_levels", "release_type",
             }
             dispatch_inputs = {k: v for k, v in inputs.items() if k in _MAIN_WF_ALLOWED}
