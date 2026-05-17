@@ -34,8 +34,8 @@ BUILD_TARGETS = [
 SUB_LEVELS = {
     "build_a12_5_10": ["66","81","101","110","117","136","149","160","168","177","185","198","205","209","218","226","233","236","237","240","246","X"],
     "build_a13_5_15": ["74","78","94","104","119","123","137","144","148","149","151","153","167","170","178","180","185","189","194","X"],
-    "build_a14_6_1": ["25","43","57","68","75","78","84","90","93","99","112","115","118","124","128","129","134","138","141","145","157","X"],
-    "build_a15_6_6": ["50","56","57","58","66","77","82","87","89","92","98","102","118","X"],
+    "build_a14_6_1": ["25","43","57","68","75","78","84","90","93","99","112","115","118","124","128","129","134","138","141","145","157","162","X"],
+    "build_a15_6_6": ["50","56","57","58","66","77","82","87","89","92","98","102","118","127","X"],
     "build_a16_6_12": ["23","30","38","58","X"],
 }
 
@@ -68,14 +68,14 @@ SUB_LEVEL_META: Dict[str, Dict[str, tuple]] = {
         "118":("2025-01",""),"124":("2025-02",""),"128":("2025-03",""),
         "129":("2025-04",""),"134":("2025-05",""),"138":("2025-06",""),
         "141":("2025-07",""),"145":("2025-09",""),"157":("2025-12",""),
-        "X":("lts",""),
+        "162":("2026-03",""),"X":("lts",""),
     },
     "build_a15_6_6": {
         "50":("2024-10",""),"56":("2024-11",""),"57":("2024-12",""),
         "58":("2025-01",""),"66":("2025-02",""),"77":("2025-03",""),
         "82":("2025-04",""),"87":("2025-05",""),"89":("2025-06",""),
         "92":("2025-07",""),"98":("2025-09",""),"102":("2025-10",""),
-        "118":("2026-01",""),"X":("lts",""),
+        "118":("2026-01",""),"127":("2026-04",""),"X":("lts",""),
     },
     "build_a16_6_12": {
         "23":("2025-06",""),"30":("2025-07",""),"38":("2025-09",""),
@@ -153,12 +153,16 @@ def _build_target_keyboard(back_cb: str = ""):
     return InlineKeyboardMarkup(rows)
 
 
+DROIDSPACES_OPTIONS = ["off", "678", "123", "345"]
+KPM_OPTIONS = ["disabled (关闭)", "enabled (开启)"]
+
 TOGGLE_FEATURES = [
     ("ZRAM",           "use_zram",     "gkitog:zram"),
     ("BBG",            "use_bbg",      "gkitog:bbg"),
     ("KPM",            "use_kpm",      "gkitog:kpm"),
     ("Re-Kernel",      "use_rekernel", "gkitog:rekernel"),
     ("SUSFS",          "cancel_susfs", "gkitog:susfs"),
+    ("Droidspaces",    "droidspaces",  "gkitog:droidspaces"),
     ("Support 1+ 8E",  "supp_op",      "gkitog:supp_op"),
 ]
 
@@ -173,6 +177,18 @@ def _toggles_keyboard(inputs: dict, back_cb: str = "", selected_target: str = ""
         # SUSFS: cancel_susfs=True nghĩa là tắt SUSFS
         if key == "cancel_susfs":
             active = not inputs.get(key, True)
+        elif key == "droidspaces":
+            val = inputs.get("droidspaces", "off")
+            icon = "✅" if val != "off" else "⬜"
+            btns.append(InlineKeyboardButton(f"{icon} {label} [{val}]", callback_data=cb))
+            continue
+        elif key == "use_kpm":
+            val = inputs.get("use_kpm", KPM_OPTIONS[0])
+            active = val != KPM_OPTIONS[0]
+            short = "ON" if active else "OFF"
+            icon = "✅" if active else "⬜"
+            btns.append(InlineKeyboardButton(f"{icon} {label} [{short}]", callback_data=cb))
+            continue
         else:
             active = inputs.get(key, False)
         icon = "✅" if active else "⬜"
@@ -291,10 +307,13 @@ class GKIFlow:
             "kernelsu_variant": "SukiSU",
             "kernelsu_branch": "Stable(标准)",
             "version": "",
+            "build_time": "Sun Dec 01 08:10:00 UTC 2024",
             "use_zram": False,
             "use_bbg": False,
-            "use_kpm": False,
+            "use_kpm": "disabled (关闭)",
+            "use_rekernel": False,
             "cancel_susfs": True,   # True = tắt SUSFS (mặc định SUSFS tắt)
+            "droidspaces": "off",
             "supp_op": False,
             "build_a12_5_10": False,
             "build_a13_5_15": False,
@@ -544,14 +563,22 @@ class GKIFlow:
         toggle_map = {
             "zram":      "use_zram",
             "bbg":       "use_bbg",
-            "kpm":       "use_kpm",
             "rekernel":  "use_rekernel",
             "susfs":     "cancel_susfs",
             "supp_op":   "supp_op",
         }
-        input_key = toggle_map.get(key)
-        if input_key:
-            inputs[input_key] = not inputs.get(input_key, False)
+        if key == "droidspaces":
+            cur = inputs.get("droidspaces", "off")
+            idx = DROIDSPACES_OPTIONS.index(cur) if cur in DROIDSPACES_OPTIONS else 0
+            inputs["droidspaces"] = DROIDSPACES_OPTIONS[(idx + 1) % len(DROIDSPACES_OPTIONS)]
+        elif key == "kpm":
+            cur = inputs.get("use_kpm", KPM_OPTIONS[0])
+            idx = KPM_OPTIONS.index(cur) if cur in KPM_OPTIONS else 0
+            inputs["use_kpm"] = KPM_OPTIONS[(idx + 1) % len(KPM_OPTIONS)]
+        else:
+            input_key = toggle_map.get(key)
+            if input_key:
+                inputs[input_key] = not inputs.get(input_key, False)
 
         header = _task_header(context)
         selected_target = context.user_data["gki"].get("selected_target", "")
@@ -757,8 +784,10 @@ class GKIFlow:
             f"• Sub-level: {subs_display}",
             f"• ZRAM: {flag(inputs.get('use_zram', True))}",
             f"• BBG: {flag(inputs.get('use_bbg', True))}",
-            f"• KPM: {flag(inputs.get('use_kpm', True))}",
+            f"• KPM: {'✅ Bật' if inputs.get('use_kpm', KPM_OPTIONS[0]) != KPM_OPTIONS[0] else '❌ Tắt'}",
+            f"• Re-Kernel: {flag(inputs.get('use_rekernel', False))}",
             f"• SUSFS: {flag(not inputs.get('cancel_susfs', False))}",
+            f"• Droidspaces: <b>{inputs.get('droidspaces', 'off')}</b>",
         ]
         if show_supp_op:
             lines.append(f"• OnePlus 8E: {flag(inputs.get('supp_op', False))}")
@@ -873,11 +902,13 @@ class GKIFlow:
                 "kernelsu_variant": inputs.get("kernelsu_variant", "SukiSU"),
                 "kernelsu_branch":  inputs.get("kernelsu_branch", "Stable(标准)"),
                 "version":          inputs.get("version", ""),
+                "build_time":       inputs.get("build_time", "Sun Dec 01 08:10:00 UTC 2024"),
                 "use_zram":         inputs.get("use_zram", False),
                 "use_bbg":          inputs.get("use_bbg", False),
                 "use_kpm":          inputs.get("use_kpm", False),
                 "use_rekernel":     inputs.get("use_rekernel", False),
                 "cancel_susfs":     inputs.get("cancel_susfs", True),
+                "droidspaces":      inputs.get("droidspaces", "off"),
                 "supp_op":          inputs.get("supp_op", False) if t_key in SUPP_OP_TARGETS else False,
             }
         else:
@@ -885,8 +916,8 @@ class GKIFlow:
             _MAIN_WF_ALLOWED = {
                 "build_all", "build_a12_5_10", "build_a13_5_15", "build_a14_6_1",
                 "build_a15_6_6", "build_a16_6_12", "kernelsu_variant", "kernelsu_branch",
-                "version", "use_zram", "use_bbg", "use_kpm", "use_rekernel", "cancel_susfs",
-                "sub_levels", "release_type",
+                "version", "build_time", "use_zram", "use_bbg", "use_kpm", "use_rekernel",
+                "cancel_susfs", "droidspaces", "sub_levels", "release_type",
             }
             dispatch_inputs = {k: v for k, v in inputs.items() if k in _MAIN_WF_ALLOWED}
 

@@ -231,7 +231,10 @@ class GitHubAPI:
         str_inputs = {k: str(v) for k, v in cleaned.items()}
         url = f"{self.base}/repos/{config.GITHUB_OWNER}/{repo}/actions/workflows/{workflow_file}/dispatches"
         payload = {"ref": ref, "inputs": str_inputs}
-        return await self._request("POST", url, json_payload=payload)
+        result = await self._request("POST", url, json_payload=payload)
+        if result["status"] not in (200, 201, 202, 204):
+            logger.error("Dispatch FAILED: %s %s → %s %s", workflow_file, ref, result["status"], result.get("json"))
+        return result
 
     async def get_run(self, repo: str, run_id: int):
         url = f"{self.base}/repos/{config.GITHUB_OWNER}/{repo}/actions/runs/{run_id}"
