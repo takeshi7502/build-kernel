@@ -58,7 +58,7 @@ def recover_for_android(android_ver_name, kernel_version, filepath):
             has_related = False
             for a in artifacts.get('artifacts', []):
                 # match names like: MKSU_kernel-android12-5.10-246
-                pattern = r'^(SukiSU|ReSukiSU|MKSU|Next)_kernel-' + android_ver_name + r'-' + kernel_version.replace('.', r'\.') + r'-(\d+)'
+                pattern = r'^(SukiSU|ReSukiSU|KittiSU|MKSU|Next)_kernel-' + android_ver_name + r'-' + kernel_version.replace('.', r'\.') + r'-(\d+)'
                 m = re.match(pattern, a['name'])
                 if m:
                     var = m.group(1)

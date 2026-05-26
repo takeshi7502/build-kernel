@@ -19,7 +19,7 @@ from config import send_admin_notification
     GKI_CONFIRM
 ) = range(8)
 
-VARIANTS = ["SukiSU", "ReSukiSU", "Official", "MKSU"]  # Next đã bị upstream loại bỏ
+VARIANTS = ["SukiSU", "ReSukiSU", "KittiSU", "Official", "MKSU"]  # Next đã bị upstream loại bỏ
 BRANCHES = ["Stable(标准)", "Dev(开发)"]
 RELEASE_TYPES = ["Actions", "Pre-Release", "Release"]
 BUILD_TARGETS = [
