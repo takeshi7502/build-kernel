@@ -4,6 +4,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, constan
 from telegram.ext import (
     ContextTypes, ConversationHandler, CallbackQueryHandler, MessageHandler, CommandHandler, filters
 )
+from telegram.error import BadRequest
 from permissions import is_admin
 from config import send_admin_notification
 
@@ -237,8 +238,26 @@ async def _safe_delete(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message
         pass
 
 
+async def _send_topic_safe(context: ContextTypes.DEFAULT_TYPE, chat_id: int, text: str, update: Update = None, **kwargs):
+    """Send to the current forum topic, retrying in the general chat if that topic is closed."""
+    thread_id = None
+    if update and update.effective_message and update.effective_message.is_topic_message:
+        thread_id = update.effective_message.message_thread_id
+    try:
+        return await context.bot.send_message(
+            chat_id=chat_id,
+            message_thread_id=thread_id,
+            text=text,
+            **kwargs,
+        )
+    except BadRequest as e:
+        if "Topic_closed" not in str(e) or thread_id is None:
+            raise
+        return await context.bot.send_message(chat_id=chat_id, text=text, **kwargs)
+
+
 async def _update_bot_msg(context: ContextTypes.DEFAULT_TYPE, chat_id: int, text: str,
-                          reply_markup=None, parse_mode=None):
+                          reply_markup=None, parse_mode=None, update: Update = None):
     """Edit tin nhắn bot đang track, hoặc gửi mới nếu chưa có."""
     bot_msg_id = context.user_data.get("gki_bot_msg_id")
     if bot_msg_id:
@@ -250,8 +269,13 @@ async def _update_bot_msg(context: ContextTypes.DEFAULT_TYPE, chat_id: int, text
             return
         except Exception:
             pass
-    msg = await context.bot.send_message(
-        chat_id=chat_id, text=text, reply_markup=reply_markup, parse_mode=parse_mode
+    msg = await _send_topic_safe(
+        context,
+        chat_id,
+        text,
+        update=update,
+        reply_markup=reply_markup,
+        parse_mode=parse_mode,
     )
     context.user_data["gki_bot_msg_id"] = msg.message_id
 
@@ -326,9 +350,11 @@ class GKIFlow:
         }}
 
         header = _task_header(context)
-        msg = await context.bot.send_message(
-            chat_id=chat_id,
-            text=header + "Chọn KernelSU variant:",
+        msg = await _send_topic_safe(
+            context,
+            chat_id,
+            header + "Chọn KernelSU variant:",
+            update=update,
             reply_markup=_kb_from_list("gkiksuvar", VARIANTS),
             parse_mode="HTML"
         )

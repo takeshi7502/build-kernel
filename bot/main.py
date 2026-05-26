@@ -28,7 +28,7 @@ from zoneinfo import ZoneInfo
 from typing import Dict, Any, Optional, List
 
 from telegram import (
-    Update, InlineKeyboardButton, InlineKeyboardMarkup, constants
+    Update, InlineKeyboardButton, InlineKeyboardMarkup, constants, BotCommand
 )
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler,
@@ -946,11 +946,13 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "\n🔒 <b>Admin:</b>\n"
             "<blockquote>"
             "<b>/build</b> — Build Kernel lưu trữ trên Web\n"
-            "<b>/key</b> <code>&lt;code&gt; &lt;uses&gt;</code> — Tạo/sửa key\n"
+            "<b>/key</b> <code>&lt;code&gt; &lt;uses|delete&gt;</code> — Tạo/sửa/xoá key\n"
             "<b>/keyvip</b> <code>&lt;code&gt; &lt;uses&gt;</code> — Tạo VIP key\n"
             "<b>/keys</b> — Xem danh sách key\n"
             "<b>/st</b> — Xem build đang chạy\n"
             "<b>/list</b> — Lịch sử build thành công\n"
+            "<b>/rb</b> hoặc <b>/rebuild</b> — Build lại run đã lưu\n"
+            "<b>/data</b> — Khôi phục data từ JSON\n"
             "<b>/chat</b> <code>&lt;nội dung&gt;</code> — Broadcast cho all user\n"
 
             "</blockquote>"
@@ -2069,6 +2071,22 @@ async def start_web_server(app_bot):
     logger.info(f"✅ Real-time Web Dashboard started natively on 0.0.0.0:{port}")
 
 
+async def _register_bot_commands(app):
+    """Publish the command list shown by Telegram's / menu."""
+    commands = [
+        BotCommand("gki", "Build GKI Kernel"),
+        BotCommand("oki", "Build OKI Kernel"),
+        BotCommand("dl", "Lấy link tải Kernel"),
+        BotCommand("ping", "Kiểm tra bot hoạt động"),
+        BotCommand("help", "Hiện hướng dẫn lệnh"),
+    ]
+    try:
+        await app.bot.set_my_commands(commands)
+        logger.info("Registered %d Telegram bot commands", len(commands))
+    except Exception as e:
+        logger.warning("Failed to register Telegram bot commands: %s", e)
+
+
 def main():
     if not config.TELEGRAM_BOT_TOKEN:
         logger.error("Missing TELEGRAM_BOT_TOKEN")
@@ -2161,6 +2179,7 @@ def main():
         seeded_grp = await app_.bot_data["storage"].seed_groups_from_jobs()
         if seeded_grp:
             logger.warning("Seeded %d group chats from job history", seeded_grp)
+        await _register_bot_commands(app_)
         app_.create_task(app_.bot_data["storage"]._sync_with_cloud())
         app_.create_task(poller(app_))
         app_.create_task(start_web_server(app_))
