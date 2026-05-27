@@ -10,7 +10,7 @@ from typing import Dict, Any
 from datetime import datetime, timezone
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, constants
 from telegram.ext import (
-    ContextTypes, ConversationHandler, CallbackQueryHandler, CommandHandler
+    ContextTypes, ConversationHandler, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 )
 from permissions import is_admin
 from config import send_admin_notification
@@ -399,6 +399,25 @@ class BuildSaveFlow:
         context.user_data.pop("bs", None)
         await q.edit_message_text("❌ Đã hủy lệnh build lưu trữ.")
         return ConversationHandler.END
+    async def timeout(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = update.effective_user
+        mention = f'<a href="tg://user?id={user.id}">{user.full_name}</a>' if user else 'Bạn'
+        notice = f"<b><blockquote>⏳ {mention}, phiên /build đã hết hạn sau 60s.</blockquote></b>"
+        q = update.callback_query
+        if q:
+            try:
+                await q.answer()
+                await q.edit_message_text(notice, parse_mode="HTML")
+            except Exception:
+                pass
+        elif update.effective_message:
+            try:
+                await update.effective_message.reply_text(notice, parse_mode="HTML")
+            except Exception:
+                pass
+        context.user_data.pop("bs", None)
+        return ConversationHandler.END
+
 
 
 def build_buildsave_conversation(gh, storage, cfg):
@@ -422,9 +441,14 @@ def build_buildsave_conversation(gh, storage, cfg):
                 back_h,
                 cancel_h
             ],
+            ConversationHandler.TIMEOUT: [
+                CallbackQueryHandler(flow.timeout),
+                MessageHandler(filters.ALL, flow.timeout),
+            ],
         },
         fallbacks=[cancel_h],
         allow_reentry=True,
         name="buildsave_conversation",
         persistent=False,
+        conversation_timeout=60,
     )

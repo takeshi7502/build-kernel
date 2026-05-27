@@ -439,6 +439,12 @@ class HybridStorage:
                 dm_users.append({"user_id": user_id, "chat_id": chat_id})
                 await self._save(data)
 
+    async def has_dm_user(self, user_id: int) -> bool:
+        """Kiểm tra user đã từng start/DM bot để bot có thể gửi PM."""
+        async with self._lock:
+            data = self._load()
+            return any(u.get("user_id") == user_id and u.get("chat_id", 0) > 0 for u in data.get("dm_users", []))
+
     async def get_dm_users(self) -> List[Dict[str, Any]]:
         """Trả về danh sách tất cả user đã từng DM bot."""
         async with self._lock:

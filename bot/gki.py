@@ -385,7 +385,9 @@ class GKIFlow:
         return ConversationHandler.END
 
     async def timeout(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        notice = "⚠️ Phiên hết hạn rồi. Gửi /gki để bắt đầu lại."
+        user = update.effective_user
+        mention = f'<a href="tg://user?id={user.id}">{user.full_name}</a>' if user else 'Bạn'
+        notice = f"<b><blockquote>⏳ {mention}, phiên /gki đã hết hạn sau 60s.</blockquote></b>"
         timeout_chat_id = None
         timeout_message_id = None
         q = update.callback_query
@@ -398,12 +400,12 @@ class GKIFlow:
                 timeout_chat_id = q.message.chat_id
                 timeout_message_id = q.message.message_id
             try:
-                await q.edit_message_text(notice)
+                await q.edit_message_text(notice, parse_mode="HTML")
             except Exception:
                 pass
         elif update.effective_message:
             try:
-                m = await update.effective_message.reply_text(notice)
+                m = await update.effective_message.reply_text(notice, parse_mode="HTML")
                 timeout_chat_id = m.chat_id
                 timeout_message_id = m.message_id
             except Exception:
@@ -979,20 +981,24 @@ class GKIFlow:
             if not user_is_admin:
                 await self.storage.consume(key)
             view_url = f"https://github.com/{self.config.GITHUB_OWNER}/{self.config.GKI_REPO}/actions/workflows/{dispatch_file}"
-            btn = InlineKeyboardMarkup([[
-                InlineKeyboardButton("🔗 Github", url=view_url),
-                InlineKeyboardButton("📊 Dashboard", url="https://kernel.takeshi.dev/")
-            ]])
             
             clean_name = user.full_name.replace("#", "＃").replace("@", "＠").replace("<", "&lt;").replace(">", "&gt;")
             mention = f'<a href="tg://user?id={user.id}">{clean_name}</a>'
             
             msg_text = (
-                f"✅ <b>Đã gửi build thành công!</b>\n"
-                f"👤 Người gửi: {mention}\n\n"
-                f"<i>Bạn sẽ nhận được thông báo khi hoàn tất.</i>"
+                f"<b>✅ Đã gửi build thành công!\n"
+                f"┃\n"
+                f"┠ Người gửi: {mention}\n"
+                f"┖ <i>Bạn sẽ nhận thông báo khi hoàn tất.</i>\n"
+                f"<blockquote>Xem thông tin: "
+                f"<a href='{view_url}'>Github</a> ┃ "
+                f"<a href='https://kernel.takeshi.dev/'>Website</a></blockquote></b>"
             )
-            await q.edit_message_text(msg_text, reply_markup=btn, parse_mode="HTML")
+            await q.edit_message_text(
+                msg_text,
+                parse_mode="HTML",
+                disable_web_page_preview=True
+            )
             
             if str(user.id) != str(self.config.OWNER_ID):
                 await send_admin_notification(
@@ -1039,5 +1045,5 @@ def build_gki_conversation(gh, storage, config):
         allow_reentry=True,
         name="gki_conversation",
         persistent=False,
-        conversation_timeout=300,  # 5 phút → tự dọn state treo
+        conversation_timeout=60,  # 60s → tự dọn state treo
     )

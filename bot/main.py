@@ -624,32 +624,7 @@ async def poller(app):
                             pass
 
 
-                        buttons = []
-                        # Tạo trang Telegraph cho artifacts
-                        telegraph: TelegraphAPI = app.bot_data.get("telegraph")
-                        artifacts = await gh.list_artifacts_for_run(repo, int(run_id))
-                        telegraph_url = None
-                        if artifacts["status"] == 200:
-                            arr = artifacts["json"].get("artifacts", [])
-                            if arr and telegraph:
-                                telegraph_url = await telegraph.create_artifacts_page(
-                                    title=f"Build GKI #{run_id}",
-                                    artifacts=arr, repo=repo,
-                                    run_id=run_id,
-                                    owner=config.GITHUB_OWNER,
-                                    config_inputs=job.get("inputs", {})
-                                )
-
-                        if telegraph_url:
-                            buttons.append([
-                                InlineKeyboardButton("🌐 Xem GitHub", url=html_url),
-                                InlineKeyboardButton("📦 Tải file", url=telegraph_url)
-                            ])
-                        else:
-                            buttons.append([InlineKeyboardButton("🌐 Xem trên GitHub", url=html_url)])
-                        
-                        buttons.append([InlineKeyboardButton("📊 Web Dashboard", url="https://kernel.takeshi.dev/")])
-                        kb = InlineKeyboardMarkup(buttons)
+                        # Link đã được nhúng trực tiếp trong nội dung message.
 
                         chat_id = job["chat_id"]
                         user_id = job["user_id"]
@@ -662,26 +637,38 @@ async def poller(app):
                         created_at_dt = datetime.fromisoformat(job.get("created_at", datetime.now(timezone.utc).isoformat()).replace("Z", "+00:00"))
                         elapsed = int((datetime.now(timezone.utc) - created_at_dt).total_seconds() // 60)
 
+                        download_link = telegraph_url or f"https://nightly.link/{config.GITHUB_OWNER}/{repo}/actions/runs/{run_id}"
                         text = (
-                            f"{icon} <b>Build {job.get('type','?').upper()} kết thúc!</b>\n"
-                            f"📌 Trạng thái: <b>{conclusion.upper()}</b>\n"
-                            f"⏱️ Thời gian: <b>{elapsed} phút</b>\n"
-                            f"👤 Người gửi: {mention}"
+                            f"<b>{icon} Build {job.get('type','?').upper()} kết thúc!\n"
+                            f"┃\n"
+                            f"┠ Người nhận: {mention}\n"
+                            f"┠ Trạng thái: {conclusion.upper()}\n"
+                            f"┖ Thời gian: {elapsed} phút\n"
+                            f"<blockquote>Xem thông tin: "
+                            f"<a href='{html_url}'>Github</a>┃"
+                            f"<a href='https://kernel.takeshi.dev/'>Website</a>┃"
+                            f"<a href='{download_link}'>Download</a></blockquote></b>"
                         )
-                            
                         try:
-                            # Không gửi tin nhắn hoàn thành riêng lẻ cho lệnh buildsave (đã có batch realtime info)
-                            if job.get("type") != "buildsave":
-                                msg = await _bot_send_topic_safe(
-                                    app.bot,
-                                    chat_id,
-                                    text,
-                                    message_thread_id=job.get("message_thread_id"),
-                                    reply_markup=kb,
+                            msg = await _bot_send_topic_safe(
+                                app.bot,
+                                chat_id,
+                                text,
+                                message_thread_id=job.get("message_thread_id"),
+                                parse_mode=constants.ParseMode.HTML,
+                                disable_web_page_preview=True
+                            )
+                            await storage.track_message(msg.message_id, chat_id, user_id)
+
+                            try:
+                                await app.bot.send_message(
+                                    chat_id=user_id,
+                                    text=text,
                                     parse_mode=constants.ParseMode.HTML,
-                                    disable_web_page_preview=True
+                                    disable_web_page_preview=True,
                                 )
-                                await storage.track_message(msg.message_id, chat_id, user_id)
+                            except Exception as e:
+                                logger.warning("Completion DM failed for user_id=%s: %s", user_id, e)
 
                             # Cập nhật trạng thái job
                             await storage.update_job(job["_id"], {
@@ -700,7 +687,7 @@ async def poller(app):
                                 except Exception as e:
                                     logger.error("Auto PM save config failed: %s", e)
 
-                                # Buildsave: cập nhật link tải xuống vào JSON và gửi thông báo đặc biệt
+                                # Buildsave: cập nhật link tải xuống vào JSON
                                 if job.get("type") == "buildsave":
                                     try:
                                         await _update_buildsave_download_link(job, run_id, app)
@@ -856,9 +843,47 @@ async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if msg:
             await msg.edit_text(
-                f"🏓 <b>Pong!</b>\nBot đang hoạt động bình thường.\nĐộ trễ: {ping_ms}ms",
+                f"<b>🏓 Pong!\n<blockquote>Độ trễ: {ping_ms}ms</blockquote></b>",
                 parse_mode=constants.ParseMode.HTML,
             )
+
+
+async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat = update.effective_chat
+    user = update.effective_user
+    storage: HybridStorage = context.application.bot_data["storage"]
+    if chat and user and chat.type == "private":
+        await storage.track_dm_user(user.id, chat.id)
+    await _send_msg(
+        update,
+        context,
+        "<b>✅ Đã kích hoạt DM!<blockquote>Bây giờ bạn có thể nhận thông báo hoàn tất qua tin nhắn riêng.</blockquote></b>",
+        parse_mode=constants.ParseMode.HTML,
+    )
+
+
+async def ensure_user_started_bot(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    chat = update.effective_chat
+    user = update.effective_user
+    if not chat or not user or chat.type == "private":
+        return True
+
+    storage: HybridStorage = context.application.bot_data["storage"]
+    if await storage.has_dm_user(user.id):
+        return True
+
+    bot_username = (await context.bot.get_me()).username
+    start_url = f"https://t.me/{bot_username}?start=dm"
+    mention = f'<a href="tg://user?id={user.id}">{user.full_name}</a>'
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("🚀 Start bot", url=start_url)]])
+    await _send_msg(
+        update,
+        context,
+        f"<b><blockquote>🔐 {mention}, bấm Start bot trước rồi dùng lại lệnh để nhận thông báo hoàn tất qua DM.</blockquote></b>",
+        parse_mode=constants.ParseMode.HTML,
+        reply_markup=kb,
+    )
+    return False
 
 
 async def dm_tracker(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2158,6 +2183,7 @@ def main():
     # Admin commands (owner + static admins in .env)
     app.add_handler(CommandHandler("st", cmd_status))
     app.add_handler(CommandHandler("list", cmd_list))
+    app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("ping", cmd_ping))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("chat", cmd_broadcast))
@@ -2184,6 +2210,8 @@ def main():
     gki_conv = build_gki_conversation(gh, storage, config)
 
     async def gki_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await ensure_user_started_bot(update, context):
+            return ConversationHandler.END
         if not await check_user_job_limit(update, context):
             return ConversationHandler.END
         return await gki_conv.entry_points[0].callback(update, context)
@@ -2194,14 +2222,43 @@ def main():
         fallbacks=gki_conv.fallbacks,
         per_user=True,
         per_chat=False,
-        conversation_timeout=300  # 5 phút timeout tránh conversation treo
+        conversation_timeout=60  # 60s timeout tránh conversation treo
     ))
 
     # OKI conversation
-    app.add_handler(build_oki_conversation(gh, storage, config))
+    oki_conv = build_oki_conversation(gh, storage, config)
+
+    async def oki_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await ensure_user_started_bot(update, context):
+            return ConversationHandler.END
+        return await oki_conv.entry_points[0].callback(update, context)
+
+    app.add_handler(ConversationHandler(
+        entry_points=[CommandHandler("oki", oki_entry)],
+        states=oki_conv.states,
+        fallbacks=oki_conv.fallbacks,
+        per_user=True,
+        per_chat=False,
+        conversation_timeout=60,
+    ))
 
     # /build — Build kernel lưu trữ (admin only)
-    app.add_handler(build_buildsave_conversation(gh, storage, config))
+    buildsave_conv = build_buildsave_conversation(gh, storage, config)
+
+    async def buildsave_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await ensure_user_started_bot(update, context):
+            return ConversationHandler.END
+        return await buildsave_conv.entry_points[0].callback(update, context)
+
+    app.add_handler(ConversationHandler(
+        entry_points=[CommandHandler("build", buildsave_entry)],
+        states=buildsave_conv.states,
+        fallbacks=buildsave_conv.fallbacks,
+        allow_reentry=True,
+        name="buildsave_conversation",
+        persistent=False,
+        conversation_timeout=60,
+    ))
 
     async def _post_init(app_):
         # Seed dm_users từ lịch sử jobs cũ

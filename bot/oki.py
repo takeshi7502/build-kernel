@@ -417,6 +417,22 @@ class OKIFlow:
         
         _cleanup(context)
         return ConversationHandler.END
+    async def timeout(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = update.effective_user
+        mention = f'<a href="tg://user?id={user.id}">{user.full_name}</a>' if user else 'Bạn'
+        notice = f"<b><blockquote>⏳ {mention}, phiên /oki đã hết hạn sau 60s.</blockquote></b>"
+        q = update.callback_query
+        if q:
+            try:
+                await q.answer()
+                await q.edit_message_text(notice, parse_mode="HTML")
+            except Exception:
+                pass
+        elif update.effective_message:
+            await self._send_msg(update, context, notice, parse_mode="HTML")
+        _cleanup(context)
+        return ConversationHandler.END
+
 
 
 def build_oki_conversation(gh, storage, config):
@@ -431,9 +447,13 @@ def build_oki_conversation(gh, storage, config):
             OKI_CHOOSE_KPM: [CallbackQueryHandler(flow.set_kpm, pattern=r"^okikpm:"), back_handler, cancel_handler],
             OKI_CHOOSE_MANAGER: [CallbackQueryHandler(flow.set_manager, pattern=r"^okimgr:"), back_handler, cancel_handler],
             OKI_CONFIRM: [CallbackQueryHandler(flow.set_confirm, pattern=r"^okiconf:"), back_handler, cancel_handler],
+            ConversationHandler.TIMEOUT: [
+                CallbackQueryHandler(flow.timeout),
+                MessageHandler(filters.ALL, flow.timeout),
+            ],
         },
         fallbacks=[cancel_handler],
         per_user=True,
         per_chat=False,
-        conversation_timeout=300
+        conversation_timeout=60
     )
