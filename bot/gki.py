@@ -986,7 +986,7 @@ class GKIFlow:
             mention = f'<a href="tg://user?id={user.id}">{clean_name}</a>'
             
             msg_text = (
-                f"<b>✅ Đã gửi build thành công!\n"
+                f"<b>➲ Đã gửi GKI Build thành công!\n"
                 f"┃\n"
                 f"┠ Người gửi: {mention}\n"
                 f"┖ <i>Bạn sẽ nhận thông báo khi hoàn tất.</i>\n"

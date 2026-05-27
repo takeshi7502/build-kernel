@@ -420,10 +420,10 @@ class OKIFlow:
             mention = f'<a href="tg://user?id={user.id}">{clean_name}</a>'
             
             msg_text = (
-                f"<b> Đã gửi OKI Build thành công!\n"
+                f"<b>➲ Đã gửi OKI Build thành công!\n"
                 f"┃\n"
                 f"┠ Người gửi: {mention}\n"
-                f"┖ Tui sẽ thông báo khi hoàn tất.\n"
+                f"┖ <i>Bạn sẽ nhận thông báo khi hoàn tất.</i>\n"
                 f"<blockquote>Xem thông tin: <a href=\"{view_url}\">Github</a>┃<a href=\"https://kernel.takeshi.dev/\">Website</a></blockquote></b>"
             )
             await q.edit_message_text(msg_text, parse_mode="HTML", disable_web_page_preview=True)
