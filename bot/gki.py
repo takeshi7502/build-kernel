@@ -256,6 +256,11 @@ async def _send_topic_safe(context: ContextTypes.DEFAULT_TYPE, chat_id: int, tex
         return await context.bot.send_message(chat_id=chat_id, text=text, **kwargs)
 
 
+def _thread_id_from_update(update: Update):
+    msg = update.effective_message if update else None
+    return msg.message_thread_id if (msg and msg.is_topic_message) else None
+
+
 async def _update_bot_msg(context: ContextTypes.DEFAULT_TYPE, chat_id: int, text: str,
                           reply_markup=None, parse_mode=None, update: Update = None):
     """Edit tin nhắn bot đang track, hoặc gửi mới nếu chưa có."""
@@ -896,7 +901,7 @@ class GKIFlow:
                 f"{eta_line}\n"
                 "<i>Bot sẽ thông báo ngay cho bạn khi có slot trống!</i>"
             )
-            await self.storage.add_waiter(user.id, q.message.chat_id, user.full_name)
+            await self.storage.add_waiter(user.id, q.message.chat_id, user.full_name, q.message.message_thread_id)
             await q.edit_message_text(msg, parse_mode="HTML")
             if context.job_queue:
                 context.job_queue.run_once(
@@ -963,6 +968,7 @@ class GKIFlow:
                 "user_id": user.id,
                 "user_name": user.full_name,
                 "chat_id": update.effective_chat.id,
+                "message_thread_id": _thread_id_from_update(update),
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "run_id": None,
                 "status": "dispatched",

@@ -8,6 +8,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ContextTypes, ConversationHandler, CallbackQueryHandler, MessageHandler, CommandHandler, filters
 )
+from telegram.error import BadRequest
 from permissions import is_admin
 from config import send_admin_notification
 
@@ -103,11 +104,28 @@ class OKIFlow:
         self.storage = storage
         self.config = config
 
+    def _thread_id_from_update(self, update: Update):
+        msg = update.effective_message if update else None
+        return msg.message_thread_id if (msg and msg.is_topic_message) else None
+
+    async def _send_topic_safe(self, context: ContextTypes.DEFAULT_TYPE, chat_id: int, text: str, thread_id=None, **kwargs):
+        try:
+            return await context.bot.send_message(
+                chat_id=chat_id,
+                message_thread_id=thread_id,
+                text=text,
+                **kwargs,
+            )
+        except BadRequest as e:
+            if "Topic_closed" not in str(e) or thread_id is None:
+                raise
+            return await context.bot.send_message(chat_id=chat_id, text=text, **kwargs)
+
     async def _send_msg(self, update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, **kwargs):
         kwargs.pop('quote', None)
         chat_id = update.effective_chat.id
         thread_id = update.effective_message.message_thread_id if (update.effective_message and update.effective_message.is_topic_message) else None
-        return await context.bot.send_message(chat_id=chat_id, message_thread_id=thread_id, text=text, **kwargs)
+        return await self._send_topic_safe(context, chat_id, text, thread_id=thread_id, **kwargs)
 
     async def _update_bot_msg(self, update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, **kwargs):
         kwargs.pop("quote", None)
@@ -127,10 +145,11 @@ class OKIFlow:
             except Exception:
                 pass
 
-        msg = await context.bot.send_message(
-            chat_id=chat_id,
-            message_thread_id=thread_id,
-            text=text,
+        msg = await self._send_topic_safe(
+            context,
+            chat_id,
+            text,
+            thread_id=thread_id,
             **kwargs
         )
         context.user_data["oki_bot_msg_id"] = msg.message_id
@@ -356,6 +375,7 @@ class OKIFlow:
                 "user_id": user.id,
                 "user_name": user.full_name,
                 "chat_id": update.effective_chat.id,
+                "message_thread_id": self._thread_id_from_update(update),
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "run_id": None,
                 "status": "dispatched",

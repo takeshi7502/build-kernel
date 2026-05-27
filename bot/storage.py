@@ -403,12 +403,17 @@ class HybridStorage:
     # ==========================
     # WAITERS (Userbot)
     # ==========================
-    async def add_waiter(self, user_id: int, chat_id: int, user_name: str = ""):
+    async def add_waiter(self, user_id: int, chat_id: int, user_name: str = "", message_thread_id=None):
         async with self._lock:
             data = self._load()
             waiters = data.setdefault("waiters", [])
             if not any(w.get("user_id") == user_id for w in waiters):
-                waiters.append({"user_id": user_id, "chat_id": chat_id, "user_name": user_name})
+                waiters.append({
+                    "user_id": user_id,
+                    "chat_id": chat_id,
+                    "user_name": user_name,
+                    "message_thread_id": message_thread_id,
+                })
                 await self._save(data)
 
     async def clear_waiters(self):

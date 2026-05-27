@@ -106,8 +106,11 @@ class BuildSaveFlow:
             await update.message.delete()
         except Exception:
             pass
-        await update.effective_chat.send_message(
-            "🔨 <b>Build Kernel Lưu Trữ</b>\n\nChọn <b>KernelSU Variant</b>:",
+        thread_id = update.effective_message.message_thread_id if (update.effective_message and update.effective_message.is_topic_message) else None
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            message_thread_id=thread_id,
+            text="🔨 <b>Build Kernel Lưu Trữ</b>\n\nChọn <b>KernelSU Variant</b>:",
             reply_markup=InlineKeyboardMarkup(rows),
             parse_mode="HTML"
         )
@@ -315,6 +318,7 @@ class BuildSaveFlow:
                 
                 "batch_id":      batch_id,
                 "batch_msg_id":  batch_msg_id,
+                "message_thread_id": msg.message_thread_id,
                 "batch_total":   len(selected_subs),
                 "batch_index":   index,
                 

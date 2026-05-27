@@ -53,7 +53,7 @@ logging.basicConfig(
 logger = logging.getLogger("gww-bot")
 
 from telegram.ext import ExtBot
-from telegram.error import RetryAfter
+from telegram.error import RetryAfter, BadRequest
 import asyncio
 
 _original_do_post = ExtBot._do_post
@@ -267,6 +267,26 @@ class GitHubAPI:
 def tg_mention_html(user) -> str:
     name = user.first_name or user.username or "user"
     return f'<a href="tg://user?id={user.id}">{name}</a>'
+
+async def _bot_send_topic_safe(bot, chat_id: int, text: str, message_thread_id=None, **kwargs):
+    """Send to a forum topic when possible, falling back if that topic is closed."""
+    try:
+        return await bot.send_message(
+            chat_id=chat_id,
+            message_thread_id=message_thread_id,
+            text=text,
+            **kwargs,
+        )
+    except BadRequest as e:
+        if "Topic_closed" not in str(e) or message_thread_id is None:
+            raise
+        return await bot.send_message(chat_id=chat_id, text=text, **kwargs)
+
+
+def _thread_id_from_update(update: Update):
+    msg = update.effective_message if update else None
+    return msg.message_thread_id if (msg and msg.is_topic_message) else None
+
 
 async def safe_delete_message(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_id: int):
     try:
@@ -652,8 +672,11 @@ async def poller(app):
                         try:
                             # Không gửi tin nhắn hoàn thành riêng lẻ cho lệnh buildsave (đã có batch realtime info)
                             if job.get("type") != "buildsave":
-                                msg = await app.bot.send_message(
-                                    chat_id=chat_id, text=text,
+                                msg = await _bot_send_topic_safe(
+                                    app.bot,
+                                    chat_id,
+                                    text,
+                                    message_thread_id=job.get("message_thread_id"),
                                     reply_markup=kb,
                                     parse_mode=constants.ParseMode.HTML,
                                     disable_web_page_preview=True
@@ -704,8 +727,11 @@ async def poller(app):
                                 w_mention = f'<a href="tg://user?id={w_user_id}">{w_name}</a>'
                                 msg_waiter = f"🔔 {w_mention} ơi, tiến trình đã hoàn tất! Bạn có thể dùng lệnh /gki lại ngay bây giờ nhé."
                                 try:
-                                    await app.bot.send_message(
-                                        chat_id=w_chat_id, text=msg_waiter,
+                                    await _bot_send_topic_safe(
+                                        app.bot,
+                                        w_chat_id,
+                                        msg_waiter,
+                                        message_thread_id=w.get("message_thread_id"),
                                         parse_mode=constants.ParseMode.HTML
                                     )
                                 except Exception:
@@ -724,7 +750,13 @@ async def _send_msg(update: Update, context: ContextTypes.DEFAULT_TYPE, text: st
     kwargs.pop('quote', None)
     chat_id = update.effective_chat.id
     thread_id = update.effective_message.message_thread_id if (update.effective_message and update.effective_message.is_topic_message) else None
-    return await context.bot.send_message(chat_id=chat_id, message_thread_id=thread_id, text=text, **kwargs)
+    return await _bot_send_topic_safe(
+        context.bot,
+        chat_id,
+        text,
+        message_thread_id=thread_id,
+        **kwargs,
+    )
 
 async def _safe_delete_user_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Silently delete the user's message immediately."""
@@ -1634,10 +1666,11 @@ async def cmd_rebuild(update: Update, context: ContextTypes.DEFAULT_TYPE):
     total = len(batch_jobs)
     chat_id = update.effective_chat.id
     thread_id = update.effective_message.message_thread_id if (update.effective_message and update.effective_message.is_topic_message) else None
-    msg = await context.bot.send_message(
-        chat_id=chat_id,
+    msg = await _bot_send_topic_safe(
+        context.bot,
+        chat_id,
+        f"🔄 <b>Đang Rebuild... {custom_id}</b>\n<b>⏳ Tiến trình: 0/{total}</b>\n<blockquote>Xem: <a href='https://github.com/{config.GITHUB_OWNER}/{config.GKI_REPO}/actions'><b>Github</b></a> | <a href='https://kernel.takeshi.dev/'><b>Dashboard</b></a></blockquote>",
         message_thread_id=thread_id,
-        text=f"🔄 <b>Đang Rebuild... {custom_id}</b>\n<b>⏳ Tiến trình: 0/{total}</b>\n<blockquote>Xem: <a href='https://github.com/{config.GITHUB_OWNER}/{config.GKI_REPO}/actions'><b>Github</b></a> | <a href='https://kernel.takeshi.dev/'><b>Dashboard</b></a></blockquote>",
         parse_mode="HTML"
     )
     rebuild_msg_id = f"{msg.message_id}|{msg.chat_id}|{custom_id}"
