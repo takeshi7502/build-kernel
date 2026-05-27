@@ -24,19 +24,25 @@ from config import send_admin_notification
 
 FILES = [
   "oneplus_nord_n30_se_5g_v", "oneplus_10r_v", "oneplus_nord_3_v", "oneplus_ace_v", "oneplus_ace_race_v",
-  "oneplus_10_pro_b", "oneplus_10t_v", "oneplus_11r_b", "oneplus_ace2_b", "oneplus_pad_lite_v", "oneplus_pad_mt6983_b",
-  "oneplus_ace_2v_b", "oneplus_ace_pro_v", "oneplus_11_b", "oneplus_12r_b", "oneplus_ace2_pro_b", "oneplus_ace3_b",
-  "oneplus_open_b", "oneplus_nord_ce4_b", "oneplus_12_b", "oneplus_pad_go_2_b", "oneplus_nord_ce4_lite_5g_b",
-  "oneplus_nord_4_b", "oneplus_ace_3v_b", "oneplus_pad_mt6897_b", "oneplus_13r_b", "oneplus_ace3_pro_b",
-  "oneplus_ace5_b", "oneplus_pad_pro_b", "oneplus_pad2_b", "oneplus_nord_ce5_b", "oneplus_nord_5_b",
-  "oneplus_ace5_pro_b", "oneplus_13_b", "oneplus_13t_b", "oneplus_13s_b", "oneplus_pad_2_pro_b", "oneplus_pad_3_b",
-  "oneplus_ace5_race_b", "oneplus_ace5_ultra_b", "oneplus_ace5_ultra_bak_b", "oneplus_pad2_mt6991_b",
-  "oneplus_ace_6", "oneplus_ace_6t", "oneplus_ace_6t_aosp", "oneplus_15r", "oneplus_15r_aosp", "oneplus_15", "oneplus_15_aosp"
+  "oneplus_10_pro_b", "oneplus_10t_v", "oneplus_11r_b", "oneplus_ace2_b", "oneplus_pad_lite_b",
+  "oneplus_pad_lite_Canary_b", "oneplus_pad_mt6983_b", "oneplus_ace_2v_b", "oneplus_ace_pro_v",
+  "oneplus_11_b", "oneplus_12r_b", "oneplus_ace2_pro_b", "oneplus_ace3_b", "oneplus_open_b",
+  "oneplus_nord_ce4_b", "oneplus_12_b", "oneplus_pad_go_2_b", "oneplus_nord_ce4_lite_5g_b",
+  "oneplus_turbo_6v", "oneplus_nord_4_b", "oneplus_ace_3v_b", "oneplus_pad_mt6897_b", "oneplus_13r_b",
+  "oneplus_ace3_pro_b", "oneplus_ace5_b", "oneplus_pad_pro_b", "oneplus_pad2_b", "oneplus_nord_ce5_b",
+  "oneplus_nord_5_b", "oneplus_ace5_pro_b", "oneplus_13_b", "oneplus_13t_b", "oneplus_13s_b",
+  "oneplus_pad_2_pro_b", "oneplus_pad_3_b", "oneplus_ace5_race_b", "oneplus_ace5_ultra_b",
+  "oneplus_pad2_mt6991_b", "oneplus_ace_6", "oneplus_turbo_6", "oneplus_nord_6", "oneplus_ace_6t",
+  "oneplus_ace_6t_Canary", "oneplus_15r", "oneplus_15r_Canary", "oneplus_15", "oneplus_15_Canary",
+  "oneplus_15t", "oneplus_15t_Canary", "oneplus_pad_3_pro", "oneplus_pad_3_pro_Canary",
+  "oneplus_pad_4", "oneplus_pad_4_Canary"
 ]
 
 def _clean_label(s: str) -> str:
     if s.startswith("oneplus_"):
         s = s[len("oneplus_"):]
+    for suffix in ("_Canary", "_aosp", "_bak", "_global"):
+        s = s.replace(suffix, "")
     if s.endswith("_v"):
         s = s[:-2]
     if s.endswith("_b"):
@@ -69,8 +75,10 @@ def _file_keyboard(page: int = 0):
 
 def _back_cancel(back_to: str):
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔙 Quay lại", callback_data=f"okiback:{back_to}")],
-        [InlineKeyboardButton("❌ Hủy", callback_data="oki:cancel")]
+        [
+            InlineKeyboardButton("🔙 Quay lại", callback_data=f"okiback:{back_to}"),
+            InlineKeyboardButton("❌ Hủy", callback_data="oki:cancel")
+        ]
     ])
 
 async def _ensure_owner(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -219,6 +227,7 @@ class OKIFlow:
             "DYNAMIC_REPO": "Numbersf",
             "BUILD_TIME": "F",
             "KSU_META": "susfs-main/Numbersf/",
+            "LZ4_UPDATE": False,
             "ZRAM": "0/lz4kd/8589934592",
             "SUFFIX": "",
             "SUBLEVEL": "",
@@ -228,9 +237,11 @@ class OKIFlow:
             "CCM": True,
             "UNICODE_BYPASS": False,
             "SCHED_HMBIRD": False,
+            "DROID_SPACES": False,
+            "RE_KERNEL": False,
             "SUSFS_DEV": False,
             "SPACE_NOCLEAN": False,
-            "BUILD_NOCCACHE": False
+            "BUILD_NOCACHE": False
         }}
         await self._update_bot_msg(update, context, "<b>Chọn máy bạn muốn build:</b>", parse_mode="HTML", reply_markup=_file_keyboard(0))
         return OKI_CHOOSE_FILE
@@ -284,10 +295,13 @@ class OKIFlow:
     async def _ask_ksu(self, q):
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("SukiSU (susfs-main)", callback_data="okiksuvar:susfs-main/Numbersf/")],
+            [InlineKeyboardButton("KittiSU (kittisu)", callback_data="okiksuvar:kittisu/Numbersf/")],
             [InlineKeyboardButton("NextSU (next nhánh)", callback_data="okiksuvar:next/Numbersf/")],
             [InlineKeyboardButton("ReSuKi (resuki nhánh)", callback_data="okiksuvar:resuki/Numbersf/")],
-            [InlineKeyboardButton("🔙 Quay lại", callback_data="okiback:file")],
-            [InlineKeyboardButton("❌ Hủy", callback_data="oki:cancel")]
+            [
+                InlineKeyboardButton("🔙 Quay lại", callback_data="okiback:file"),
+                InlineKeyboardButton("❌ Hủy", callback_data="oki:cancel")
+            ]
         ])
         await q.edit_message_text("<b>Chọn loại KernelSU bạn muốn tích hợp:</b>", parse_mode="HTML", reply_markup=kb)
 
@@ -303,8 +317,10 @@ class OKIFlow:
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("KPM", callback_data="okikpm:KPM"), InlineKeyboardButton("KPN", callback_data="okikpm:KPN")],
             [InlineKeyboardButton("N/A (Tắt Module)", callback_data="okikpm:N/A")],
-            [InlineKeyboardButton("🔙 Quay lại", callback_data="okiback:ksu")],
-            [InlineKeyboardButton("❌ Hủy", callback_data="oki:cancel")]
+            [
+                InlineKeyboardButton("🔙 Quay lại", callback_data="okiback:ksu"),
+                InlineKeyboardButton("❌ Hủy", callback_data="oki:cancel")
+            ]
         ])
         await q.edit_message_text("<b>Chọn phương thức module KernelSU (KPM):</b>", parse_mode="HTML", reply_markup=kb)
 
@@ -320,8 +336,10 @@ class OKIFlow:
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("MIUIX", callback_data="okimgr:MIUIX"), InlineKeyboardButton("MIUIX_SPOOF", callback_data="okimgr:MIUIX_SPOOF")],
             [InlineKeyboardButton("MD3", callback_data="okimgr:MD3"), InlineKeyboardButton("MD3_SPOOF", callback_data="okimgr:MD3_SPOOF")],
-            [InlineKeyboardButton("🔙 Quay lại", callback_data="okiback:kpm")],
-            [InlineKeyboardButton("❌ Hủy", callback_data="oki:cancel")]
+            [
+                InlineKeyboardButton("🔙 Quay lại", callback_data="okiback:kpm"),
+                InlineKeyboardButton("❌ Hủy", callback_data="oki:cancel")
+            ]
         ])
         await q.edit_message_text("<b>Chọn nguồn Manager (Trình quản lý):</b>", parse_mode="HTML", reply_markup=kb)
 
@@ -336,8 +354,10 @@ class OKIFlow:
     async def _ask_confirm(self, q):
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("⚡ BẬT Fast Build", callback_data="okiconf:fast"), InlineKeyboardButton("🐢 TẮT Fast Build", callback_data="okiconf:slow")],
-            [InlineKeyboardButton("🔙 Quay lại", callback_data="okiback:manager")],
-            [InlineKeyboardButton("❌ Hủy", callback_data="oki:cancel")]
+            [
+                InlineKeyboardButton("🔙 Quay lại", callback_data="okiback:manager"),
+                InlineKeyboardButton("❌ Hủy", callback_data="oki:cancel")
+            ]
         ])
         await q.edit_message_text("<b>Cấu hình cuối cùng: Chọn tốc độ Build (Fast Build):</b>\n<i>(Các cấu hình khác như ZRAM, BBG, DYNAMIC_REPO sẽ dùng mặc định)</i>", parse_mode="HTML", reply_markup=kb)
 
@@ -387,20 +407,18 @@ class OKIFlow:
                 await self.storage.consume(key)
             
             view_url = f"https://github.com/{self.config.GITHUB_OWNER}/{self.config.OKI_REPO}/actions/workflows/{dispatch_file}"
-            btn = InlineKeyboardMarkup([[
-                InlineKeyboardButton("🔗 Github", url=view_url),
-                InlineKeyboardButton("📊 Dashboard", url="https://kernel.takeshi.dev/")
-            ]])
             
             clean_name = user.full_name.replace("#", "＃").replace("@", "＠").replace("<", "&lt;").replace(">", "&gt;")
             mention = f'<a href="tg://user?id={user.id}">{clean_name}</a>'
             
             msg_text = (
-                f"✅ <b>Đã gửi OKI Build thành công!</b>\n"
-                f"👤 Người gửi: {mention}\n\n"
-                f"<i>Bạn sẽ nhận được thông báo khi hoàn tất.</i>"
+                f"<b> Đã gửi OKI Build thành công!\n"
+                f"┃\n"
+                f"┠ Người gửi: {mention}\n"
+                f"┖ Tui sẽ thông báo khi hoàn tất.\n"
+                f"<blockquote>Xem thông tin: <a href=\"{view_url}\">Github</a>┃<a href=\"https://kernel.takeshi.dev/\">Website</a></blockquote></b>"
             )
-            await q.edit_message_text(msg_text, reply_markup=btn, parse_mode="HTML")
+            await q.edit_message_text(msg_text, parse_mode="HTML", disable_web_page_preview=True)
             
             if str(user.id) != str(self.config.OWNER_ID):
                 await send_admin_notification(
@@ -421,15 +439,37 @@ class OKIFlow:
         user = update.effective_user
         mention = f'<a href="tg://user?id={user.id}">{user.full_name}</a>' if user else 'Bạn'
         notice = f"<b><blockquote>⏳ {mention}, phiên /oki đã hết hạn sau 60s.</blockquote></b>"
+        timeout_chat_id = None
+        timeout_message_id = None
         q = update.callback_query
         if q:
             try:
                 await q.answer()
+            except Exception:
+                pass
+            if q.message:
+                timeout_chat_id = q.message.chat_id
+                timeout_message_id = q.message.message_id
+            try:
                 await q.edit_message_text(notice, parse_mode="HTML")
             except Exception:
                 pass
         elif update.effective_message:
-            await self._send_msg(update, context, notice, parse_mode="HTML")
+            try:
+                m = await self._send_msg(update, context, notice, parse_mode="HTML")
+                timeout_chat_id = m.chat_id
+                timeout_message_id = m.message_id
+            except Exception:
+                pass
+
+        if context.job_queue and timeout_chat_id and timeout_message_id:
+            context.job_queue.run_once(
+                _del_msg_job,
+                when=60,
+                chat_id=timeout_chat_id,
+                data=timeout_message_id
+            )
+
         _cleanup(context)
         return ConversationHandler.END
 

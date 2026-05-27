@@ -56,21 +56,31 @@ async def get_realtime_data(app):
         if gh:
             now = int(datetime.now(timezone.utc).timestamp())
             if now - _LAST_GH_FETCH > 30: # Phân giải cache 30 giây để tránh Rate Limit
-                url = f"{gh.base}/repos/{config.GITHUB_OWNER}/{config.GKI_REPO}/actions/runs?per_page=50"
-                res = await gh._request("GET", url)
-                if res.get("status") == 200:
-                    _GH_RUNS_CACHE = {str(r["id"]): r for r in res.get("json", {}).get("workflow_runs", [])}
+                repos = [config.GKI_REPO]
+                if getattr(config, "OKI_REPO", "") and config.OKI_REPO not in repos:
+                    repos.append(config.OKI_REPO)
+
+                new_cache = {}
+                for repo in repos:
+                    url = f"{gh.base}/repos/{config.GITHUB_OWNER}/{repo}/actions/runs?per_page=50"
+                    res = await gh._request("GET", url)
+                    if res.get("status") == 200:
+                        new_cache[repo] = {str(r["id"]): r for r in res.get("json", {}).get("workflow_runs", [])}
+                if new_cache:
+                    _GH_RUNS_CACHE = new_cache
                     _LAST_GH_FETCH = now
             
             if _GH_RUNS_CACHE:
                 active_jobs = []
                 for j in jobs:
                     run_id = str(j.get("run_id", ""))
+                    repo_name = j.get("repo", config.GKI_REPO)
+                    repo_cache = _GH_RUNS_CACHE.get(repo_name, {})
                     if not run_id or run_id == "None":
                         active_jobs.append(j)
                         continue
                         
-                    if run_id not in _GH_RUNS_CACHE:
+                    if run_id not in repo_cache:
                         # Không có trong top 50 run gần nhất. Nếu cũ quá 6 tiếng thì báo lỗi để tránh kẹt trạng thái.
                         try:
                             cat = datetime.fromisoformat(j.get("created_at", "").replace("Z", "+00:00"))
@@ -83,7 +93,7 @@ async def get_realtime_data(app):
                         active_jobs.append(j)
                         continue
                         
-                    gh_run = _GH_RUNS_CACHE[run_id]
+                    gh_run = repo_cache[run_id]
                     # Nếu DB đã đánh dấu cancelled thì giữ nguyên, không để GH override
                     if j.get("conclusion") == "cancelled":
                         j["status"] = "completed"
@@ -93,9 +103,14 @@ async def get_realtime_data(app):
                     active_jobs.append(j)
                 jobs = active_jobs
             
-            # Đếm số tiến trình đang chạy (active_builds)
+            # Đếm số tiến trình đang chạy (active_builds) trên cả GKI và OKI
             if _GH_RUNS_CACHE:
-                active_gh_builds = sum(1 for r in _GH_RUNS_CACHE.values() if r.get("status") in ("in_progress", "queued", "waiting"))
+                active_gh_builds = sum(
+                    1
+                    for repo_cache in _GH_RUNS_CACHE.values()
+                    for r in repo_cache.values()
+                    if r.get("status") in ("in_progress", "queued", "waiting")
+                )
 
         data["active_builds"] = active_gh_builds
         # -------- KẾT THÚC ĐỒNG BỘ VỚI GITHUB --------
@@ -291,6 +306,7 @@ async def get_realtime_data(app):
                 
                 ksu_meta = str(inputs.get("KSU_META", ""))
                 if "susfs-main" in ksu_meta: variant = "SukiSU"
+                elif "kittisu" in ksu_meta: variant = "KittiSU"
                 elif "next" in ksu_meta: variant = "NextSU"
                 elif "resuki" in ksu_meta: variant = "ReSuKi"
                 else: variant = ksu_meta.split("/")[0] if ksu_meta else "NoKSU"
@@ -371,8 +387,10 @@ async def get_realtime_data(app):
                 
             duration = j.get("gh_duration", "")
             run_id = str(j.get("run_id", ""))
-            if run_id in _GH_RUNS_CACHE:
-                r = _GH_RUNS_CACHE[run_id]
+            repo_name = j.get("repo", config.GKI_REPO)
+            repo_cache = _GH_RUNS_CACHE.get(repo_name, {})
+            if run_id in repo_cache:
+                r = repo_cache[run_id]
                 try:
                     t1_str = r.get("run_started_at") or r.get("created_at", "")
                     if t1_str:

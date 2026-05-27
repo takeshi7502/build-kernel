@@ -606,6 +606,19 @@ async def poller(app):
 
                     status = rn["json"].get("status")
                     if status == "completed":
+                        duplicate_jobs = []
+                        if run_id:
+                            try:
+                                all_jobs = await storage.get_jobs()
+                                duplicate_jobs = [
+                                    j for j in all_jobs
+                                    if j.get("_id") != job.get("_id")
+                                    and j.get("repo") == job.get("repo")
+                                    and str(j.get("run_id")) == str(run_id)
+                                    and not j.get("notified")
+                                ]
+                            except Exception as e:
+                                logger.warning("Duplicate job lookup failed for run_id=%s: %s", run_id, e)
                         conclusion = rn["json"].get("conclusion")
                         html_url = rn["json"].get("html_url")
                         telegraph_url = None
@@ -671,13 +684,15 @@ async def poller(app):
                             except Exception as e:
                                 logger.warning("Completion DM failed for user_id=%s: %s", user_id, e)
 
-                            # Cập nhật trạng thái job
-                            await storage.update_job(job["_id"], {
+                            update_fields = {
                                 "status": "completed",
                                 "conclusion": conclusion,
                                 "gh_duration": gh_dur,
                                 "notified": True
-                            })
+                            }
+                            await storage.update_job(job["_id"], update_fields)
+                            for dup in duplicate_jobs:
+                                await storage.update_job(dup["_id"], update_fields)
 
                             if conclusion == "success":
                                 await storage.add_successful_build(run_id, user_id, job.get("ref", "unknown"), user_name)
