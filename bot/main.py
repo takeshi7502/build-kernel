@@ -608,6 +608,7 @@ async def poller(app):
                     if status == "completed":
                         conclusion = rn["json"].get("conclusion")
                         html_url = rn["json"].get("html_url")
+                        telegraph_url = None
                         
                         gh_dur = ""
                         try:
