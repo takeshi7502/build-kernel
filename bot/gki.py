@@ -228,7 +228,7 @@ async def _ensure_owner(update: Update, context: ContextTypes.DEFAULT_TYPE) -> b
 def _task_header(context) -> str:
     owner_name = context.chat_data.get("gki_owner_name", "Unknown")
     owner_id = context.chat_data.get("gki_owner", 0)
-    return f'📋 <b>Task by <a href="tg://user?id={owner_id}">{owner_name}</a></b>\n\n'
+    return f'📋 <b>Task by <a href="tg://user?id={owner_id}">{owner_name}</a></b>\n┃\n┖ '
 
 
 async def _safe_delete(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_id: int):
