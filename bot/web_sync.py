@@ -4,13 +4,20 @@ import logging
 from datetime import datetime, timezone, timedelta
 import config
 
+def _is_kpm_enabled(inputs: dict) -> bool:
+    raw = inputs.get("use_kpm", False)
+    if isinstance(raw, bool):
+        return raw
+    return str(raw).strip().lower().startswith("enabled")
+
+
 def _make_custom_id(variant, inputs, created_at_iso):
     if not created_at_iso:
         created_at_iso = ""
     var_cl = str(variant).upper().replace(" ", "").replace("-", "").replace("(", "").replace(")", "")[:6]
     z_n = "1" if inputs.get("use_zram", True) else "0"
     b_n = "1" if inputs.get("use_bbg", True) else "0"
-    k_n = "1" if inputs.get("use_kpm", True) else "0"
+    k_n = "1" if _is_kpm_enabled(inputs) else "0"
     s_n = "0" if inputs.get("cancel_susfs", True) else "1"
     try:
         dt = datetime.fromisoformat(created_at_iso.replace("Z", "+00:00")) + timedelta(hours=7)
@@ -146,7 +153,7 @@ async def get_realtime_data(app):
                 custom_version = str(inputs.get("version", "")).strip("-")
                 zram = "Bật" if inputs.get("use_zram", True) else "Tắt"
                 bbg = "Bật" if inputs.get("use_bbg", True) else "Tắt"
-                kpm = "Bật" if inputs.get("use_kpm", True) else "Tắt"
+                kpm = "Bật" if _is_kpm_enabled(inputs) else "Tắt"
                 susfs = "Tắt" if inputs.get("cancel_susfs", True) else "Bật"
                 
                 # Tính trạng thái tổng hợp của cả batch
@@ -322,7 +329,7 @@ async def get_realtime_data(app):
                 custom_version = str(inputs.get("version", "")).strip("-")
                 zram = "Bật" if inputs.get("use_zram", True) else "Tắt"
                 bbg = "Bật" if inputs.get("use_bbg", True) else "Tắt"
-                kpm = "Bật" if inputs.get("use_kpm", True) else "Tắt"
+                kpm = "Bật" if _is_kpm_enabled(inputs) else "Tắt"
                 susfs = "Tắt" if inputs.get("cancel_susfs", True) else "Bật"
                 
             else:
@@ -355,7 +362,7 @@ async def get_realtime_data(app):
                 custom_version = str(inputs.get("version", "")).strip("-")
                 zram = "Bật" if inputs.get("use_zram", True) else "Tắt"
                 bbg = "Bật" if inputs.get("use_bbg", True) else "Tắt"
-                kpm = "Bật" if inputs.get("use_kpm", True) else "Tắt"
+                kpm = "Bật" if _is_kpm_enabled(inputs) else "Tắt"
                 susfs = "Tắt" if inputs.get("cancel_susfs", True) else "Bật"
             
             status = "building"

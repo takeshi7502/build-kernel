@@ -681,12 +681,6 @@ async def poller(app):
 
                             if conclusion == "success":
                                 await storage.add_successful_build(run_id, user_id, job.get("ref", "unknown"), user_name)
-                                # Tự động gửi PM cấu hình cho GKI
-                                try:
-                                    if job.get("type", "gki") == "gki":
-                                        await send_saved_config(app, run_id, job, user_id)
-                                except Exception as e:
-                                    logger.error("Auto PM save config failed: %s", e)
 
                                 # Buildsave: cập nhật link tải xuống vào JSON
                                 if job.get("type") == "buildsave":
