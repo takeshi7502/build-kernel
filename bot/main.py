@@ -871,13 +871,15 @@ async def ensure_user_started_bot(update: Update, context: ContextTypes.DEFAULT_
     start_url = f"https://t.me/{bot_username}?start=dm"
     mention = f'<a href="tg://user?id={user.id}">{user.full_name}</a>'
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("🚀 Start bot", url=start_url)]])
-    await _send_msg(
+    m = await _send_msg(
         update,
         context,
-        f"<b><blockquote>🔐 {mention}, bấm Start bot trước rồi dùng lại lệnh để nhận thông báo hoàn tất qua DM.</blockquote></b>",
+        f"<b><blockquote>🔐 {mention}, bấm Start bot trước rồi dùng lại lệnh nha!</blockquote></b>",
         parse_mode=constants.ParseMode.HTML,
         reply_markup=kb,
     )
+    if m:
+        context.job_queue.run_once(_del_msg_job, when=60, chat_id=m.chat_id, data=m.message_id)
     return False
 
 
