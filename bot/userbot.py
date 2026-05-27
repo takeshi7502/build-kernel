@@ -80,7 +80,7 @@ ADMIN_IDS = set(_parse_int_list(os.getenv("ADMIN_IDS", "")))
 USERBOT_STANDALONE = os.getenv("USERBOT_STANDALONE", "0").strip().lower() in {"1", "true", "yes", "on"}
 
 # ─── Build data ───────────────────────────────────────────────────────
-VARIANTS = ["SukiSU", "ReSukiSU", "KittiSU", "Official", "Next", "MKSU"]
+VARIANTS = ["SukiSU", "ReSukiSU", "KittiSU", "Official", "MKSU"]  # Next đã bị upstream loại bỏ
 BRANCHES = ["Stable(标准)", "Dev(开发)"]
 RELEASE_TYPES = ["Actions", "Pre-Release", "Release"]
 BUILD_TARGETS = [
@@ -445,20 +445,39 @@ async def _delete_later(msg, seconds: int = 10):
     asyncio.ensure_future(_do())
 
 
+def _topic_reply_to_from_event(event):
+    """Return Telethon reply_to id used to target the current forum topic."""
+    reply_to = getattr(event.message, "reply_to", None)
+    if reply_to and getattr(reply_to, "forum_topic", False):
+        return reply_to.reply_to_top_id or event.message.reply_to_msg_id
+    return None
+
+
+async def _send_topic_safe(chat_id, text: str, topic_reply_to=None, **kwargs):
+    """Send to a forum topic when possible, falling back if that topic is closed."""
+    if topic_reply_to:
+        kwargs["reply_to"] = topic_reply_to
+    try:
+        return await client.send_message(chat_id, text, **kwargs)
+    except Exception as e:
+        if not topic_reply_to or "Topic_closed" not in str(e):
+            raise
+        kwargs.pop("reply_to", None)
+        return await client.send_message(chat_id, text, **kwargs)
+
+
 async def _reply(event, text: str, html: bool = False):
     chat_id = event.chat_id
     kwargs = {
         "link_preview": False,
         "parse_mode": "html" if html else None
     }
-    
-    if hasattr(event.message, "reply_to") and event.message.reply_to and getattr(event.message.reply_to, "forum_topic", False):
-        kwargs["reply_to"] = event.message.reply_to.reply_to_top_id or event.message.reply_to_msg_id
+    topic_reply_to = _topic_reply_to_from_event(event)
 
     _processing_chats.add(chat_id)
     try:
-        msg = await client.send_message(
-            chat_id, text, **kwargs
+        msg = await _send_topic_safe(
+            chat_id, text, topic_reply_to=topic_reply_to, **kwargs
         )
         return msg
     finally:
@@ -908,7 +927,7 @@ async def _do_dispatch(event, session: Dict[str, Any]) -> bool:
         msg = (f"❌ Máy chủ đang quá tải!\n\n"
                f"• Hiện tại đang có {active_runs_count} tiến trình.\n"
                f"• Vui lòng chờ rồi thử lại.{eta_line}")
-        await storage.add_waiter(sender_id, chat_id, "")
+        await storage.add_waiter(sender_id, chat_id, "", _topic_reply_to_from_event(event))
         if menu_msg_id:
             try:
                 await client.edit_message(chat_id, menu_msg_id, msg)
@@ -1006,6 +1025,7 @@ async def _do_dispatch(event, session: Dict[str, Any]) -> bool:
         "user_id": sender_id,
         "user_name": sender_name,
         "chat_id": chat_id,
+        "message_thread_id": _topic_reply_to_from_event(event),
         "created_at": datetime.now(timezone.utc).isoformat(),
         "run_id": None,
         "status": "dispatched",
@@ -1849,7 +1869,13 @@ async def poller_loop():
                             )
 
                         try:
-                            await client.send_message(chat_id, text, parse_mode="html", link_preview=False)
+                            await _send_topic_safe(
+                                chat_id,
+                                text,
+                                topic_reply_to=job.get("message_thread_id"),
+                                parse_mode="html",
+                                link_preview=False,
+                            )
                         except Exception as e:
                             logger.error("Send notification failed: %s", e)
 
@@ -1863,8 +1889,12 @@ async def poller_loop():
                         if waiters:
                             for w in waiters:
                                 try:
-                                    await client.send_message(w["chat_id"],
-                                        f"🔔 Tiến trình đã hoàn tất! Bạn có thể dùng .gki lại.", link_preview=False)
+                                    await _send_topic_safe(
+                                        w["chat_id"],
+                                        f"🔔 Tiến trình đã hoàn tất! Bạn có thể dùng .gki lại.",
+                                        topic_reply_to=w.get("message_thread_id"),
+                                        link_preview=False,
+                                    )
                                 except Exception:
                                     pass
                             await storage.clear_waiters()
