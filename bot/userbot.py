@@ -182,6 +182,7 @@ DEFAULT_INPUTS: Dict[str, Any] = {
     "build_a16_6_12": False,
     "build_all": False,
     "release_type": "Actions",
+    "artifact_upload_mode": "all",
     "sub_levels": "",
 }
 
@@ -522,7 +523,9 @@ async def _show_step(event, session: Dict[str, Any]):
     elif step == "branch":
         text = header + _build_menu("<b>Chọn nhánh KernelSU:</b>", ["Stable", "Dev"])
     elif step == "version":
-        text = (header + "<b>Nhập tên version</b>\n<i>(VD nhập: JinYan → 5.10.209-JinYan)</i>\n"
+        text = (header + "<b>Nhập tên version</b>\n"
+                "VD: nhập <code>Jinmups</code> thì tên kernel sẽ có dạng:\n"
+                "<blockquote><code>5.10.149-Jinmups</code></blockquote>\n"
                 "Hoặc gửi <code>skip</code> để bỏ qua.\n\n"
                 "  0 = Quay lại  |  x = Hủy")
     elif step == "target":
@@ -960,7 +963,6 @@ async def _do_dispatch(event, session: Dict[str, Any]) -> bool:
         meta = SUB_LEVEL_META.get(t_key, {}).get(sl, ("lts", ""))
         dispatch_file = CUSTOM_WORKFLOW
         dispatch_inputs = {
-            "android_version":  android_ver,
             "kernel_version":   kernel_ver,
             "sub_level":        sl,
             "os_patch_level":   meta[0],
@@ -972,6 +974,7 @@ async def _do_dispatch(event, session: Dict[str, Any]) -> bool:
             "use_bbg":          inputs.get("use_bbg", False),
             "use_kpm":          inputs.get("use_kpm", False),
             "cancel_susfs":     inputs.get("cancel_susfs", False),
+            "artifact_upload_mode": "all",
             "supp_op":          inputs.get("supp_op", False) if t_key in SUPP_OP_TARGETS else False,
         }
 

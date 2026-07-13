@@ -21,7 +21,7 @@ from config import send_admin_notification
 ) = range(8)
 
 VARIANTS = ["SukiSU", "ReSukiSU", "KittiSU", "Official", "MKSU"]  # Next đã bị upstream loại bỏ
-BRANCHES = ["Stable(标准)", "Dev(开发)"]
+BRANCHES = ["Stable", "Dev"]
 RELEASE_TYPES = ["Actions", "Pre-Release", "Release"]
 BUILD_TARGETS = [
     ("A12 - 5.10", "build_a12_5_10"),
@@ -351,6 +351,7 @@ class GKIFlow:
             "build_a16_6_12": False,
             "build_all": False,
             "release_type": "Actions",
+            "artifact_upload_mode": "all",
             "sub_levels": "",
         }}
 
@@ -457,7 +458,7 @@ class GKIFlow:
                 [InlineKeyboardButton("⬅️", callback_data="gkiback:ksu_branch"), InlineKeyboardButton("❌", callback_data="gki:cancel")]
             ])
             await q.edit_message_text(
-                header + "⏭️ Nhập <code>tên version</code>.\nVD: JinYan thì sẽ có dạng: 5.10.209-JinYan\nHoặc bấm nút để bỏ qua.",
+                header + "⏭️ Nhập <code>tên version</code>.\nVD: nhập <code>Jinmups</code> thì tên kernel sẽ có dạng:\n<blockquote><code>5.10.149-Jinmups</code></blockquote>\nHoặc bấm nút để bỏ qua.",
                 reply_markup=kb, parse_mode="HTML"
             )
             return GKI_VERSION
@@ -535,14 +536,18 @@ class GKIFlow:
         if not await _ensure_owner(update, context): return GKI_KSU_BRANCH
         q = update.callback_query; await q.answer()
         _, val = q.data.split(":", 1)
-        context.user_data["gki"]["inputs"]["kernelsu_branch"] = val
+        branch_map = {
+            "Stable": "Stable(标准)",
+            "Dev": "Dev(开发)",
+        }
+        context.user_data["gki"]["inputs"]["kernelsu_branch"] = branch_map.get(val, val)
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("⏭️ Dùng mặc định", callback_data="gkiver:none")],
             [InlineKeyboardButton("⬅️", callback_data="gkiback:ksu_branch"), InlineKeyboardButton("❌", callback_data="gki:cancel")]
         ])
         header = _task_header(context)
         await q.edit_message_text(
-            header + "⏭️ Nhập <code>tên version</code>.\nVD: JinYan thì sẽ có dạng: 5.10.209-JinYan\nHoặc bấm nút để bỏ qua.",
+            header + "⏭️ Nhập <code>tên version</code>.\nVD: nhập <code>Jinmups</code> thì tên kernel sẽ có dạng:\n<blockquote><code>5.10.149-Jinmups</code></blockquote>\nHoặc bấm nút để bỏ qua.",
             reply_markup=kb, parse_mode="HTML"
         )
         return GKI_VERSION
@@ -927,7 +932,6 @@ class GKIFlow:
             meta = SUB_LEVEL_META.get(t_key, {}).get(sl, ("lts", ""))
             dispatch_file = CUSTOM_WORKFLOW
             dispatch_inputs = {
-                "android_version": android_ver,
                 "kernel_version":  kernel_ver,
                 "sub_level":       sl,
                 "os_patch_level":  meta[0],
@@ -942,6 +946,7 @@ class GKIFlow:
                 "use_rekernel":     inputs.get("use_rekernel", False),
                 "cancel_susfs":     inputs.get("cancel_susfs", True),
                 "droidspaces":      inputs.get("droidspaces", "off"),
+                "artifact_upload_mode": "all",
                 "supp_op":          inputs.get("supp_op", False) if t_key in SUPP_OP_TARGETS else False,
             }
         else:
@@ -950,7 +955,7 @@ class GKIFlow:
                 "build_all", "build_a12_5_10", "build_a13_5_15", "build_a14_6_1",
                 "build_a15_6_6", "build_a16_6_12", "kernelsu_variant", "kernelsu_branch",
                 "version", "build_time", "use_zram", "use_bbg", "use_kpm", "use_rekernel",
-                "cancel_susfs", "droidspaces", "sub_levels", "release_type",
+                "cancel_susfs", "droidspaces", "sub_levels", "release_type", "artifact_upload_mode",
             }
             dispatch_inputs = {k: v for k, v in inputs.items() if k in _MAIN_WF_ALLOWED}
 
