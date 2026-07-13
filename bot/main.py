@@ -899,7 +899,7 @@ async def ensure_user_started_bot(update: Update, context: ContextTypes.DEFAULT_
 
 
 async def dm_tracker(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Catch-all: tự động lưu chat_id của mọi user DM bot."""
+    """Catch-all: lưu user DM và nhóm mà bot đang hoạt động."""
     chat = update.effective_chat
     user = update.effective_user
     storage: HybridStorage = context.application.bot_data["storage"]
@@ -907,87 +907,227 @@ async def dm_tracker(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if chat.type == "private":
             await storage.track_dm_user(user.id, chat.id)
         elif chat.type in ("group", "supergroup"):
-            title = chat.title or ""
-            await storage.track_group(chat.id, title)
+            await storage.track_group(chat.id, chat.title or "")
 
 
 async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Admin gửi thông báo đến tất cả user đã từng DM bot và các nhóm bot đã tham gia."""
+    """Tạo broadcast và yêu cầu admin chọn DM, nhóm hoặc cả hai."""
     user = update.effective_user
     storage: HybridStorage = context.application.bot_data["storage"]
-    if not await is_admin(user.id, storage):
-        return
-
-    # Lấy danh sách admin để loại trừ
-    admin_ids = set()
-    admin_ids.add(config.OWNER_ID)
-    admin_ids.update(config.ADMIN_IDS)
-    dynamic_admins = await storage.get_admin_ids()
-    admin_ids.update(dynamic_admins)
-
-    dm_users = await storage.get_dm_users()
-    dm_targets = [u for u in dm_users if u.get("user_id") not in admin_ids]
-    group_targets = await storage.get_group_chats()
-
-    if not dm_targets and not group_targets:
-        await _send_msg(update, context, "⚠️ Chưa có user hay nhóm nào trong danh sách để gửi.")
+    if not user or not await is_admin(user.id, storage):
         return
 
     replied = update.message.reply_to_message if update.message else None
     text_body = " ".join(context.args) if context.args else ""
-
     if not replied and not text_body:
-        await _send_msg(update, context,
+        await _send_msg(
+            update,
+            context,
             "📌 <b>Cách dùng:</b>\n"
-            "• <code>/chat Nội dung thông báo</code>\n"
-            "• Reply một tin nhắn + gõ <code>/chat</code>",
-            parse_mode=constants.ParseMode.HTML
+            "• <code>/bc Nội dung thông báo</code>\n"
+            "• Reply một tin nhắn + gõ <code>/bc</code> hoặc <code>/broadcast</code>",
+            parse_mode=constants.ParseMode.HTML,
         )
         return
 
-    dm_ok = dm_fail = 0
-    grp_ok = grp_fail = 0
-
-    # Gửi tới tất cả user DM
-    for u in dm_targets:
-        cid = u.get("chat_id")
-        try:
-            if replied:
-                await context.bot.forward_message(
-                    chat_id=cid,
-                    from_chat_id=replied.chat_id,
-                    message_id=replied.message_id
-                )
-            else:
-                await context.bot.send_message(chat_id=cid, text=text_body)
-            dm_ok += 1
-        except Exception:
-            dm_fail += 1
-
-    # Gửi tới tất cả nhóm
-    for g in group_targets:
-        cid = g.get("chat_id")
-        try:
-            if replied:
-                await context.bot.forward_message(
-                    chat_id=cid,
-                    from_chat_id=replied.chat_id,
-                    message_id=replied.message_id
-                )
-            else:
-                await context.bot.send_message(chat_id=cid, text=text_body)
-            grp_ok += 1
-        except Exception:
-            grp_fail += 1
-
-    total_ok = dm_ok + grp_ok
-    total = dm_ok + dm_fail + grp_ok + grp_fail
-    await _send_msg(update, context,
-        f"📢 Đã gửi <b>{total_ok}/{total}</b> điểm nhận.\n"
-        f"• User DM: {dm_ok}/{dm_ok + dm_fail}\n"
-        f"• Nhóm: {grp_ok}/{grp_ok + grp_fail}",
-        parse_mode=constants.ParseMode.HTML
+    kb = InlineKeyboardMarkup([[
+        InlineKeyboardButton("1️⃣ DM", callback_data="broadcast:dm"),
+        InlineKeyboardButton("2️⃣ Nhóm", callback_data="broadcast:group"),
+        InlineKeyboardButton("3️⃣ Cả hai", callback_data="broadcast:all"),
+    ]])
+    status = await _send_msg(
+        update,
+        context,
+        "📢 <b>Chọn đối tượng nhận Broadcast:</b>",
+        parse_mode=constants.ParseMode.HTML,
+        reply_markup=kb,
     )
+    if not status:
+        return
+
+    pending = context.application.bot_data.setdefault("pending_broadcasts", {})
+    pending[(status.chat_id, status.message_id)] = {
+        "admin_id": user.id,
+        "text": text_body,
+        "source_message": replied,
+    }
+
+
+async def _send_broadcast_content(bot, chat_id: int, payload: dict):
+    """Gửi lại nội dung thành tin mới, không phụ thuộc message_id và không lộ nguồn."""
+    source = payload.get("source_message")
+    if source is None:
+        return await bot.send_message(chat_id=chat_id, text=payload["text"])
+
+    common_caption = {
+        "caption": source.caption,
+        "caption_entities": source.caption_entities,
+    }
+    if source.text is not None:
+        return await bot.send_message(
+            chat_id=chat_id,
+            text=source.text,
+            entities=source.entities,
+        )
+    if source.photo:
+        return await bot.send_photo(chat_id=chat_id, photo=source.photo[-1].file_id, **common_caption)
+    if source.video:
+        return await bot.send_video(
+            chat_id=chat_id,
+            video=source.video.file_id,
+            duration=source.video.duration,
+            width=source.video.width,
+            height=source.video.height,
+            supports_streaming=source.video.supports_streaming,
+            **common_caption,
+        )
+    if source.document:
+        return await bot.send_document(chat_id=chat_id, document=source.document.file_id, **common_caption)
+    if source.audio:
+        return await bot.send_audio(
+            chat_id=chat_id,
+            audio=source.audio.file_id,
+            duration=source.audio.duration,
+            performer=source.audio.performer,
+            title=source.audio.title,
+            **common_caption,
+        )
+    if source.animation:
+        return await bot.send_animation(
+            chat_id=chat_id,
+            animation=source.animation.file_id,
+            duration=source.animation.duration,
+            width=source.animation.width,
+            height=source.animation.height,
+            **common_caption,
+        )
+    if source.voice:
+        return await bot.send_voice(
+            chat_id=chat_id,
+            voice=source.voice.file_id,
+            duration=source.voice.duration,
+            **common_caption,
+        )
+    if source.video_note:
+        return await bot.send_video_note(
+            chat_id=chat_id,
+            video_note=source.video_note.file_id,
+            duration=source.video_note.duration,
+            length=source.video_note.length,
+        )
+    if source.sticker:
+        return await bot.send_sticker(chat_id=chat_id, sticker=source.sticker.file_id)
+    if source.contact:
+        return await bot.send_contact(
+            chat_id=chat_id,
+            phone_number=source.contact.phone_number,
+            first_name=source.contact.first_name,
+            last_name=source.contact.last_name,
+            vcard=source.contact.vcard,
+        )
+    if source.location:
+        return await bot.send_location(
+            chat_id=chat_id,
+            latitude=source.location.latitude,
+            longitude=source.location.longitude,
+        )
+
+    return await bot.copy_message(
+        chat_id=chat_id,
+        from_chat_id=source.chat_id,
+        message_id=source.message_id,
+    )
+
+
+async def cb_broadcast_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Phát nội dung theo phạm vi đã chọn và cập nhật một status message."""
+    query = update.callback_query
+    if not query or not query.message or not query.from_user:
+        return
+
+    key = (query.message.chat_id, query.message.message_id)
+    pending = context.application.bot_data.setdefault("pending_broadcasts", {})
+    payload = pending.get(key)
+    if not payload:
+        await query.answer("Yêu cầu này đã hết hạn hoặc đã được xử lý.", show_alert=True)
+        return
+    if query.from_user.id != payload["admin_id"]:
+        await query.answer("Chỉ admin tạo Broadcast này mới được chọn.", show_alert=True)
+        return
+
+    # Pop trước khi chạy để một cú double-click không tạo hai broadcast.
+    pending.pop(key, None)
+    await query.answer()
+
+    scope = query.data.rsplit(":", 1)[-1]
+    storage: HybridStorage = context.application.bot_data["storage"]
+
+    admin_ids = {config.OWNER_ID, *config.ADMIN_IDS}
+    admin_ids.update(await storage.get_admin_ids())
+    dm_targets = []
+    group_targets = []
+    if scope in ("dm", "all"):
+        dm_targets = [
+            u for u in await storage.get_dm_users()
+            if u.get("user_id") not in admin_ids and u.get("chat_id")
+        ]
+    if scope in ("group", "all"):
+        group_targets = [g for g in await storage.get_group_chats() if g.get("chat_id")]
+
+    targets = [("dm", u.get("chat_id"), u.get("user_id")) for u in dm_targets]
+    targets.extend(("group", g.get("chat_id"), None) for g in group_targets)
+    total = len(targets)
+    labels = {"dm": "DM", "group": "Nhóm", "all": "Cả hai"}
+
+    async def render_progress(processed, dm_ok, dm_fail, grp_ok, grp_fail, done=False):
+        icon = "✅" if done else "⏳"
+        title = "Broadcast hoàn thành" if done else "Đang Broadcast"
+        text = (
+            f"{icon} <b>{title}</b>\n"
+            f"<blockquote>Phạm vi: <b>{labels[scope]}</b>\n"
+            f"Tiến trình: <b>{processed}/{total}</b>\n"
+            f"👤 DM: <b>{dm_ok}</b> thành công · <b>{dm_fail}</b> thất bại\n"
+            f"👥 Nhóm: <b>{grp_ok}</b> thành công · <b>{grp_fail}</b> thất bại</blockquote>"
+        )
+        try:
+            await query.message.edit_text(text, parse_mode=constants.ParseMode.HTML)
+        except BadRequest as exc:
+            if "message is not modified" not in str(exc).lower():
+                logger.warning("Không thể cập nhật tiến trình Broadcast: %s", exc)
+
+    await render_progress(0, 0, 0, 0, 0)
+    if not total:
+        await render_progress(0, 0, 0, 0, 0, done=True)
+        return
+
+    dm_ok = dm_fail = grp_ok = grp_fail = 0
+    loop = asyncio.get_running_loop()
+    last_edit = loop.time()
+
+    progress_interval = max(1, (total + 14) // 15)
+    for processed, (target_type, chat_id, user_id) in enumerate(targets, 1):
+        try:
+            await _send_broadcast_content(context.bot, chat_id, payload)
+            if target_type == "dm":
+                dm_ok += 1
+            else:
+                grp_ok += 1
+        except Exception as exc:
+            if target_type == "dm":
+                dm_fail += 1
+            else:
+                grp_fail += 1
+            logger.warning(
+                "Broadcast tới %s chat_id=%s thất bại: %s",
+                target_type, chat_id, exc,
+            )
+
+        now = loop.time()
+        if processed == total or processed % progress_interval == 0 or now - last_edit >= 0.8:
+            await render_progress(processed, dm_ok, dm_fail, grp_ok, grp_fail)
+            last_edit = loop.time()
+
+    await render_progress(total, dm_ok, dm_fail, grp_ok, grp_fail, done=True)
 
 
 
@@ -1022,7 +1162,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "<b>/list</b> — Lịch sử build thành công\n"
             "<b>/rb</b> hoặc <b>/rebuild</b> — Build lại run đã lưu\n"
             "<b>/data</b> — Khôi phục data từ JSON\n"
-            "<b>/chat</b> <code>&lt;nội dung&gt;</code> — Broadcast cho all user\n"
+            "<b>/bc</b> hoặc <b>/broadcast</b> — Broadcast thông báo\n"
 
             "</blockquote>"
         )
@@ -2198,7 +2338,12 @@ def main():
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("ping", cmd_ping))
     app.add_handler(CommandHandler("help", cmd_help))
-    app.add_handler(CommandHandler("chat", cmd_broadcast))
+    app.add_handler(CommandHandler(["bc", "broadcast"], cmd_broadcast))
+    app.add_handler(CallbackQueryHandler(
+        cb_broadcast_target,
+        pattern=r"^broadcast:(dm|group|all)$",
+        block=False,
+    ))
     app.add_handler(CallbackQueryHandler(cb_list_page, pattern=r"^listpage:\d+$"))
     app.add_handler(CallbackQueryHandler(cb_close_msg, pattern=r"^closemsg"))
     app.add_handler(CallbackQueryHandler(cb_refresh_st, pattern=r"^refresh_st"))
@@ -2215,8 +2360,8 @@ def main():
     app.add_handler(CallbackQueryHandler(cb_dl_variant, pattern=r"^dl_var:"))
     app.add_handler(CommandHandler("data", cmd_data_restore))
 
-    # DM user tracker (group=99, catch-all, lowest priority)
-    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.ALL, dm_tracker), group=99)
+    # DM/group tracker (group=99, catch-all, lowest priority)
+    app.add_handler(MessageHandler(filters.ALL, dm_tracker), group=99)
 
     # GKI conversation
     gki_conv = build_gki_conversation(gh, storage, config)

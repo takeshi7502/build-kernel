@@ -431,11 +431,16 @@ class HybridStorage:
     # DM USERS (Broadcast)
     # ==========================
     async def track_dm_user(self, user_id: int, chat_id: int):
-        """Lưu user đã từng DM bot (deduplicate theo user_id)."""
+        """Lưu user đã từng DM bot và cập nhật chat_id nếu dữ liệu thay đổi."""
         async with self._lock:
             data = self._load()
             dm_users = data.setdefault("dm_users", [])
-            if not any(u.get("user_id") == user_id for u in dm_users):
+            existing = next((u for u in dm_users if u.get("user_id") == user_id), None)
+            if existing:
+                if existing.get("chat_id") != chat_id:
+                    existing["chat_id"] = chat_id
+                    await self._save(data)
+            else:
                 dm_users.append({"user_id": user_id, "chat_id": chat_id})
                 await self._save(data)
 
