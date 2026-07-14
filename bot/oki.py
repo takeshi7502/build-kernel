@@ -18,24 +18,21 @@ from config import send_admin_notification
     OKI_CHOOSE_FILE,
     OKI_CHOOSE_KSU_VARIANT,
     OKI_CHOOSE_KPM,
-    OKI_CHOOSE_MANAGER,
     OKI_CONFIRM
-) = range(6)
+) = range(5)
 
 FILES = [
   "oneplus_nord_n30_se_5g_v", "oneplus_10r_v", "oneplus_nord_3_v", "oneplus_ace_v", "oneplus_ace_race_v",
   "oneplus_10_pro_b", "oneplus_10t_v", "oneplus_11r_b", "oneplus_ace2_b", "oneplus_pad_lite_b",
-  "oneplus_pad_lite_Canary_b", "oneplus_pad_mt6983_b", "oneplus_ace_2v_b", "oneplus_ace_pro_v",
-  "oneplus_11_b", "oneplus_12r_b", "oneplus_ace2_pro_b", "oneplus_ace3_b", "oneplus_open_b",
-  "oneplus_nord_ce4_b", "oneplus_12_b", "oneplus_pad_go_2_b", "oneplus_nord_ce4_lite_5g_b",
+  "oneplus_pad_mt6983_b", "oneplus_ace_2v_b", "oneplus_ace_pro_v", "oneplus_11_b", "oneplus_12r_b",
+  "oneplus_ace2_pro_b", "oneplus_ace3_b", "oneplus_open_b", "oneplus_nord_ce4_b", "oneplus_12_b",
+  "oneplus_pad_go_2_b", "oneplus_turbo_6x_b", "oneplus_nord_ce4_lite_5g_b", "oneplus_nord_ce6_lite_b",
   "oneplus_turbo_6v", "oneplus_nord_4_b", "oneplus_ace_3v_b", "oneplus_pad_mt6897_b", "oneplus_13r_b",
   "oneplus_ace3_pro_b", "oneplus_ace5_b", "oneplus_pad_pro_b", "oneplus_pad2_b", "oneplus_nord_ce5_b",
   "oneplus_nord_5_b", "oneplus_ace5_pro_b", "oneplus_13_b", "oneplus_13t_b", "oneplus_13s_b",
   "oneplus_pad_2_pro_b", "oneplus_pad_3_b", "oneplus_ace5_race_b", "oneplus_ace5_ultra_b",
   "oneplus_pad2_mt6991_b", "oneplus_ace_6", "oneplus_turbo_6", "oneplus_nord_6", "oneplus_ace_6t",
-  "oneplus_ace_6t_Canary", "oneplus_15r", "oneplus_15r_Canary", "oneplus_15", "oneplus_15_Canary",
-  "oneplus_15t", "oneplus_15t_Canary", "oneplus_pad_3_pro", "oneplus_pad_3_pro_Canary",
-  "oneplus_pad_4", "oneplus_pad_4_Canary"
+  "oneplus_15r", "oneplus_15", "oneplus_15t", "oneplus_pad_3_pro", "oneplus_pad_4", "oneplus_ace6_ultra"
 ]
 
 def _clean_label(s: str) -> str:
@@ -228,17 +225,16 @@ class OKIFlow:
         # Mặc định tất cả các tham số
         context.user_data["oki"] = {"inputs": {
             "FILE": "oneplus_12_b",
-            "MANAGER_SOURCE": "MIUIX",
-            "SUSFS_CI": "N/A",  
+            "SUSFS_CI": "N/A",
             "KPM": "KPM",
             "SUSFS_META": "",
             "DYNAMIC_REPO": "Numbersf",
             "BUILD_TIME": "F",
-            "KSU_META": "susfs-main/Numbersf/",
+            "KSU_META": "main/builtin/Numbersf/",
             "LZ4_UPDATE": False,
             "ZRAM": "0/lz4kd/8589934592",
             "SUFFIX": "",
-            "SUBLEVEL": "",
+            "RESUBLEVEL": "",
             "FAST_BUILD": True,
             "LSM_BBG": True,
             "NETFILTER": True,
@@ -280,9 +276,6 @@ class OKIFlow:
         elif target == "kpm":
             await self._ask_kpm(q, context)
             return OKI_CHOOSE_KPM
-        elif target == "manager":
-            await self._ask_manager(q, context)
-            return OKI_CHOOSE_MANAGER
 
     async def page(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await _ensure_owner(update, context): return OKI_CHOOSE_FILE
@@ -302,10 +295,10 @@ class OKIFlow:
         
     async def _ask_ksu(self, q, context: ContextTypes.DEFAULT_TYPE):
         kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("SukiSU (susfs-main)", callback_data="okiksuvar:susfs-main/Numbersf/")],
-            [InlineKeyboardButton("KittiSU (kittisu)", callback_data="okiksuvar:kittisu/Numbersf/")],
-            [InlineKeyboardButton("NextSU (next nhánh)", callback_data="okiksuvar:next/Numbersf/")],
-            [InlineKeyboardButton("ReSuKi (resuki nhánh)", callback_data="okiksuvar:resuki/Numbersf/")],
+            [InlineKeyboardButton("SukiSU", callback_data="okiksuvar:main/builtin/Numbersf/")],
+            [InlineKeyboardButton("KittiSU", callback_data="okiksuvar:kittisu/main/Numbersf/")],
+            [InlineKeyboardButton("NextSU", callback_data="okiksuvar:main/next/Numbersf/")],
+            [InlineKeyboardButton("ReSuKi", callback_data="okiksuvar:main/resuki/Numbersf/")],
             [
                 InlineKeyboardButton("🔙 Quay lại", callback_data="okiback:file"),
                 InlineKeyboardButton("❌ Hủy", callback_data="oki:cancel")
@@ -337,25 +330,6 @@ class OKIFlow:
         q = update.callback_query; await q.answer()
         _, val = q.data.split(":", 1)
         context.user_data["oki"]["inputs"]["KPM"] = val
-        await self._ask_manager(q, context)
-        return OKI_CHOOSE_MANAGER
-
-    async def _ask_manager(self, q, context: ContextTypes.DEFAULT_TYPE):
-        kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("MIUIX", callback_data="okimgr:MIUIX"), InlineKeyboardButton("MIUIX_SPOOF", callback_data="okimgr:MIUIX_SPOOF")],
-            [InlineKeyboardButton("MD3", callback_data="okimgr:MD3"), InlineKeyboardButton("MD3_SPOOF", callback_data="okimgr:MD3_SPOOF")],
-            [
-                InlineKeyboardButton("🔙 Quay lại", callback_data="okiback:kpm"),
-                InlineKeyboardButton("❌ Hủy", callback_data="oki:cancel")
-            ]
-        ])
-        await q.edit_message_text(_task_header(context) + "Chọn nguồn Manager:", parse_mode="HTML", reply_markup=kb)
-
-    async def set_manager(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not await _ensure_owner(update, context): return OKI_CHOOSE_MANAGER
-        q = update.callback_query; await q.answer()
-        _, val = q.data.split(":", 1)
-        context.user_data["oki"]["inputs"]["MANAGER_SOURCE"] = val
         await self._ask_confirm(q, context)
         return OKI_CONFIRM
 
@@ -363,7 +337,7 @@ class OKIFlow:
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("⚡ BẬT Fast Build", callback_data="okiconf:fast"), InlineKeyboardButton("🐢 TẮT Fast Build", callback_data="okiconf:slow")],
             [
-                InlineKeyboardButton("🔙 Quay lại", callback_data="okiback:manager"),
+                InlineKeyboardButton("🔙 Quay lại", callback_data="okiback:kpm"),
                 InlineKeyboardButton("❌ Hủy", callback_data="oki:cancel")
             ]
         ])
@@ -493,7 +467,6 @@ def build_oki_conversation(gh, storage, config):
             OKI_CHOOSE_FILE: [CallbackQueryHandler(flow.page, pattern=r"^okipage:"), CallbackQueryHandler(flow.set_file, pattern=r"^okifile:"), back_handler, cancel_handler],
             OKI_CHOOSE_KSU_VARIANT: [CallbackQueryHandler(flow.set_ksu_var, pattern=r"^okiksuvar:"), back_handler, cancel_handler],
             OKI_CHOOSE_KPM: [CallbackQueryHandler(flow.set_kpm, pattern=r"^okikpm:"), back_handler, cancel_handler],
-            OKI_CHOOSE_MANAGER: [CallbackQueryHandler(flow.set_manager, pattern=r"^okimgr:"), back_handler, cancel_handler],
             OKI_CONFIRM: [CallbackQueryHandler(flow.set_confirm, pattern=r"^okiconf:"), back_handler, cancel_handler],
             ConversationHandler.TIMEOUT: [
                 CallbackQueryHandler(flow.timeout),

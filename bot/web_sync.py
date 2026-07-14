@@ -305,11 +305,14 @@ async def get_realtime_data(app):
                 os_str = f"OnePlus - {clean_name}"
                 
                 ksu_meta = str(inputs.get("KSU_META", ""))
-                if "susfs-main" in ksu_meta: variant = "SukiSU"
-                elif "kittisu" in ksu_meta: variant = "KittiSU"
-                elif "next" in ksu_meta: variant = "NextSU"
-                elif "resuki" in ksu_meta: variant = "ReSuKi"
-                else: variant = ksu_meta.split("/")[0] if ksu_meta else "NoKSU"
+                ksu_parts = ksu_meta.split("/")
+                ksu_manager_branch = ksu_parts[0].lower() if ksu_parts else ""
+                ksu_builtin_branch = ksu_parts[1].lower() if len(ksu_parts) > 1 else ""
+                if ksu_manager_branch == "kittisu": variant = "KittiSU"
+                elif ksu_builtin_branch == "next": variant = "NextSU"
+                elif ksu_builtin_branch == "resuki": variant = "ReSuKi"
+                elif ksu_manager_branch in {"main", "susfs-main", "builtin"}: variant = "SukiSU"
+                else: variant = ksu_manager_branch or "NoKSU"
                 
                 title = variant
                 run_id_str = str(j.get("run_id")) if j.get("run_id") else "Đang chờ..."
