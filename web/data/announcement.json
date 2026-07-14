@@ -1,26 +1,22 @@
 {
   "items": [
     {
-      "date": "31-03-2026",
+      "date": "14-07-2026",
       "content_md": [
-        "## GKI Kernel Tracker",
+        "## Changelog",
         "",
-        "Trang web theo dõi build kernel cho bot. Ở đây cũng có kernel build sẵn cho tất cả các phiên bản.",
+        "- Bot: cải thiện GKI/OKI và đồng bộ workflow.",
+        "- GKI: cập nhật build, SUSFS, Manager và artifact.",
+        "- OKI: cập nhật upstream, thiết bị, KSU_META và KittiSU.",
         "",
-        "- Hỗ trợ Android 12/13/14/15/16.",
-        "- Cập nhật phiên bản kernel mới nếu có.",
-        "",
-        "MIRROR GROUP: [Tham gia ngay](https://t.me/takeshi_updrive)"
+        "MIRROR GROUP: [Tham gia ngay](https://t.me/jinmups)"
       ],
       "content_zh_md": [
-        "## GKI 内核版本追踪器",
+        "## 更新日志",
         "",
-        "页面已上线，可在同一处查看所有维护分支。",
-        "",
-        "- 支持 Android 12/13/14/15",
-        "- 每周自动增量更新",
-        "",
-        "详情：[GitHub 仓库](https://github.com/zzh20188/GKI_KernelSU_SUSFS)"
+        "- Bot：改进 GKI/OKI 并同步工作流。",
+        "- GKI：更新构建、SUSFS、Manager 与产物。",
+        "- OKI：同步上游、设备、KSU_META 与 KittiSU。"
       ]
     }
   ]
