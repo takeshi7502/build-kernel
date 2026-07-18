@@ -2117,6 +2117,28 @@ async def cmd_data_restore(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status.edit_text(f"❌ Lỗi khôi phục: {e}")
 
 
+def _load_web_kernel_downloads(version: str) -> dict:
+    """Đọc các variant/link của kernel từ cùng nguồn JSON mà website sử dụng."""
+    import glob
+    import json as _json
+
+    web_data_dir = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "web", "data"))
+    variants = {}
+    for json_path in glob.glob(os.path.join(web_data_dir, "android*", "*.json")):
+        try:
+            with open(json_path, "r", encoding="utf-8") as f:
+                data = _json.load(f)
+            for entry in data.get("entries", []):
+                if str(entry.get("kernel", "")).strip() != version:
+                    continue
+                for variant, url in (entry.get("downloads") or {}).items():
+                    if variant and url:
+                        variants[str(variant)] = str(url)
+        except (OSError, ValueError, TypeError) as exc:
+            logger.warning("/dl: không đọc được %s: %s", json_path, exc)
+    return variants
+
+
 async def cmd_dl(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     args = context.args
@@ -2131,16 +2153,21 @@ async def cmd_dl(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     all_jobs = await storage.get_jobs()
     variants_map = {}
-    
+
+    # Website là nguồn chính cho catalog tải xuống.
+    for variant, download_url in _load_web_kernel_downloads(version).items():
+        variants_map[variant] = {"download_url": download_url}
+
+    # Lịch sử bot là nguồn bổ sung, đồng thời cung cấp metadata cấu hình nếu còn giữ job.
     for job in sorted(all_jobs, key=lambda x: x.get("created_at", "")):
         if job.get("type") == "buildsave" and job.get("status") == "completed" and job.get("conclusion") == "success":
             if job.get("bs_full_ver") == version:
-                var = job.get("bs_variant")
-                if var:
-                    variants_map[var] = job
-                    
+                variant = job.get("bs_variant")
+                if variant:
+                    variants_map.setdefault(variant, {}).update({"job": job})
+
     if not variants_map:
-        msg = await update.message.reply_text(f"Chưa có bản build nào cho version {version}")
+        msg = await update.message.reply_text(f"Chưa có link tải nào cho version {version} trên website hoặc lịch sử bot")
         if context.job_queue:
             context.job_queue.run_once(_del_msg_job, when=10, chat_id=chat_id, data=msg.message_id)
         return
@@ -2177,16 +2204,32 @@ async def cb_dl_variant(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if job.get("bs_full_ver") == version and job.get("bs_variant") == variant:
                 target_job = job
                 break
-                
-    if not target_job or not target_job.get("run_id"):
-        await query.edit_message_text("❌ Lỗi: Không tìm thấy dữ liệu run_id trên hệ thống.")
+
+    # Ưu tiên run_id trong lịch sử bot, fallback sang link nightly của website.
+    download_url = _load_web_kernel_downloads(version).get(variant, "")
+    run_id = target_job.get("run_id") if target_job else None
+    if not run_id and download_url:
+        import re
+        match = re.search(r"/actions/runs/(\d+)", download_url)
+        if match:
+            run_id = int(match.group(1))
+
+    if not run_id:
+        await query.edit_message_text("❌ Có kernel trên website nhưng link không chứa GitHub run ID hợp lệ.")
         return
-        
-    run_id = target_job["run_id"]
-    
+
     resp = await gh.list_artifacts_for_run(config.GKI_REPO, run_id)
     if resp["status"] != 200:
-        await query.edit_message_text("❌ Lỗi lấy thông tin API hoặc bản build đã hết hạn (quá 90 ngày).")
+        # Vẫn trả link website đã lưu nếu API GitHub không còn artifact metadata.
+        if download_url:
+            text = (
+                f"<b>{version} - {variant}</b>\n"
+                f"⚠️ Không lấy được metadata artifact từ GitHub (có thể artifact đã hết hạn).\n"
+                f"<blockquote><b><a href='{download_url}'>Mở link tải đã lưu trên website</a></b></blockquote>"
+            )
+            await query.edit_message_text(text, parse_mode="HTML", disable_web_page_preview=True)
+        else:
+            await query.edit_message_text("❌ Lỗi lấy thông tin API hoặc bản build đã hết hạn (quá 90 ngày).")
         return
         
     artifacts = resp.get("json", {}).get("artifacts", [])
@@ -2221,11 +2264,11 @@ async def cb_dl_variant(update: Update, context: ContextTypes.DEFAULT_TYPE):
         size_str = "N/A"
 
     # Tính cấu hình từ job data (ưu tiên lấy từ inputs, fallback sang root)
-    inputs = target_job.get("inputs", {})
-    zram = inputs.get("use_zram", target_job.get("use_zram", True))
-    bbg = inputs.get("use_bbg", target_job.get("use_bbg", True))
-    susfs = not inputs.get("cancel_susfs", target_job.get("cancel_susfs", False))
-    kpm = inputs.get("use_kpm", target_job.get("use_kpm", False))
+    inputs = target_job.get("inputs", {}) if target_job else {}
+    zram = inputs.get("use_zram", target_job.get("use_zram", True) if target_job else True)
+    bbg = inputs.get("use_bbg", target_job.get("use_bbg", True) if target_job else True)
+    susfs = not inputs.get("cancel_susfs", target_job.get("cancel_susfs", False) if target_job else False)
+    kpm = inputs.get("use_kpm", target_job.get("use_kpm", False) if target_job else False)
 
     cfg_parts = []
     if zram: cfg_parts.append("ZRAM")
