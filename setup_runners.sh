@@ -84,41 +84,73 @@ if [ "$MENU_OPTION" = "2" ]; then
     echo "========================================="
     echo "🗑️ GỠ BỎ RUNNER ĐANG CHẠY"
     echo "========================================="
-    read -p "🔢 Bạn muốn gỡ bỏ bao nhiêu Runner? [Mặc định: 1]: " INPUT_REMOVE
-    REMOVE_COUNT=${INPUT_REMOVE:-1}
-    
-    if ! [[ "$REMOVE_COUNT" =~ ^[0-9]+$ ]]; then
-        echo "❌ LỖI: Vui lòng gõ một con số hợp lệ!"
+
+    # Quét runner thực tế thay vì giả định luôn tồn tại runner-1, runner-2...
+    RUNNER_DIRS=()
+    while IFS= read -r DIR; do
+        [ -f "$DIR/config.sh" ] && RUNNER_DIRS+=("$DIR")
+    done < <(find . -maxdepth 1 -mindepth 1 -type d -name 'runner-*' -printf '%f\n' | sort -V)
+
+    DETECTED_COUNT=${#RUNNER_DIRS[@]}
+    if [ "$DETECTED_COUNT" -eq 0 ]; then
+        echo "⚠️ Không phát hiện runner cục bộ nào trong: $(pwd)"
+        exit 0
+    fi
+
+    echo "📋 Phát hiện $DETECTED_COUNT runner cục bộ:"
+    INDEX=1
+    for DIR in "${RUNNER_DIRS[@]}"; do
+        SERVICE_NAME=""
+        [ -f "$DIR/.service" ] && SERVICE_NAME=$(<"$DIR/.service")
+
+        if [ -n "$SERVICE_NAME" ] && systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
+            STATUS="🟢 đang chạy"
+        elif [ -n "$SERVICE_NAME" ]; then
+            STATUS="🔴 đã dừng"
+        else
+            STATUS="⚪ chưa cài service"
+        fi
+
+        printf "  %d. %-14s %s" "$INDEX" "$DIR" "$STATUS"
+        [ -n "$SERVICE_NAME" ] && printf " (%s)" "$SERVICE_NAME"
+        printf "\n"
+        INDEX=$((INDEX + 1))
+    done
+    echo "-----------------------------------------"
+
+    read -p "🔢 Bạn muốn gỡ bao nhiêu runner từ danh sách trên? [Mặc định: $DETECTED_COUNT]: " INPUT_REMOVE
+    REMOVE_COUNT=${INPUT_REMOVE:-$DETECTED_COUNT}
+
+    if ! [[ "$REMOVE_COUNT" =~ ^[1-9][0-9]*$ ]] || [ "$REMOVE_COUNT" -gt "$DETECTED_COUNT" ]; then
+        echo "❌ LỖI: Hãy nhập số từ 1 đến $DETECTED_COUNT."
         exit 1
     fi
-    
+
     get_removal_token
     VPS_NAME=$(hostname)
-    i=1
-    while [ $i -le $REMOVE_COUNT ]; do
-        DIR="runner-$i"
-        if [ -d "$DIR" ]; then
-            echo "🛑 Đang gỡ bỏ ${VPS_NAME}-Runner-$i..."
-            cd "$DIR" || exit 1
-            sudo ./svc.sh stop || true
-            sudo ./svc.sh uninstall || true
+    RUNNER_BASE_DIR=$(pwd)
+    i=0
+    while [ "$i" -lt "$REMOVE_COUNT" ]; do
+        DIR="${RUNNER_DIRS[$i]}"
+        RUNNER_LABEL="${DIR#runner-}"
+        echo "🛑 Đang gỡ bỏ ${VPS_NAME}-Runner-${RUNNER_LABEL} ($DIR)..."
+        cd "$DIR" || exit 1
+        sudo ./svc.sh stop || true
+        sudo ./svc.sh uninstall || true
 
-            if ./config.sh remove --token "$FINAL_TOKEN"; then
-                cd ..
-                rm -rf "$DIR"
-                echo "✅ Gỡ bỏ thành công ${VPS_NAME}-Runner-$i!"
-            else
-                cd ..
-                echo "❌ Không thể xóa ${VPS_NAME}-Runner-$i khỏi GitHub."
-                echo "Hãy lấy removal token mới tại Settings -> Actions -> Runners -> Remove."
-                echo "⚠️ Giữ lại thư mục $DIR để bạn có thể thử gỡ lại; không báo thành công giả."
-            fi
+        if ./config.sh remove --token "$FINAL_TOKEN"; then
+            cd "$RUNNER_BASE_DIR" || exit 1
+            rm -rf "$DIR"
+            echo "✅ Gỡ bỏ thành công ${VPS_NAME}-Runner-${RUNNER_LABEL}!"
         else
-            echo "⚠️ Thư mục $DIR không tồn tại. Bỏ qua."
+            cd "$RUNNER_BASE_DIR" || exit 1
+            echo "❌ Không thể xóa ${VPS_NAME}-Runner-${RUNNER_LABEL} khỏi GitHub."
+            echo "Hãy lấy removal token mới tại Settings -> Actions -> Runners -> Remove."
+            echo "⚠️ Giữ lại thư mục $DIR để bạn có thể thử gỡ lại; không báo thành công giả."
         fi
         i=$((i + 1))
     done
-    echo "🎉 Đã hoàn tất gỡ bỏ dưới máy ảo VPS!"
+    echo "🎉 Đã hoàn tất xử lý $REMOVE_COUNT runner trên VPS!"
     
     if [ -n "$GITHUB_TOKEN" ] && [ -n "$GITHUB_OWNER" ] && [ -n "$GKI_REPO" ]; then
         echo ""
