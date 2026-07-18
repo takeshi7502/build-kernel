@@ -38,6 +38,10 @@ fi
 URL="https://github.com/${GITHUB_OWNER}/${GKI_REPO}"
 ENV_TOKEN="${GITHUB_RUNNER_TOKEN}"
 
+# GitHub Runner chặn root theo mặc định cho cả config và remove.
+# Script này hỗ trợ VPS chạy trực tiếp bằng root.
+export RUNNER_ALLOW_RUNASROOT=1
+
 # Hàm nhập token
 get_token() {
     while true; do
@@ -49,6 +53,18 @@ get_token() {
         else
             # Cập nhật ngược lại vào ENV_TOKEN để lần chạy sau lỡ lỗi thì gợi ý luôn
             ENV_TOKEN="$FINAL_TOKEN"
+            break
+        fi
+    done
+}
+
+# Removal token khác registration token và phải lấy từ trang Remove runner.
+get_removal_token() {
+    while true; do
+        read -p "🔑 Nhập REMOVAL TOKEN từ Settings -> Actions -> Runners -> Remove: " FINAL_TOKEN
+        if [ -z "$FINAL_TOKEN" ]; then
+            echo "❌ Removal token không được để trống và không dùng token cũ trong .env."
+        else
             break
         fi
     done
@@ -76,20 +92,27 @@ if [ "$MENU_OPTION" = "2" ]; then
         exit 1
     fi
     
-    get_token
+    get_removal_token
     VPS_NAME=$(hostname)
     i=1
     while [ $i -le $REMOVE_COUNT ]; do
         DIR="runner-$i"
         if [ -d "$DIR" ]; then
             echo "🛑 Đang gỡ bỏ ${VPS_NAME}-Runner-$i..."
-            cd $DIR
-            sudo ./svc.sh stop
-            sudo ./svc.sh uninstall
-            ./config.sh remove --token "$FINAL_TOKEN"
-            cd ..
-            rm -rf $DIR
-            echo "✅ Gỡ bỏ thành công ${VPS_NAME}-Runner-$i!"
+            cd "$DIR" || exit 1
+            sudo ./svc.sh stop || true
+            sudo ./svc.sh uninstall || true
+
+            if ./config.sh remove --token "$FINAL_TOKEN"; then
+                cd ..
+                rm -rf "$DIR"
+                echo "✅ Gỡ bỏ thành công ${VPS_NAME}-Runner-$i!"
+            else
+                cd ..
+                echo "❌ Không thể xóa ${VPS_NAME}-Runner-$i khỏi GitHub."
+                echo "Hãy lấy removal token mới tại Settings -> Actions -> Runners -> Remove."
+                echo "⚠️ Giữ lại thư mục $DIR để bạn có thể thử gỡ lại; không báo thành công giả."
+            fi
         else
             echo "⚠️ Thư mục $DIR không tồn tại. Bỏ qua."
         fi
@@ -158,7 +181,6 @@ if [ ! -f "$TAR_FILE" ]; then
     curl -o $TAR_FILE -L "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/${TAR_FILE}"
 fi
 
-export RUNNER_ALLOW_RUNASROOT=1
 VPS_NAME=$(hostname)
 
 i=1
