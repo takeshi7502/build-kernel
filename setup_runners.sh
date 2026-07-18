@@ -124,7 +124,7 @@ fi
 echo ""
 get_token
 
-RUNNER_VERSION="2.332.0"
+RUNNER_VERSION="2.335.1"
 TAR_FILE="actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz"
 
 if [ ! -f "$TAR_FILE" ]; then
@@ -149,17 +149,20 @@ while [ $i -le $RUNNER_COUNT ]; do
     
     cd $DIR
     
-    # Chạy config và hứng mã lỗi
+    # Chạy config và xử lý lỗi. config.sh có thể thất bại do token, phiên bản runner,
+    # quyền repository, kết nối mạng hoặc cấu hình GitHub còn sót lại.
     if ! ./config.sh --url "$URL" --token "$FINAL_TOKEN" --name "${VPS_NAME}-Runner-$i" --unattended --replace; then
         echo ""
-        echo "🚨 LỖI GITHUB TỪ CHỐI (Mã 404/401)!"
-        echo "Nguyên nhân 99% là do TOKEN bạn nhập đã cũ hoặc hết hạn 1 tiếng."
+        echo "🚨 KHÔNG THỂ ĐĂNG KÝ RUNNER!"
+        echo "Các nguyên nhân thường gặp: token đã hết hạn, token không thuộc đúng repository,"
+        echo "thiếu quyền quản trị Actions hoặc GitHub tạm thời từ chối yêu cầu."
+        echo "Repository đang dùng: $URL"
         cd ..
-        rm -rf $DIR
-        
-        # Bắt nhập lại token mới
+        rm -rf "$DIR"
+
+        # Bắt nhập token mới rồi thử lại đúng runner thứ i.
+        # Không nhấn Enter nếu token trong .env đã cũ.
         get_token
-        # Quay lại đầu vòng lặp để tạo lại đúng con runner thứ i này
         continue
     fi
     
