@@ -4,9 +4,35 @@
 # Có tính năng tự động phát hiện mã Token chết và gợi ý an toàn chống Sập Nguồn (OOM)
 # ==========================================
 
-# 1. Tải cấu hình từ .env
-if [ -f .env ]; then
-    export $(grep -v '^#' .env | xargs)
+# 1. Tải cấu hình từ .env nằm cùng thư mục với script.
+# Không dùng `export $(... | xargs)` vì cách đó dễ hỏng khi .env có khoảng trắng/ký tự đặc biệt.
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+ENV_FILE="$SCRIPT_DIR/.env"
+
+if [ -f "$ENV_FILE" ]; then
+    while IFS='=' read -r KEY VALUE; do
+        VALUE="${VALUE%$'\r'}"
+        VALUE="${VALUE#\"}"
+        VALUE="${VALUE%\"}"
+        VALUE="${VALUE#\'}"
+        VALUE="${VALUE%\'}"
+        case "$KEY" in
+            GITHUB_OWNER|GKI_REPO|GITHUB_RUNNER_TOKEN|GITHUB_TOKEN)
+                printf -v "$KEY" '%s' "$VALUE"
+                export "$KEY"
+                ;;
+        esac
+    done < "$ENV_FILE"
+fi
+
+# .env thường bị gitignore và có thể không tồn tại khi clone bằng user khác.
+if [ -z "$GITHUB_OWNER" ]; then
+    read -p "👤 GitHub owner [Mặc định: takeshi7502]: " INPUT_OWNER
+    GITHUB_OWNER="${INPUT_OWNER:-takeshi7502}"
+fi
+if [ -z "$GKI_REPO" ]; then
+    read -p "📦 GitHub repository [Mặc định: GKI_KernelSU_SUSFS]: " INPUT_REPO
+    GKI_REPO="${INPUT_REPO:-GKI_KernelSU_SUSFS}"
 fi
 
 URL="https://github.com/${GITHUB_OWNER}/${GKI_REPO}"
