@@ -11,7 +11,7 @@ var modalBody = document.getElementById('modalBody');
 var modalClose = document.getElementById('modalClose');
 
 // Danh sách variant cố định theo thứ tự ưu tiên hiển thị
-var VARIANT_ORDER = ['SukiSU', 'ReSukiSU', 'Next', 'MKSU', 'Official'];
+var VARIANT_ORDER = ['SukiSU', 'ReSukiSU', 'KittiSU', 'Next', 'MKSU', 'Official'];
 
 // Hiển thị popup với danh sách nút tải xuống theo variant
 export function showModal(android, kernel, sublevel, patch, downloads) {
