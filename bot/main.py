@@ -2015,8 +2015,8 @@ def _iter_recent_web_catalog_gki_jobs(jobs, max_age_days: int = 90):
         yield created_at, job
 
 
-def _clear_user_gki_downloads_from_web_data():
-    """Remove generated user-GKI catalog links before rebuilding them from recent history."""
+def _clear_web_downloads_before_rebuild():
+    """Remove every existing web download link before rebuilding from recent user GKI history."""
     bot_dir = os.path.dirname(os.path.abspath(__file__))
     data_root = os.path.normpath(os.path.join(bot_dir, "..", "web", "data"))
     removed = 0
@@ -2028,23 +2028,20 @@ def _clear_user_gki_downloads_from_web_data():
             with open(json_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             touched = False
+            if data.pop("lts_downloads", None) is not None:
+                removed += 1
+                touched = True
             for entry in data.get("entries", []):
-                downloads = entry.get("downloads")
-                if not isinstance(downloads, dict):
-                    continue
-                for variant, value in list(downloads.items()):
-                    if isinstance(value, dict) and str(value.get("source", "")).startswith("user-gki"):
-                        downloads.pop(variant, None)
-                        removed += 1
-                        touched = True
-                if isinstance(downloads, dict) and not downloads:
-                    entry.pop("downloads", None)
+                downloads = entry.pop("downloads", None)
+                if isinstance(downloads, dict):
+                    removed += len(downloads)
+                    touched = True
             if touched:
                 with open(json_path, "w", encoding="utf-8") as f:
                     json.dump(data, f, ensure_ascii=False, indent=2)
                     f.write("\n")
         except Exception as e:
-            logger.error("web catalog: failed to clear generated links from %s: %s", json_path, e)
+            logger.error("web catalog: failed to clear downloads from %s: %s", json_path, e)
     return removed
 
 
@@ -2143,7 +2140,7 @@ async def _rebuild_web_downloads_from_recent_gki_jobs(storage: HybridStorage, ap
         logger.error("web catalog: cannot load jobs for rebuild: %s", e)
         return
 
-    removed = _clear_user_gki_downloads_from_web_data()
+    removed = _clear_web_downloads_before_rebuild()
     eligible = sorted(_iter_recent_web_catalog_gki_jobs(jobs, max_age_days), key=lambda item: item[0])
     updated = 0
     for _, job in eligible:
