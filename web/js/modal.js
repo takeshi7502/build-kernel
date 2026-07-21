@@ -24,7 +24,10 @@ export function showModal(android, kernel, sublevel, patch, downloads) {
   var rows = '';
 
   VARIANT_ORDER.forEach(function (variant) {
-    var link = downloads && downloads[variant] ? downloads[variant] : null;
+    var item = downloads && downloads[variant] ? downloads[variant] : null;
+    var link = typeof item === 'string' ? item : (item && item.url ? item.url : null);
+    var configLabel = item && typeof item === 'object' && item.config ? String(item.config) : '';
+    var variantLabel = variant + (configLabel ? ' — ' + configLabel : '');
 
     var btn = link
       ? '<a class="modal-dl-btn modal-dl-btn--active" href="' + esc(link) + '" target="_blank" rel="noopener noreferrer">📥 Tải xuống</a>'
@@ -32,7 +35,7 @@ export function showModal(android, kernel, sublevel, patch, downloads) {
 
     rows +=
       '<div class="modal-row modal-variant-row">' +
-        '<span class="modal-label modal-variant-label">' + esc(variant) + '</span>' +
+        '<span class="modal-label modal-variant-label">' + esc(variantLabel) + '</span>' +
         btn +
       '</div>';
   });

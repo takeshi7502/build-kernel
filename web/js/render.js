@@ -141,7 +141,9 @@ function buildCard(data, meta) {
       // Serialize downloads cho data attribute (nếu có)
       var dlJson = JSON.stringify(entry.downloads || {}).replace(/'/g, '&apos;');
       // Hiển thị icon nếu đã có ít nhất 1 link download
-      var hasDownload = entry.downloads && Object.values(entry.downloads).some(function(v){ return !!v; });
+      var hasDownload = entry.downloads && Object.values(entry.downloads).some(function(v){
+        return typeof v === 'string' ? !!v : !!(v && v.url);
+      });
       var dlIcon = hasDownload ? '<span class="kv-dl-dot" title="Có file tải xuống">📥</span>' : '';
       rows += '<tr class="' + rowClass + '" data-android="' + esc(meta.android) + '" data-kernel="' + esc(meta.kernel) + '" data-sublevel="' + esc(sublevel) + '" data-patch="' + esc(entry.date) + '" data-downloads=\'' + dlJson + "'" + '>' +
         '<td class="date-cell">' + esc(entry.date) + '</td>' +

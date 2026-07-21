@@ -38,7 +38,7 @@ from telegram.request import HTTPXRequest
 
 import config
 from web_sync import _make_custom_id
-from gki import build_gki_conversation, _del_msg_job, SUB_LEVELS
+from gki import build_gki_conversation, _del_msg_job, SUB_LEVELS, TARGET_META, SUB_LEVEL_META
 from oki import build_oki_conversation
 from buildsave import build_buildsave_conversation
 from permissions import is_owner, is_admin
@@ -462,6 +462,7 @@ async def poller(app):
             await asyncio.sleep(3600)
 
     app.create_task(cleanup_task())
+    app.create_task(_rebuild_web_downloads_from_recent_gki_jobs(storage, app, max_age_days=90))
 
     while True:
         try:
@@ -697,12 +698,16 @@ async def poller(app):
                             if conclusion == "success":
                                 await storage.add_successful_build(run_id, user_id, job.get("ref", "unknown"), user_name)
 
-                                # Buildsave: cập nhật link tải xuống vào JSON
-                                if job.get("type") == "buildsave":
+                                # Web catalog: dùng build /gki của user làm nguồn link tải xuống.
+                                if job.get("type") == "gki":
                                     try:
-                                        await _update_buildsave_download_link(job, run_id, app)
+                                        await _rebuild_web_downloads_from_recent_gki_jobs(storage, app, max_age_days=90)
                                     except Exception as e:
-                                        logger.error("buildsave JSON update failed: %s", e)
+                                        logger.error("GKI web catalog rebuild failed: %s", e)
+
+                                # /build buildsave cũ vẫn giữ nguyên chức năng, nhưng không còn ghi link web.
+                                if job.get("type") == "buildsave":
+                                    logger.info("buildsave JSON update skipped; web catalog now uses qualifying user /gki builds")
 
                             # Cập nhật message dạng batch nếu là buildsave
                             if job.get("type") == "buildsave" and job.get("batch_id"):
@@ -1944,6 +1949,215 @@ async def cmd_delete_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.job_queue.run_once(_del_msg_job, when=10, chat_id=msg.chat_id, data=msg.message_id)
         if update.message:
             context.job_queue.run_once(_del_msg_job, when=10, chat_id=update.message.chat_id, data=update.message.message_id)
+
+def _truthy_feature(value) -> bool:
+    """Normalize workflow input values into booleans for web feature labels."""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "on", "enabled", "enabled (开启)"}
+
+
+def _gki_web_config_label(inputs: dict) -> str:
+    """Build a compact config label shown after the KernelSU variant in the web modal."""
+    parts = []
+    if not _truthy_feature(inputs.get("cancel_susfs", True)):
+        parts.append("SUSFS")
+    if _truthy_feature(inputs.get("use_bbg")):
+        parts.append("BBG")
+    if _truthy_feature(inputs.get("use_zram")):
+        parts.append("ZRAM")
+    if _truthy_feature(inputs.get("use_kpm")):
+        parts.append("KPM")
+    if _truthy_feature(inputs.get("use_rekernel")):
+        parts.append("Re-Kernel")
+    droidspaces = str(inputs.get("droidspaces", "off") or "off").strip()
+    if droidspaces and droidspaces.lower() != "off":
+        parts.append(f"Droidspaces {droidspaces}")
+    if _truthy_feature(inputs.get("supp_op")):
+        parts.append("OP8E")
+    return " + ".join(parts)
+
+
+def _parse_job_created_at(job: dict):
+    raw = str(job.get("created_at", "") or "").strip()
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+def _iter_recent_web_catalog_gki_jobs(jobs, max_age_days: int = 90):
+    """Yield successful default-version single-target GKI jobs eligible for the web catalog."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
+    for job in jobs:
+        if job.get("type") != "gki":
+            continue
+        if job.get("status") != "completed" or job.get("conclusion") != "success":
+            continue
+        if not job.get("run_id"):
+            continue
+        created_at = _parse_job_created_at(job)
+        if not created_at or created_at < cutoff:
+            continue
+        inputs = job.get("inputs") or {}
+        if str(inputs.get("version", "") or "").strip():
+            continue
+        target_keys = [key for key in TARGET_META if _truthy_feature(inputs.get(key))]
+        sub_levels = [s.strip() for s in str(inputs.get("sub_levels", "") or "").split(",") if s.strip()]
+        if len(target_keys) != 1 or len(sub_levels) != 1:
+            continue
+        if sub_levels[0].upper() == "X":
+            continue
+        yield created_at, job
+
+
+def _clear_user_gki_downloads_from_web_data():
+    """Remove generated user-GKI catalog links before rebuilding them from recent history."""
+    bot_dir = os.path.dirname(os.path.abspath(__file__))
+    data_root = os.path.normpath(os.path.join(bot_dir, "..", "web", "data"))
+    removed = 0
+    for android, kernel_v in TARGET_META.values():
+        json_path = os.path.join(data_root, android, f"{kernel_v}.json")
+        if not os.path.exists(json_path):
+            continue
+        try:
+            with open(json_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            touched = False
+            for entry in data.get("entries", []):
+                downloads = entry.get("downloads")
+                if not isinstance(downloads, dict):
+                    continue
+                for variant, value in list(downloads.items()):
+                    if isinstance(value, dict) and str(value.get("source", "")).startswith("user-gki"):
+                        downloads.pop(variant, None)
+                        removed += 1
+                        touched = True
+                if isinstance(downloads, dict) and not downloads:
+                    entry.pop("downloads", None)
+            if touched:
+                with open(json_path, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+                    f.write("\n")
+        except Exception as e:
+            logger.error("web catalog: failed to clear generated links from %s: %s", json_path, e)
+    return removed
+
+
+async def _update_web_download_from_gki_job(job: dict, run_id, app):
+    """Use a successful default-version user /gki build as the web download source."""
+    import json as _json
+
+    inputs = job.get("inputs") or {}
+    if str(inputs.get("version", "") or "").strip():
+        logger.info("web catalog: skip GKI run %s because custom version is not default", run_id)
+        return
+
+    target_keys = [key for key in TARGET_META if _truthy_feature(inputs.get(key))]
+    sub_levels_raw = str(inputs.get("sub_levels", "") or "").strip()
+    sub_levels = [s.strip() for s in sub_levels_raw.split(",") if s.strip()]
+    if len(target_keys) != 1 or len(sub_levels) != 1:
+        logger.info(
+            "web catalog: skip GKI run %s because it is not a single target/sub build: targets=%s subs=%s",
+            run_id, target_keys, sub_levels,
+        )
+        return
+
+    sub_level = sub_levels[0]
+    if sub_level.upper() == "X":
+        logger.info("web catalog: skip GKI run %s because LTS/X catalog writes are not enabled", run_id)
+        return
+
+    target_key = target_keys[0]
+    android, kernel_v = TARGET_META[target_key]
+    full_ver = f"{kernel_v}.{sub_level}"
+    variant = str(inputs.get("kernelsu_variant", "SukiSU") or "SukiSU").strip() or "SukiSU"
+    nightly_link = (
+        f"https://nightly.link/{config.GITHUB_OWNER}/{config.GKI_REPO}"
+        f"/actions/runs/{run_id}"
+    )
+
+    bot_dir = os.path.dirname(os.path.abspath(__file__))
+    json_path = os.path.normpath(os.path.join(bot_dir, "..", "web", "data", android, f"{kernel_v}.json"))
+    if not os.path.exists(json_path):
+        logger.error("web catalog: không tìm thấy file JSON: %s", json_path)
+        return
+
+    with open(json_path, "r", encoding="utf-8") as f:
+        data = _json.load(f)
+
+    features = {
+        "susfs": not _truthy_feature(inputs.get("cancel_susfs", True)),
+        "bbg": _truthy_feature(inputs.get("use_bbg")),
+        "zram": _truthy_feature(inputs.get("use_zram")),
+        "kpm": _truthy_feature(inputs.get("use_kpm")),
+        "rekernel": _truthy_feature(inputs.get("use_rekernel")),
+        "droidspaces": str(inputs.get("droidspaces", "off") or "off"),
+        "supp_op": _truthy_feature(inputs.get("supp_op")),
+    }
+    download_info = {
+        "url": nightly_link,
+        "config": _gki_web_config_label(inputs),
+        "features": features,
+        "source": "user-gki-auto",
+        "run_id": int(run_id),
+        "user_name": job.get("user_name", ""),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    entries = data.setdefault("entries", [])
+    target_entry = None
+    for entry in entries:
+        if entry.get("kernel") == full_ver:
+            target_entry = entry
+            break
+
+    if target_entry is None:
+        meta = SUB_LEVEL_META.get(target_key, {}).get(sub_level, (datetime.now(timezone.utc).strftime("%Y-%m"), ""))
+        target_entry = {"date": meta[0], "kernel": full_ver}
+        entries.append(target_entry)
+        entries.sort(key=lambda item: [int(part) for part in str(item.get("kernel", "0.0.0")).split(".") if part.isdigit()])
+
+    downloads = target_entry.setdefault("downloads", {})
+    downloads[variant] = download_info
+
+    with open(json_path, "w", encoding="utf-8") as f:
+        _json.dump(data, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+
+    logger.warning(
+        "web catalog: updated from user GKI %s %s %s -> %s",
+        full_ver, variant, download_info.get("config") or "default", nightly_link,
+    )
+
+
+async def _rebuild_web_downloads_from_recent_gki_jobs(storage: HybridStorage, app, max_age_days: int = 90):
+    """Rebuild generated web downloads from all recent qualifying user /gki jobs."""
+    try:
+        jobs = await storage.get_jobs()
+    except Exception as e:
+        logger.error("web catalog: cannot load jobs for rebuild: %s", e)
+        return
+
+    removed = _clear_user_gki_downloads_from_web_data()
+    eligible = sorted(_iter_recent_web_catalog_gki_jobs(jobs, max_age_days), key=lambda item: item[0])
+    updated = 0
+    for _, job in eligible:
+        try:
+            await _update_web_download_from_gki_job(job, job.get("run_id"), app)
+            updated += 1
+        except Exception as e:
+            logger.error("web catalog: rebuild failed for job %s run %s: %s", job.get("_id"), job.get("run_id"), e)
+
+    logger.warning(
+        "web catalog: rebuilt from recent user GKI jobs; max_age_days=%s eligible=%s removed=%s updated=%s",
+        max_age_days, len(eligible), removed, updated,
+    )
+
 
 async def _update_buildsave_download_link(job: dict, run_id, app):
     """Cập nhật link tải xuống vào file JSON của web khi build lưu trữ hoàn tất."""
