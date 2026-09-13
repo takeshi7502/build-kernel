@@ -1,10 +1,17 @@
 import os
 import json
 import asyncio
+import hashlib
 import logging
 import socket
+import tempfile
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone, timedelta
+
+try:
+    import fcntl
+except ImportError:  # Windows development environments do not provide fcntl.
+    fcntl = None
 
 logger = logging.getLogger("storage")
 
@@ -12,6 +19,31 @@ try:
     from motor.motor_asyncio import AsyncIOMotorClient
 except ImportError:
     AsyncIOMotorClient = None
+
+
+class _ProcessSafeAsyncLock:
+    """Serialize storage mutations across both bot processes on Linux."""
+
+    def __init__(self, lock_path: str):
+        self._local_lock = asyncio.Lock()
+        self._lock_path = lock_path
+        self._handle = None
+
+    async def __aenter__(self):
+        await self._local_lock.acquire()
+        if fcntl is not None:
+            self._handle = open(self._lock_path, "a+", encoding="utf-8")
+            await asyncio.to_thread(fcntl.flock, self._handle.fileno(), fcntl.LOCK_EX)
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        try:
+            if self._handle is not None:
+                await asyncio.to_thread(fcntl.flock, self._handle.fileno(), fcntl.LOCK_UN)
+                self._handle.close()
+                self._handle = None
+        finally:
+            self._local_lock.release()
 
 class HybridStorage:
     def __init__(
@@ -22,7 +54,10 @@ class HybridStorage:
         writer_hostname: str = "",
     ):
         self.path = path
-        self._lock = asyncio.Lock()
+        lock_id = hashlib.sha256(os.path.abspath(path).encode("utf-8")).hexdigest()[:16]
+        self._lock = _ProcessSafeAsyncLock(
+            os.path.join(tempfile.gettempdir(), f"gki-storage-{lock_id}.lock")
+        )
         self.mongo_uri = mongo_uri
         self.sync_mode = (sync_mode or "auto").strip().lower()
         self.writer_hostname = (writer_hostname or "").strip().lower()
@@ -32,7 +67,7 @@ class HybridStorage:
         self.collection = None
         
         if not os.path.exists(self.path):
-            self._save_local({"keys": {}, "jobs": [], "messages": {}, "admins": [], "auth_chats": [], "waiters": [], "successful_builds": []})
+            self._save_local(self._default_data())
             
         if self.mongo_uri and AsyncIOMotorClient:
             try:
@@ -41,6 +76,10 @@ class HybridStorage:
                 self.collection = self.db["storage_data"]
             except Exception as e:
                 logger.error("MongoDB connection failed: %s", e)
+
+    def close(self):
+        if self.client is not None:
+            self.client.close()
 
     def _resolved_sync_mode(self) -> str:
         mode = self.sync_mode
@@ -132,21 +171,47 @@ class HybridStorage:
         except Exception as e:
             logger.error("MongoDB Sync Error: %s", e)
 
+    @staticmethod
+    def _default_data() -> Dict[str, Any]:
+        return {
+            "keys": {}, "jobs": [], "messages": {}, "admins": [],
+            "auth_chats": [], "waiters": [], "successful_builds": [],
+            "dm_users": [], "group_chats": [],
+        }
+
     def _load(self) -> Dict[str, Any]:
         if not os.path.exists(self.path):
-            return {"keys": {}, "jobs": [], "messages": {}, "admins": [], "auth_chats": [], "waiters": [], "successful_builds": []}
+            return self._default_data()
         try:
             with open(self.path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {"keys": {}, "jobs": [], "messages": {}, "admins": [], "auth_chats": [], "waiters": [], "successful_builds": []}
+                data = json.load(f)
+            if not isinstance(data, dict):
+                raise ValueError("root JSON value must be an object")
+            return data
+        except (OSError, ValueError, json.JSONDecodeError) as e:
+            # Returning a blank database here would make the next write erase
+            # every queued build and access key. Fail safely instead.
+            logger.critical("Cannot read storage file %s; refusing to overwrite it: %s", self.path, e)
+            raise RuntimeError(f"Storage data is unreadable: {self.path}") from e
 
     def _save_local(self, data: Dict[str, Any]):
+        directory = os.path.dirname(os.path.abspath(self.path)) or "."
+        temp_path = None
         try:
-            with open(self.path, "w", encoding="utf-8") as f:
+            fd, temp_path = tempfile.mkstemp(prefix=".storage-", suffix=".json", dir=directory)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temp_path, self.path)
         except Exception as e:
             logger.error("Save JSON failed: %s", e)
+            if temp_path:
+                try:
+                    os.unlink(temp_path)
+                except OSError:
+                    pass
+            raise
 
     async def _save(self, data: Dict[str, Any]):
         self._save_local(data)

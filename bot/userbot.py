@@ -6,6 +6,7 @@ os.environ.pop("ALL_PROXY", None)
 os.environ["AIOHTTP_NO_EXTENSIONS"] = "1"
 
 import asyncio
+import html
 import json
 import logging
 import shlex
@@ -269,7 +270,7 @@ class GitHubAPI:
         return await self._request("DELETE", url)
 
     async def list_runs_for_repo(self, repo: str, ref: str, created_iso: str):
-        ts = datetime.fromisoformat(created_iso) - timedelta(seconds=10)
+        ts = _parse_utc(created_iso) - timedelta(seconds=10)
         url = f"{self.base}/repos/{self.owner}/{repo}/actions/runs?branch={ref}&per_page=10&created=%3E{ts.isoformat()}"
         return await self._request("GET", url)
 
@@ -279,6 +280,21 @@ class GitHubAPI:
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────
+def _parse_utc(value: str) -> datetime:
+    parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _html_user_mention(user_id, user_name) -> str:
+    label = html.escape(str(user_name or user_id or "user"))
+    try:
+        return f'<a href="tg://user?id={int(user_id)}">{label}</a>'
+    except (TypeError, ValueError):
+        return label
+
+
 def _format_time_utc7(iso_time: str) -> str:
     try:
         dt_obj = datetime.fromisoformat(iso_time.replace("Z", "+00:00"))
@@ -508,7 +524,7 @@ async def _update_menu(event, session: Dict[str, Any], text: str):
 def _task_header(session: Dict[str, Any]) -> str:
     uid = session.get("user_id", 0)
     name = session.get("user_name", "Unknown")
-    return f'📋 <b>Task by <a href="tg://user?id={uid}">{name}</a></b>\n\n'
+    return f"📋 <b>Task by {_html_user_mention(uid, name)}</b>\n\n"
 
 
 # ─── Step handlers ───────────────────────────────────────────────────
@@ -1015,7 +1031,6 @@ async def _do_dispatch(event, session: Dict[str, Any]) -> bool:
         first = getattr(sender, 'first_name', '') or ''
         last = getattr(sender, 'last_name', '') or ''
         sender_name = f"{first} {last}".strip() or 'User'
-        sender_name = sender_name.replace("#", "＃").replace("@", "＠").replace("<", "&lt;").replace(">", "&gt;")
     except Exception:
         sender_name = 'User'
 
@@ -1039,7 +1054,7 @@ async def _do_dispatch(event, session: Dict[str, Any]) -> bool:
     await storage.add_job(job)
 
     view_url = f"https://github.com/{GITHUB_OWNER}/{GKI_REPO}/actions/workflows/{dispatch_file}"
-    mention = f"<a href='tg://user?id={sender_id}'>{sender_name}</a>"
+    mention = _html_user_mention(sender_id, sender_name)
     success_text = (
         "✅ <b>Đã gửi build thành công!</b>\n"
         f"👤 Người gửi: {mention}\n\n"
@@ -1211,7 +1226,10 @@ async def status_cmd(event):
         user_name = job.get("user_name", "GitHub")
         url = run.get("html_url", f"https://github.com/{GITHUB_OWNER}/{GKI_REPO}/actions/runs/{run_id}")
         lines.append(f"")
-        lines.append(f"<b>{idx}. Run #{run_id}</b> | {run.get('status')} | {elapsed_m}p | by {user_name}")
+        lines.append(
+            f"<b>{idx}. Run #{run_id}</b> | {html.escape(str(run.get('status', 'unknown')))} "
+            f"| {elapsed_m}p | by {html.escape(str(user_name))}"
+        )
         lines.append(f"   🔗 <a href='{url}'>Xem trên GitHub</a>")
         lines.append(f"   ❌ Hủy: <code>.cancel {run_id}</code>")
     await _reply_temp(event, "\n".join(lines), 60, html=True)
@@ -1319,9 +1337,9 @@ async def list_cmd(event):
         user_id = job.get("user_id", 0)
         user_name = job.get("user_name", run.get("actor", {}).get("login", "Unknown"))
         if user_id:
-            mention = f"<a href='tg://user?id={user_id}'>{user_name}</a>"
+            mention = _html_user_mention(user_id, user_name)
         else:
-            mention = user_name
+            mention = html.escape(str(user_name))
         lines.append(f"<b>{idx}. Run #{run_id}</b> by {mention}")
         lines.append(f"Time: {time_str}")
         lines.append(f"Xoá: <code>.delete {run_id}</code>")
@@ -1724,9 +1742,9 @@ async def list_reply_handler(event):
         user_id = job.get("user_id", 0)
         user_name = job.get("user_name", run.get("actor", {}).get("login", "Unknown"))
         if user_id:
-            mention = f"<a href='tg://user?id={user_id}'>{user_name}</a>"
+            mention = _html_user_mention(user_id, user_name)
         else:
-            mention = user_name
+            mention = html.escape(str(user_name))
         lines.append(f"<b>{idx}. Run #{run_id}</b> by {mention}")
         lines.append(f"Time: {time_str}")
         lines.append(f"Xoá: <code>.delete {run_id}</code>")
@@ -1815,18 +1833,29 @@ async def poller_loop():
                     if not run_id and ref and workflow_file and job_created_at_iso:
                         runs_resp = await gh.list_runs_for_repo(repo, ref, job_created_at_iso)
                         if runs_resp.get("status") == 200:
+                            all_jobs = await storage.get_jobs()
+                            claimed_run_ids = {
+                                str(existing.get("run_id"))
+                                for existing in all_jobs
+                                if existing.get("_id") != job.get("_id") and existing.get("run_id")
+                            }
                             possible = []
-                            job_created_dt = datetime.fromisoformat(job_created_at_iso)
+                            job_created_dt = _parse_utc(job_created_at_iso)
                             for run in runs_resp["json"].get("workflow_runs", []):
                                 if run.get("event") != "workflow_dispatch":
                                     continue
                                 if workflow_file not in run.get("path", ""):
                                     continue
-                                run_dt = datetime.fromisoformat(run["created_at"].replace("Z", "+00:00"))
+                                if str(run.get("id")) in claimed_run_ids:
+                                    continue
+                                run_dt = _parse_utc(run["created_at"])
                                 if run_dt >= (job_created_dt - timedelta(seconds=15)):
                                     possible.append(run)
                             if possible:
-                                best = sorted(possible, key=lambda x: x["created_at"])[0]
+                                best = min(
+                                    possible,
+                                    key=lambda x: abs((_parse_utc(x["created_at"]) - job_created_dt).total_seconds()),
+                                )
                                 run_id = best["id"]
                                 await storage.update_job(job["_id"], {"run_id": run_id})
 
@@ -1834,6 +1863,12 @@ async def poller_loop():
                         continue
 
                     rn = await gh.get_run(repo, int(run_id))
+                    if rn.get("status") == 404:
+                        logger.warning("Run %s no longer exists; marking job cancelled", run_id)
+                        await storage.update_job(job["_id"], {
+                            "status": "completed", "conclusion": "cancelled", "notified": True
+                        })
+                        continue
                     if rn.get("status") != 200:
                         continue
 
@@ -1847,10 +1882,12 @@ async def poller_loop():
                         user_id = job.get("user_id", 0)
                         user_name = job.get("user_name", "Unknown")
                         icon = "✅" if conclusion == "success" else "❌" if conclusion == "failure" else "⚠️"
-                        mention = f'<a href="tg://user?id={user_id}">{user_name}</a>'
+                        mention = _html_user_mention(user_id, user_name)
 
-                        created_at_dt = datetime.fromisoformat(job["created_at"].replace("Z", "+00:00"))
+                        created_at_dt = _parse_utc(job["created_at"])
                         elapsed = int((datetime.now(timezone.utc) - created_at_dt).total_seconds() // 60)
+                        github_link = html.escape(str(html_url or "#"), quote=True)
+                        nightly_link = html.escape(str(nightly_url), quote=True)
 
                         if conclusion == "success":
                             text = (
@@ -1858,8 +1895,8 @@ async def poller_loop():
                                 f"👤 Người nhận: {mention}\n"
                                 f"⏱️ Thời gian: <b>{elapsed} phút</b>\n"
                                 f"📊 Trạng thái: <b>{conclusion.upper()}</b>\n"
-                                f"<blockquote><b>Xem : <a href='{html_url}'>Github</a> | "
-                                f"<a href='{nightly_url}'>File</a> | "
+                                f"<blockquote><b>Xem : <a href='{github_link}'>Github</a> | "
+                                f"<a href='{nightly_link}'>File</a> | "
                                 f"<a href='https://kernel.takeshi.dev/'>Dashboard</a></b></blockquote>"
                             )
                         else:
@@ -1868,8 +1905,15 @@ async def poller_loop():
                                 f"👤 Người gửi: {mention}\n"
                                 f"⏱️ Thời gian: <b>{elapsed} phút</b>\n"
                                 f"📊 Trạng thái: <b>{conclusion.upper()}</b>\n"
-                                f"🔗 <a href='{html_url}'>Xem lỗi trên GitHub</a>"
+                                f"🔗 <a href='{github_link}'>Xem lỗi trên GitHub</a>"
                             )
+
+                        # Keep terminal state accurate even if Telethon has a
+                        # temporary delivery failure; notified stays false so
+                        # the notification can be retried.
+                        await storage.update_job(job["_id"], {
+                            "status": "completed", "conclusion": conclusion
+                        })
 
                         try:
                             await _send_topic_safe(
@@ -1879,12 +1923,9 @@ async def poller_loop():
                                 parse_mode="html",
                                 link_preview=False,
                             )
+                            await storage.update_job(job["_id"], {"notified": True})
                         except Exception as e:
-                            logger.error("Send notification failed: %s", e)
-
-                        await storage.update_job(job["_id"], {
-                            "status": "completed", "conclusion": conclusion, "notified": True
-                        })
+                            logger.error("Send notification failed; will retry: %s", e)
                         if conclusion == "success":
                             await storage.add_successful_build(run_id, job.get("user_id", 0), ref, user_name)
 
@@ -1914,7 +1955,7 @@ async def cleanup_loop():
     while True:
         try:
             await storage.delete_old_messages(24)
-            await storage.delete_old_jobs(7)
+            await storage.delete_old_jobs(30)
         except Exception as e:
             logger.error("Cleanup error: %s", e)
         await asyncio.sleep(3600)

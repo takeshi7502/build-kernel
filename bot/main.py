@@ -1,4 +1,5 @@
 import os
+import html
 # Xóa proxy để tránh lỗi kết nối trên môi trường Termux/VPS có proxy hệ thống
 os.environ.pop("HTTPS_PROXY", None)
 os.environ.pop("HTTP_PROXY", None)
@@ -192,6 +193,10 @@ class GitHubAPI:
             self.session = aiohttp.ClientSession(timeout=timeout, connector=connector)
         return self.session
 
+    async def close(self):
+        if self.session and not self.session.closed:
+            await self.session.close()
+
     async def _request(self, method: str, url: str, json_payload: Optional[dict] = None):
         headers = {
             "Authorization": f"Bearer {self.token}",
@@ -249,7 +254,7 @@ class GitHubAPI:
         return await self._request("GET", url)
 
     async def list_runs_for_repo(self, repo: str, ref: str, created_iso: str):
-        ts = datetime.fromisoformat(created_iso) - timedelta(seconds=10)
+        ts = _parse_utc(created_iso) - timedelta(seconds=10)
         created_filter = ts.isoformat()
         url = f"{self.base}/repos/{config.GITHUB_OWNER}/{repo}/actions/runs?branch={ref}&per_page=10&created=%3E{created_filter}"
         return await self._request("GET", url)
@@ -266,7 +271,23 @@ class GitHubAPI:
 
 def tg_mention_html(user) -> str:
     name = user.first_name or user.username or "user"
-    return f'<a href="tg://user?id={user.id}">{name}</a>'
+    return f'<a href="tg://user?id={user.id}">{html.escape(str(name))}</a>'
+
+
+def _html_user_mention(user_id, user_name) -> str:
+    label = html.escape(str(user_name or user_id or "user"))
+    try:
+        return f'<a href="tg://user?id={int(user_id)}">{label}</a>'
+    except (TypeError, ValueError):
+        return label
+
+
+def _parse_utc(value: str) -> datetime:
+    """Parse stored GitHub/ISO timestamps into timezone-aware UTC datetimes."""
+    parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 async def _bot_send_topic_safe(bot, chat_id: int, text: str, message_thread_id=None, **kwargs):
     """Send to a forum topic when possible, falling back if that topic is closed."""
@@ -477,10 +498,13 @@ async def poller(app):
                     continue
                 _grun = _gj.get("run_id")
                 try:
-                    _gcat = datetime.fromisoformat(_gj.get("created_at", "").replace("Z", "+00:00"))
+                    _gcat = _parse_utc(_gj.get("created_at", ""))
                     _gmin = (_now - _gcat).total_seconds() / 60
-                    # Ghost: không có run_id sau 10 phút, hoặc có run_id nhưng trên 120 phút
-                    _is_ghost = (not _grun and _gmin > 10) or (_grun and _gmin > 120)
+                    # A kernel build may legitimately take more than two hours.
+                    # Only a dispatched job that never receives a GitHub run ID
+                    # is considered orphaned here; jobs with a run ID are
+                    # reconciled against GitHub in the normal polling path.
+                    _is_ghost = not _grun and _gmin > 20
                 except Exception:
                     _is_ghost = not _grun
                 if _is_ghost:
@@ -570,18 +594,30 @@ async def poller(app):
                     if not run_id and ref and workflow_file and job_created_at_iso:
                         runs_resp = await gh.list_runs_for_repo(repo, ref, job_created_at_iso)
                         if runs_resp["status"] == 200:
+                            all_jobs = await storage.get_jobs()
+                            claimed_run_ids = {
+                                str(existing.get("run_id"))
+                                for existing in all_jobs
+                                if existing.get("_id") != job.get("_id") and existing.get("run_id")
+                            }
                             possible_runs = []
-                            job_created_dt = datetime.fromisoformat(job_created_at_iso)
+                            job_created_dt = _parse_utc(job_created_at_iso)
                             for run in runs_resp["json"].get("workflow_runs", []):
                                 if run.get("event") != "workflow_dispatch":
                                     continue
                                 if workflow_file not in run.get("path", ""):
                                     continue
-                                run_created_dt = datetime.fromisoformat(run["created_at"].replace("Z", "+00:00"))
+                                if str(run.get("id")) in claimed_run_ids:
+                                    continue
+                                run_created_dt = _parse_utc(run["created_at"])
                                 if run_created_dt >= (job_created_dt - timedelta(seconds=15)):
                                     possible_runs.append(run)
                             if possible_runs:
-                                best_match = sorted(possible_runs, key=lambda x: x["created_at"])[0]
+                                # Prefer the nearest unclaimed run after dispatch.
+                                best_match = min(
+                                    possible_runs,
+                                    key=lambda x: abs((_parse_utc(x["created_at"]) - job_created_dt).total_seconds()),
+                                )
                                 run_id = best_match["id"]
                                 await storage.update_job(job["_id"], {"run_id": run_id})
 
@@ -639,20 +675,20 @@ async def poller(app):
                             pass
 
 
-                        # Link đã được nhúng trực tiếp trong nội dung message.
-
                         chat_id = job["chat_id"]
                         user_id = job["user_id"]
                         user_name = job.get("user_name", "")
                         if not user_name:
                             user_name = str(user_id)
-                        mention = f'<a href="tg://user?id={user_id}">{user_name}</a>'
+                        mention = _html_user_mention(user_id, user_name)
                         icon = "✅" if conclusion == "success" else "❌" if conclusion == "failure" else "⚠️"
                         
-                        created_at_dt = datetime.fromisoformat(job.get("created_at", datetime.now(timezone.utc).isoformat()).replace("Z", "+00:00"))
+                        created_at_dt = _parse_utc(job.get("created_at", datetime.now(timezone.utc).isoformat()))
                         elapsed = int((datetime.now(timezone.utc) - created_at_dt).total_seconds() // 60)
 
                         download_link = telegraph_url or f"https://nightly.link/{config.GITHUB_OWNER}/{repo}/actions/runs/{run_id}"
+                        github_link = html.escape(str(html_url or "#"), quote=True)
+                        download_link = html.escape(str(download_link), quote=True)
                         text = (
                             f"<b>{icon} Build {job.get('type','?').upper()} kết thúc!\n"
                             f"┃\n"
@@ -660,10 +696,28 @@ async def poller(app):
                             f"┠ Trạng thái: {conclusion.upper()}\n"
                             f"┖ Thời gian: {elapsed} phút\n"
                             f"<blockquote>Xem thông tin: "
-                            f"<a href='{html_url}'>Github</a>┃"
+                            f"<a href='{github_link}'>Github</a>┃"
                             f"<a href='https://kernel.takeshi.dev/'>Website</a>┃"
                             f"<a href='{download_link}'>Download</a></blockquote></b>"
                         )
+
+                        # Persist the terminal GitHub state before attempting a
+                        # Telegram delivery. A transient Telegram outage must
+                        # not leave the dashboard showing a completed run as
+                        # "building".
+                        completion_fields = {
+                            "status": "completed",
+                            "conclusion": conclusion,
+                            "gh_duration": gh_dur,
+                        }
+                        await storage.update_job(job["_id"], completion_fields)
+                        for dup in duplicate_jobs:
+                            await storage.update_job(dup["_id"], completion_fields)
+                        if job.get("type") == "buildsave" and job.get("batch_id"):
+                            await update_batch_message(job["batch_id"], storage, app.bot)
+                        if job.get("rebuild_msg_id"):
+                            await update_rebuild_message(job["rebuild_msg_id"], storage, app.bot)
+
                         try:
                             msg = await _bot_send_topic_safe(
                                 app.bot,
@@ -685,15 +739,9 @@ async def poller(app):
                             except Exception as e:
                                 logger.warning("Completion DM failed for user_id=%s: %s", user_id, e)
 
-                            update_fields = {
-                                "status": "completed",
-                                "conclusion": conclusion,
-                                "gh_duration": gh_dur,
-                                "notified": True
-                            }
-                            await storage.update_job(job["_id"], update_fields)
+                            await storage.update_job(job["_id"], {"notified": True})
                             for dup in duplicate_jobs:
-                                await storage.update_job(dup["_id"], update_fields)
+                                await storage.update_job(dup["_id"], {"notified": True})
 
                             if conclusion == "success":
                                 await storage.add_successful_build(run_id, user_id, job.get("ref", "unknown"), user_name)
@@ -709,15 +757,11 @@ async def poller(app):
                                 if job.get("type") == "buildsave":
                                     logger.info("buildsave JSON update skipped; web catalog now uses qualifying user /gki builds")
 
-                            # Cập nhật message dạng batch nếu là buildsave
-                            if job.get("type") == "buildsave" and job.get("batch_id"):
-                                await update_batch_message(job["batch_id"], storage, app.bot)
-                            if job.get("rebuild_msg_id"):
-                                await update_rebuild_message(job["rebuild_msg_id"], storage, app.bot)
-
                         except Exception as e:
-                            logger.error("Send notification / Post completion failed: %s", e)
-                            await storage.update_job(job["_id"], {"notified": True})
+                            # Keep notified=False so the next polling cycle can
+                            # retry. This is safer than silently losing a build
+                            # completion notification.
+                            logger.error("Send completion notification failed; will retry: %s", e)
 
                         # Báo cho những người đang đợi
                         waiters = await storage.get_waiters()
@@ -726,7 +770,7 @@ async def poller(app):
                                 w_user_id = w["user_id"]
                                 w_chat_id = w["chat_id"]
                                 w_name = w.get("user_name", str(w_user_id))
-                                w_mention = f'<a href="tg://user?id={w_user_id}">{w_name}</a>'
+                                w_mention = _html_user_mention(w_user_id, w_name)
                                 msg_waiter = f"🔔 {w_mention} ơi, tiến trình đã hoàn tất! Bạn có thể dùng lệnh /gki lại ngay bây giờ nhé."
                                 try:
                                     await _bot_send_topic_safe(
@@ -889,7 +933,7 @@ async def ensure_user_started_bot(update: Update, context: ContextTypes.DEFAULT_
 
     bot_username = (await context.bot.get_me()).username
     start_url = f"https://t.me/{bot_username}?start=dm"
-    mention = f'<a href="tg://user?id={user.id}">{user.full_name}</a>'
+    mention = _html_user_mention(user.id, user.full_name)
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("🚀 Start bot", url=start_url)]])
     m = await _send_msg(
         update,
@@ -1261,7 +1305,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE, message
 
         user_id = job.get("user_id", "Unknown")
         user_name = job.get("user_name", "Unknown")
-        mention = f'<a href="tg://user?id={user_id}">{user_name}</a>' if user_id != "Unknown" else "GitHub / Manual"
+        mention = _html_user_mention(user_id, user_name) if user_id != "Unknown" else "GitHub / Manual"
 
         job_type = job.get("type", "gki")
         if job_type == "buildsave":
@@ -1412,7 +1456,7 @@ async def show_list_page(update: Update, context: ContextTypes.DEFAULT_TYPE, pag
             if user_id == 0:
                 mention = "Hệ thống cũ"
             else:
-                mention = f'<a href="tg://user?id={user_id}">{user_name}</a>'
+                mention = _html_user_mention(user_id, user_name)
         else:
             actor = r.get("actor", {}).get("login", "Unknown")
             mention = f"GitHub / {actor}"
@@ -2532,6 +2576,7 @@ async def start_web_server(app_bot):
     port = int(os.getenv("WEB_PORT", 5000))
     site = aiohttp_web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
+    app_bot.bot_data["web_runner"] = runner
     logger.info(f"✅ Real-time Web Dashboard started natively on 0.0.0.0:{port}")
 
 
@@ -2685,6 +2730,14 @@ def main():
         app_.create_task(poller(app_))
         app_.create_task(start_web_server(app_))
     app.post_init = _post_init
+
+    async def _post_shutdown(app_):
+        runner = app_.bot_data.pop("web_runner", None)
+        if runner is not None:
+            await runner.cleanup()
+        await app_.bot_data["gh"].close()
+        app_.bot_data["storage"].close()
+    app.post_shutdown = _post_shutdown
 
     print("\n" + "="*60)
     print("🚀 GKI BOT ĐÃ KHỞI ĐỘNG THÀNH CÔNG!")

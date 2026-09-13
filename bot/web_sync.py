@@ -1,5 +1,6 @@
 import json
 import base64
+import html
 import logging
 from datetime import datetime, timezone, timedelta
 import config
@@ -30,6 +31,11 @@ logger = logging.getLogger("gww-web-sync")
 
 _GH_RUNS_CACHE = {}
 _LAST_GH_FETCH = 0
+
+
+def _html_text(value) -> str:
+    """Escape values that are inserted into the dashboard's HTML templates."""
+    return html.escape(str(value if value is not None else ""))
 
 async def get_realtime_data(app):
     global _GH_RUNS_CACHE, _LAST_GH_FETCH
@@ -144,7 +150,7 @@ async def get_realtime_data(app):
         
         for j in all_jobs_to_render:
             inputs = j.get("inputs", {})
-            user_name = j.get("user_name") or j.get("sender_name") or "Unknown"
+            user_name = _html_text(j.get("user_name") or j.get("sender_name") or "Unknown")
             
             if j.get("_batch_jobs"):  # Đây là đại diện của 1 batch buildsave
                 bjobs = j["_batch_jobs"]
@@ -419,7 +425,7 @@ async def get_realtime_data(app):
                 "type": j.get("type", "gki"),
                 "title": title,
                 "sub_title": sub_title,
-                "custom_version": custom_version,
+                "custom_version": _html_text(custom_version),
                 "zram": zram,
                 "kpm": kpm,
                 "bbg": bbg,

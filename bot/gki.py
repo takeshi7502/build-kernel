@@ -1,3 +1,4 @@
+import html
 from typing import Dict, Any, List
 from datetime import datetime, timezone
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, constants
@@ -208,7 +209,7 @@ def _toggles_keyboard(inputs: dict, back_cb: str = "", selected_target: str = ""
 
 async def _ensure_owner(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     uid = update.effective_user.id
-    owner = context.chat_data.get("gki_owner")
+    owner = context.user_data.get("gki_owner")
     
     # Cho phép chính chủ HOẶC admin được thao tác
     if owner is None or owner == uid:
@@ -226,9 +227,9 @@ async def _ensure_owner(update: Update, context: ContextTypes.DEFAULT_TYPE) -> b
 
 
 def _task_header(context) -> str:
-    owner_name = context.chat_data.get("gki_owner_name", "Unknown")
-    owner_id = context.chat_data.get("gki_owner", 0)
-    return f'📋 <b>Task by <a href="tg://user?id={owner_id}">{owner_name}</a></b>\n┃\n┖ '
+    owner_name = context.user_data.get("gki_owner_name", "Unknown")
+    owner_id = context.user_data.get("gki_owner", 0)
+    return f'📋 <b>Task by <a href="tg://user?id={owner_id}">{html.escape(str(owner_name))}</a></b>\n┃\n┖ '
 
 
 async def _safe_delete(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_id: int):
@@ -289,8 +290,8 @@ def _cleanup(context: ContextTypes.DEFAULT_TYPE):
     context.user_data.pop("gki", None)
     context.user_data.pop("build_key", None)
     context.user_data.pop("gki_bot_msg_id", None)
-    context.chat_data.pop("gki_owner", None)
-    context.chat_data.pop("gki_owner_name", None)
+    context.user_data.pop("gki_owner", None)
+    context.user_data.pop("gki_owner_name", None)
 
 async def _del_msg_job(context: ContextTypes.DEFAULT_TYPE):
     job = context.job
@@ -330,8 +331,8 @@ class GKIFlow:
 
         await _safe_delete(context, chat_id, update.message.message_id)
 
-        context.chat_data["gki_owner"] = update.effective_user.id
-        context.chat_data["gki_owner_name"] = update.effective_user.full_name
+        context.user_data["gki_owner"] = update.effective_user.id
+        context.user_data["gki_owner_name"] = update.effective_user.full_name
         context.user_data["gki"] = {"inputs": {
             "kernelsu_variant": "SukiSU",
             "kernelsu_branch": "Stable(标准)",
@@ -387,7 +388,7 @@ class GKIFlow:
 
     async def timeout(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = update.effective_user
-        mention = f'<a href="tg://user?id={user.id}">{user.full_name}</a>' if user else 'Bạn'
+        mention = f'<a href="tg://user?id={user.id}">{html.escape(user.full_name)}</a>' if user else 'Bạn'
         notice = f"<b><blockquote>⏳ {mention}, phiên /gki đã hết hạn sau 60s.</blockquote></b>"
         timeout_chat_id = None
         timeout_message_id = None
@@ -987,8 +988,7 @@ class GKIFlow:
                 await self.storage.consume(key)
             view_url = f"https://github.com/{self.config.GITHUB_OWNER}/{self.config.GKI_REPO}/actions/workflows/{dispatch_file}"
             
-            clean_name = user.full_name.replace("#", "＃").replace("@", "＠").replace("<", "&lt;").replace(">", "&gt;")
-            mention = f'<a href="tg://user?id={user.id}">{clean_name}</a>'
+            mention = f'<a href="tg://user?id={user.id}">{html.escape(user.full_name)}</a>'
             
             msg_text = (
                 f"<b>➲ Đã gửi GKI Build thành công!\n"

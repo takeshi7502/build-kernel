@@ -6,6 +6,7 @@ Flow:
 Cấu hình cố định: Stable, no custom version, ZRAM/BBG/SUSFS=on, KPM=off, Actions release.
 """
 
+import html
 from typing import Dict, Any
 from datetime import datetime, timezone
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, constants
@@ -401,7 +402,7 @@ class BuildSaveFlow:
         return ConversationHandler.END
     async def timeout(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = update.effective_user
-        mention = f'<a href="tg://user?id={user.id}">{user.full_name}</a>' if user else 'Bạn'
+        mention = f'<a href="tg://user?id={user.id}">{html.escape(user.full_name)}</a>' if user else 'Bạn'
         notice = f"<b><blockquote>⏳ {mention}, phiên /build đã hết hạn sau 60s.</blockquote></b>"
         q = update.callback_query
         if q:

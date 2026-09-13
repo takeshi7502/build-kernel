@@ -1,6 +1,7 @@
 # ==============================
 # GitHub Workflow Bot - oki.py
 # ==============================
+import html
 from typing import Dict, Any, List
 from datetime import datetime, timezone
 import time
@@ -80,7 +81,7 @@ def _back_cancel(back_to: str):
 
 async def _ensure_owner(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     uid = update.effective_user.id
-    owner = context.chat_data.get("oki_owner")
+    owner = context.user_data.get("oki_owner")
     if owner is None or owner == uid:
         return True
     try:
@@ -100,14 +101,14 @@ def _cleanup(context: ContextTypes.DEFAULT_TYPE):
     context.user_data.pop("oki", None)
     context.user_data.pop("build_key", None)
     context.user_data.pop("oki_bot_msg_id", None)
-    context.chat_data.pop("oki_owner", None)
-    context.chat_data.pop("oki_owner_name", None)
+    context.user_data.pop("oki_owner", None)
+    context.user_data.pop("oki_owner_name", None)
 
 
 def _task_header(context: ContextTypes.DEFAULT_TYPE) -> str:
-    owner_name = context.chat_data.get("oki_owner_name", "Unknown")
-    owner_id = context.chat_data.get("oki_owner", 0)
-    return f'📋 <b>Task by <a href="tg://user?id={owner_id}">{owner_name}</a></b>\n┃\n┖ '
+    owner_name = context.user_data.get("oki_owner_name", "Unknown")
+    owner_id = context.user_data.get("oki_owner", 0)
+    return f'📋 <b>Task by <a href="tg://user?id={owner_id}">{html.escape(str(owner_name))}</a></b>\n┃\n┖ '
 
 
 class OKIFlow:
@@ -220,8 +221,8 @@ class OKIFlow:
 
             context.user_data["build_key"] = key
 
-        context.chat_data["oki_owner"] = update.effective_user.id
-        context.chat_data["oki_owner_name"] = update.effective_user.full_name
+        context.user_data["oki_owner"] = update.effective_user.id
+        context.user_data["oki_owner_name"] = update.effective_user.full_name
         # Mặc định tất cả các tham số
         context.user_data["oki"] = {"inputs": {
             "FILE": "oneplus_12_b",
@@ -390,8 +391,7 @@ class OKIFlow:
             
             view_url = f"https://github.com/{self.config.GITHUB_OWNER}/{self.config.OKI_REPO}/actions/workflows/{dispatch_file}"
             
-            clean_name = user.full_name.replace("#", "＃").replace("@", "＠").replace("<", "&lt;").replace(">", "&gt;")
-            mention = f'<a href="tg://user?id={user.id}">{clean_name}</a>'
+            mention = f'<a href="tg://user?id={user.id}">{html.escape(user.full_name)}</a>'
             
             msg_text = (
                 f"<b>➲ Đã gửi OKI Build thành công!\n"
@@ -419,7 +419,7 @@ class OKIFlow:
         return ConversationHandler.END
     async def timeout(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = update.effective_user
-        mention = f'<a href="tg://user?id={user.id}">{user.full_name}</a>' if user else 'Bạn'
+        mention = f'<a href="tg://user?id={user.id}">{html.escape(user.full_name)}</a>' if user else 'Bạn'
         notice = f"<b><blockquote>⏳ {mention}, phiên /oki đã hết hạn sau 60s.</blockquote></b>"
         timeout_chat_id = None
         timeout_message_id = None
