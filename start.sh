@@ -278,10 +278,6 @@ if [ "$MODE" = "bot" ] || [ "$MODE" = "all" ]; then
     ensure_dashboard_assets
 fi
 
-if [ "$CONFIGURE_SSL" -eq 1 ]; then
-    configure_ssl
-fi
-
 case "$MODE" in
     bot)
         stop_process_if_present gki-userbot
@@ -298,6 +294,12 @@ case "$MODE" in
 esac
 
 pm2 save
+
+# SSL is optional infrastructure. Start the requested bot services first so a
+# DNS/ACME failure cannot leave the bot offline.
+if [ "$CONFIGURE_SSL" -eq 1 ]; then
+    configure_ssl
+fi
 
 echo ""
 echo "✅ Hoàn tất."
