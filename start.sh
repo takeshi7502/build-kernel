@@ -90,10 +90,16 @@ ensure_pm2() {
 }
 
 ensure_venv_module() {
-    if python3 -c 'import venv' >/dev/null 2>&1; then
+    # On Ubuntu, `import venv` can succeed even when ensurepip is absent.
+    # Test actual venv creation in an isolated temporary directory instead.
+    local probe_dir
+    probe_dir="$(mktemp -d "$SCRIPT_DIR/.venv-check.XXXXXX")"
+    if python3 -m venv "$probe_dir" >/dev/null 2>&1; then
+        rm -rf -- "$probe_dir"
         return
     fi
-    echo "⚙️  Đang cài python3-venv..."
+    rm -rf -- "$probe_dir"
+    echo "⚙️  Đang cài python3-venv (bổ sung ensurepip)..."
     sudo apt-get update
     sudo apt-get install -y python3-venv
 }
@@ -102,7 +108,14 @@ ensure_runtime() {
     ensure_command python3 python3
     ensure_pm2
 
-    if [ ! -d "venv" ]; then
+    if [ -d "venv" ] && { [ ! -x "venv/bin/python" ] || [ ! -x "venv/bin/pip" ]; }; then
+        local backup_name
+        backup_name="venv.incomplete.$(date +%Y%m%d%H%M%S)"
+        echo "⚠️  Phát hiện venv tạo dở; lưu lại thành $backup_name"
+        mv venv "$backup_name"
+    fi
+
+    if [ ! -x "venv/bin/python" ] || [ ! -x "venv/bin/pip" ]; then
         echo "⚙️  Đang tạo Python virtual environment..."
         ensure_venv_module
         python3 -m venv venv
