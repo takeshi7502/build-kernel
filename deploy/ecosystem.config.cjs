@@ -16,6 +16,7 @@ module.exports = {
       restart_delay: 5000,
       min_uptime: 10000,
       max_restarts: 10,
+      max_memory_restart: "400M",
       kill_timeout: 15000,
       time: true,
       env: { PYTHONUNBUFFERED: "1" },

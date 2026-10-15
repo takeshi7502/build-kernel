@@ -12,6 +12,11 @@ bot/                         Backend Python
   config.py                  Đọc và kiểm tra cấu hình .env
   main.py                    Telegram handlers, poller, HTTP server
   github.py                  GitHub API client dùng chung
+  dispatch.py                Hàng đợi bền vững, gửi build và lưu run ID
+  workers.py                 Giám sát worker, heartbeat và tự phục hồi
+  notifications.py           Outbox thông báo/broadcast, retry có giới hạn
+  status.py                  Cache GitHub dùng chung cho poller và dashboard
+  maintenance.py             Backup định kỳ, cloud sync và cập nhật catalog
   catalog.py                 Cập nhật link tải kernel, giữ catalog đã có
   backups.py                 Kiểm tra ZIP backup trước khi khôi phục
   gki.py                     Hội thoại /gki
@@ -34,7 +39,7 @@ start.sh                     Cài đặt/cập nhật dependency và khởi ch�
 run.sh                       Thao tác hằng ngày
 ```
 
-Đọc thêm [kiến trúc và dữ liệu](docs/architecture.md), [nâng cấp từ bản cũ](docs/migration.md) và [công cụ bảo trì](tools/README.md).
+Đọc thêm [kiến trúc và dữ liệu](docs/architecture.md), [vận hành và xử lý sự cố](docs/reliability.md), [nâng cấp từ bản cũ](docs/migration.md) và [công cụ bảo trì](tools/README.md).
 
 ## Cài mới trên Ubuntu/Debian
 
@@ -118,6 +123,9 @@ PowerShell kích hoạt môi trường bằng `.\venv\Scripts\Activate.ps1`; ent
 | --- | --- |
 | `bash run.sh` | Mở menu thao tác |
 | `bash run.sh status` | Xem trạng thái process |
+| `bash run.sh health` | Kiểm tra worker và storage qua `/healthz` |
+| `bash run.sh backup` | Tạo ZIP backup local và kiểm tra nội dung |
+| `bash run.sh backups` | Liệt kê các ZIP backup local |
 | `bash run.sh logs` | Xem log trực tiếp; Ctrl+C để thoát |
 | `bash run.sh restart` | Khởi động lại bot và nạp cấu hình mới |
 | `bash run.sh update` | Cập nhật source bằng fast-forward, chưa restart |
@@ -137,6 +145,8 @@ Sao lưu `.env`, `data.json` (hoặc đường dẫn `STORAGE_PATH`) và `web/da
 | `/dl` | Tra cứu link tải kernel |
 | `/build` | Build nhiều phiên bản theo batch, dành cho admin |
 | `/st`, `/list` | Theo dõi job và lịch sử build |
+| `/jobs`, `/canceljob ID` | Xem hàng đợi, hủy job thuộc quyền quản lý |
+| `/resolvejob ID RUN_ID\|refund` | Admin xử lý yêu cầu GitHub chưa rõ kết quả sau khi kiểm tra |
 | `/rb`, `/rebuild` | Chức năng rebuild dành cho admin |
 | `/key`, `/keyvip`, `/keys` | Quản lý key dành cho owner |
 | `/bc`, `/broadcast` | Gửi thông báo theo quyền quản trị |
@@ -150,12 +160,15 @@ Các thao tác hủy job/batch hiển thị trong giao diện quản lý của b
 
 MongoDB là tùy chọn. Để chạy local-only, để trống `MONGODB_URI` và đặt `MONGODB_SYNC_MODE=off`. Khi dùng MongoDB, chọn chế độ và hostname writer theo `.env.example`; chỉ dùng một instance ghi cho cùng bộ dữ liệu. `pull` tải snapshot cloud lúc khởi tạo, thay state local nếu cloud có dữ liệu; đây không phải cơ chế đồng bộ realtime hai chiều. Chi tiết ở [kiến trúc](docs/architecture.md).
 
+Bot dùng PyMongo Async thay Motor. Cloud snapshot được gộp và đẩy nền mỗi 30 giây; local vẫn được ghi ngay trước khi gửi build. Backup ZIP tự tạo lúc worker khởi động, sau đó mỗi 24 giờ, giữ 14 bản tại `data/backups/`. Backup chứa key/dữ liệu riêng tư: không đặt trong thư mục phục vụ web; sao chép bản backup ra ngoài VPS để phòng mất máy. Các biến mới đều có mặc định, không cần ghi đè `.env` đang chạy tốt. Xem [hướng dẫn nâng cấp/vận hành](docs/reliability.md).
+
 ## Kiểm tra source
 
 ```bash
 python -m compileall -q bot tools scripts
 # Nếu còn thư mục kiểm thử local:
 python -m unittest discover -s tests -t .
+node tests/test_dashboard_ui.cjs
 cd web
 npm ci
 npm run build

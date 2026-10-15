@@ -9,6 +9,7 @@ from . import config
 from .github import parse_utc as _parse_utc
 from .gki import SUB_LEVEL_META, TARGET_META
 from .storage import HybridStorage
+from .workers import heartbeat
 
 logger = logging.getLogger(__name__)
 
@@ -241,6 +242,8 @@ async def rebuild_downloads(storage: HybridStorage, app, max_age_days: int = 90)
     )
     updated = 0
     for _, job in eligible:
+        if app:
+            heartbeat(app, "catalog")
         try:
             await update_download(job, job.get("run_id"), app)
             updated += 1

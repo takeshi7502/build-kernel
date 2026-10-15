@@ -8,9 +8,8 @@ Cấu hình cố định: Stable, no custom version, ZRAM/BBG/SUSFS=on, KPM=off,
 
 import html
 from datetime import datetime, timezone
-from typing import Any, Dict
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, constants
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     CallbackQueryHandler,
     CommandHandler,
@@ -28,7 +27,6 @@ from .gki import (
     TARGET_META,
     TOGGLE_FEATURES,
     VARIANTS,
-    _del_msg_job,
 )
 from .permissions import is_admin
 
@@ -383,8 +381,15 @@ class BuildSaveFlow:
             jobs_to_create.append(job)
             index += 1
 
-        for j in jobs_to_create:
-            await self.storage.add_job(j)
+        try:
+            saved_jobs = await self.storage.enqueue_batch(
+                jobs_to_create, f"buildsave:{q.message.chat_id}:{q.message.message_id}:{user.id}"
+            )
+        except ValueError as error:
+            context.user_data.pop("bs", None)
+            await q.edit_message_text(f"❌ {error}")
+            return ConversationHandler.END
+        batch_id = saved_jobs[0]["batch_id"]
 
         # Gửi thông điệp cập nhật lần đầu tiên
         await self.update_batch_message(batch_id, self.storage, context.bot)

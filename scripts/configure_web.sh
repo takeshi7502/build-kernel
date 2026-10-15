@@ -160,7 +160,7 @@ pm2 save
 echo "Đang chờ bot/dashboard khởi động..."
 ready=0
 for attempt in {1..30}; do
-    if curl --noproxy '*' --fail --silent --max-time 2 "http://127.0.0.1:$port/" >/dev/null; then ready=1; break; fi
+    if curl --noproxy '*' --fail --silent --max-time 2 "http://127.0.0.1:$port/healthz" >/dev/null; then ready=1; break; fi
     sleep 2
 done
 if [ "$ready" -ne 1 ]; then echo "Backend chưa sẵn sàng; xem bash run.sh logs." >&2; exit 1; fi

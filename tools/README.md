@@ -6,6 +6,18 @@ Bot thường không cần chạy công cụ trong thư mục này. Thực thi t
 python -m pip install -r tools/requirements.txt
 ```
 
+## Backup state và catalog
+
+Không cần dependency riêng của các tool workflow bên dưới; dùng dependency runtime của bot:
+
+```bash
+venv/bin/python tools/manage_backups.py create
+venv/bin/python tools/manage_backups.py list
+venv/bin/python tools/manage_backups.py verify /path/to/backup.zip
+```
+
+Các lệnh không gọi API remote. `create` lấy snapshot qua storage lock và tạo ZIP đã kiểm tra tại `BACKUP_DIR`; có thể chạy trong lúc bot hoạt động trên Linux. `verify` không ghi/giải nén. Backup chứa dữ liệu riêng tư; xem [vận hành](../docs/reliability.md) trước khi chia sẻ/khôi phục. `bash run.sh backup` và `bash run.sh backups` là cách gọi nhanh trên VPS.
+
 ## Patch workflow trên local clone
 
 ```bash

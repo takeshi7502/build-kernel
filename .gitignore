@@ -14,6 +14,10 @@ bot/data.json
 *.json.bak
 /data/
 /logs/
+/backups/
+kernel-backup-*.zip
+.backup-*.zip
+.storage-*.json
 *.log
 log.txt
 web/data/**/*.json

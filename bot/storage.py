@@ -1,10 +1,13 @@
 import asyncio
+import copy
 import hashlib
 import json
 import logging
 import os
 import socket
 import tempfile
+import time
+import uuid
 import weakref
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -25,9 +28,9 @@ def _parse_timestamp(value: str) -> datetime:
 
 
 try:
-    from motor.motor_asyncio import AsyncIOMotorClient
+    from pymongo import AsyncMongoClient
 except ImportError:
-    AsyncIOMotorClient = None
+    AsyncMongoClient = None
 
 
 class _ProcessSafeAsyncLock:
@@ -92,22 +95,36 @@ class HybridStorage:
         self.client = None
         self.db = None
         self.collection = None
+        self._cached_data = None
+        self._cached_fingerprint = None
+        self._cloud_revision = 0
+        self._cloud_dirty = False
+        self.last_cloud_success = None
+        self.cloud_error = None
+        self.last_write_error = None
 
         self._new_store = not os.path.exists(self.path)
         # Do not materialize an empty database before a first cloud restore:
         # a transient connection error + restart must not turn it into a writer.
 
-        if self.mongo_uri and AsyncIOMotorClient:
+        if self.mongo_uri and AsyncMongoClient is None:
+            raise RuntimeError("MongoDB requires pymongo>=4.13; install requirements.txt")
+        if self.mongo_uri:
             try:
-                self.client = AsyncIOMotorClient(self.mongo_uri, serverSelectionTimeoutMS=5000)
+                self.client = AsyncMongoClient(
+                    self.mongo_uri,
+                    serverSelectionTimeoutMS=5000,
+                    connectTimeoutMS=5000,
+                    socketTimeoutMS=10000,
+                )
                 self.db = self.client["kernel_bot_db"]
                 self.collection = self.db["storage_data"]
             except Exception as e:
                 raise RuntimeError("Invalid MongoDB client configuration") from e
 
-    def close(self):
+    async def close(self):
         if self.client is not None:
-            self.client.close()
+            await self.client.close()
 
     def _resolved_sync_mode(self) -> str:
         mode = self.sync_mode
@@ -135,8 +152,26 @@ class HybridStorage:
         try:
             payload = {"_id": "master_data", **data}
             await self.collection.replace_one({"_id": "master_data"}, payload, upsert=True)
+            self.last_cloud_success = time.time()
+            self.cloud_error = None
+            return True
         except Exception as e:
-            logger.error("MongoDB push error: %s", e)
+            self.cloud_error = type(e).__name__
+            logger.error("MongoDB push error: %s", self.cloud_error)
+            return False
+
+    async def flush_cloud(self, force=False):
+        """Coalesce changes and perform network I/O outside the storage lock."""
+        if self.collection is None or not self._can_push() or not (force or self._cloud_dirty):
+            return True
+        async with self._lock:
+            snapshot = self._load()
+            revision = self._cloud_revision
+        if not await self._push_cloud(snapshot):
+            return False
+        if revision == self._cloud_revision:
+            self._cloud_dirty = False
+        return True
 
     async def _sync_with_cloud(self):
         if self.collection is None or not self._can_pull():
@@ -152,12 +187,12 @@ class HybridStorage:
                 if cloud_doc and (self._resolved_sync_mode() == "pull" or fresh):
                     local_data = {key: value for key, value in cloud_doc.items() if key != "_id"}
                     self._validate_data(local_data)
-                    self._save_local(local_data)
+                    await self._run_io(self._save_local, local_data)
                     logger.info("Restored MongoDB snapshot into local storage")
                 self._new_store = False
                 self._synced = True
-                if self._can_push():
-                    await self._push_cloud(local_data)
+                self._cloud_dirty = self._can_push()
+            await self.flush_cloud()
         except Exception as e:
             logger.error("MongoDB Sync Error: %s", e)
             if self._new_store:
@@ -166,6 +201,11 @@ class HybridStorage:
                 raise RuntimeError(
                     "Cannot initialize new storage until MongoDB backup is reachable"
                 ) from e
+            # An existing local writer may continue while cloud is down, but
+            # must still retry snapshots once connectivity returns.
+            self._synced = True
+            self.cloud_error = type(e).__name__
+            self._cloud_dirty = self._can_push()
 
     @staticmethod
     def _default_data() -> Dict[str, Any]:
@@ -193,6 +233,9 @@ class HybridStorage:
             ("successful_builds", list),
             ("dm_users", list),
             ("group_chats", list),
+            ("outbox", list),
+            ("broadcasts", dict),
+            ("blocked_chats", list),
         ):
             if key in data and not isinstance(data[key], expected):
                 raise ValueError(f"storage field {key} must be {expected.__name__}")
@@ -205,9 +248,27 @@ class HybridStorage:
             type(data["last_job_id"]) is not int or data["last_job_id"] < 0
         ):
             raise ValueError("last_job_id must be a non-negative integer")
-        for field in ("successful_builds", "dm_users", "group_chats"):
+        for field in ("successful_builds", "dm_users", "group_chats", "outbox"):
             if any(not isinstance(item, dict) for item in data.get(field, [])):
                 raise ValueError(f"{field} must contain objects")
+        for record in data.get("outbox", []):
+            if (
+                not isinstance(record.get("id"), str)
+                or type(record.get("chat_id")) is not int
+                or record.get("kind") not in {"completion", "notice", "broadcast"}
+                or record.get("status") not in {"pending", "sent", "failed", "superseded"}
+                or type(record.get("attempts")) is not int
+                or record["attempts"] < 0
+                or not isinstance(record.get("job_ids"), list)
+                or not isinstance(record.get("next_attempt", 0), (int, float))
+                or not isinstance(record.get("created_at", 0), (int, float))
+            ):
+                raise ValueError("outbox contains an invalid delivery record")
+        if any(
+            not isinstance(batch, dict) or not isinstance(batch.get("payload"), dict)
+            for batch in data.get("broadcasts", {}).values()
+        ):
+            raise ValueError("broadcasts must contain objects with payloads")
 
     async def snapshot(self) -> Dict[str, Any]:
         """Return a consistent snapshot for backup without exposing the lock."""
@@ -226,11 +287,19 @@ class HybridStorage:
 
     def _load(self) -> Dict[str, Any]:
         if not os.path.exists(self.path):
+            if self._cached_data is not None:
+                raise RuntimeError("Active storage file disappeared; refusing to reset state")
             return self._default_data()
         try:
+            stat = os.stat(self.path)
+            fingerprint = (stat.st_mtime_ns, stat.st_size, stat.st_ino)
+            if self._cached_data is not None and fingerprint == self._cached_fingerprint:
+                return copy.deepcopy(self._cached_data)
             with open(self.path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             self._validate_data(data)
+            self._cached_data = copy.deepcopy(data)
+            self._cached_fingerprint = fingerprint
             return data
         except (OSError, ValueError) as e:
             # Returning a blank database here would make the next write erase
@@ -251,7 +320,12 @@ class HybridStorage:
                 os.fsync(f.fileno())
             os.replace(temp_path, self.path)
             self._new_store = False
+            stat = os.stat(self.path)
+            self._cached_fingerprint = (stat.st_mtime_ns, stat.st_size, stat.st_ino)
+            self._cached_data = copy.deepcopy(data)
+            self.last_write_error = None
         except Exception as e:
+            self.last_write_error = type(e).__name__
             logger.error("Save JSON failed: %s", e)
             if temp_path:
                 try:
@@ -260,10 +334,30 @@ class HybridStorage:
                     pass
             raise
 
+    @staticmethod
+    async def _run_io(function, *args):
+        # A cancelled worker must wait for its disk write before releasing the
+        # mutation lock, otherwise another writer can overwrite the wrong state.
+        task = asyncio.create_task(asyncio.to_thread(function, *args))
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError:
+            while not task.done():
+                try:
+                    await asyncio.shield(task)
+                except asyncio.CancelledError:
+                    pass
+            task.result()
+            raise
+
     async def _save(self, data: Dict[str, Any]):
-        self._save_local(data)
-        if self.collection is not None and self._can_push():
-            await self._push_cloud(data)
+        try:
+            await self._run_io(self._save_local, data)
+        finally:
+            # Cancellation can arrive after the thread committed the file.
+            # Keep the cloud snapshot dirty even in that case.
+            self._cloud_revision += 1
+            self._cloud_dirty = True
 
     # ==========================
     # KEYS
@@ -354,6 +448,274 @@ class HybridStorage:
     # ==========================
     # JOBS
     # ==========================
+    @staticmethod
+    def _insert_job(data, job):
+        jobs = data.setdefault("jobs", [])
+        job_id = (
+            max(data.get("last_job_id", 0), max((j.get("_id", 0) for j in jobs), default=0)) + 1
+        )
+        data["last_job_id"] = job_id
+        job = copy.deepcopy(job)
+        job["_id"] = job_id
+        job.setdefault("created_at", datetime.now(timezone.utc).isoformat())
+        jobs.append(job)
+        return job
+
+    async def enqueue_job(self, job, key=None, request_id=None):
+        """Persist intent and reserve a key in one write before any remote call."""
+        async with self._lock:
+            data = self._load()
+            request_id = request_id or str(uuid.uuid4())
+            existing = next(
+                (j for j in data.get("jobs", []) if j.get("request_id") == request_id), None
+            )
+            if existing:
+                return existing
+            if (
+                len(
+                    [
+                        j
+                        for j in data.get("jobs", [])
+                        if j.get("status") in {"queued", "rebuild_queued"}
+                    ]
+                )
+                >= 500
+            ):
+                raise ValueError("Hàng đợi đang đầy. Vui lòng thử lại sau.")
+            job = dict(job, request_id=request_id, status="queued", notified=False, run_id=None)
+            job["queued_at"] = datetime.now(timezone.utc).isoformat()
+            if key:
+                info = data.get("keys", {}).get(key, {})
+                uses = int(info.get("uses", 0) if isinstance(info, dict) else info)
+                if uses <= 0:
+                    raise ValueError("Key không hợp lệ hoặc đã hết lượt.")
+                vip = isinstance(info, dict) and info.get("vip", False)
+                if not vip and any(
+                    j.get("user_id") == job.get("user_id")
+                    and j.get("status")
+                    in {
+                        "queued",
+                        "dispatching",
+                        "dispatched",
+                        "running",
+                        "in_progress",
+                        "rebuild_queued",
+                    }
+                    for j in data.get("jobs", [])
+                ):
+                    raise ValueError("Bạn đang có một build chưa hoàn tất.")
+                data["keys"][key] = (
+                    {**info, "uses": uses - 1}
+                    if isinstance(info, dict)
+                    else {"uses": uses - 1, "vip": False}
+                )
+                job["key_reservation"] = {"code": key, "state": "reserved"}
+            saved = self._insert_job(data, job)
+            await self._save(data)
+            return saved
+
+    async def enqueue_batch(self, jobs, request_id):
+        async with self._lock:
+            data = self._load()
+            existing = [j for j in data.get("jobs", []) if j.get("batch_request_id") == request_id]
+            if existing:
+                return existing
+            queued = sum(
+                j.get("status") in {"queued", "rebuild_queued"} for j in data.get("jobs", [])
+            )
+            if queued + len(jobs) > 500:
+                raise ValueError("Hàng đợi đang đầy. Vui lòng thử lại sau.")
+            saved = [self._insert_job(data, dict(job, batch_request_id=request_id)) for job in jobs]
+            await self._save(data)
+            return saved
+
+    @staticmethod
+    def _refund_reservation(data, job):
+        hold = job.get("key_reservation", {})
+        if hold.get("state") != "reserved":
+            return
+        code = hold.get("code")
+        info = data.get("keys", {}).get(code)
+        if info is not None:  # Never recreate a key revoked by an administrator.
+            uses = int(info.get("uses", 0) if isinstance(info, dict) else info)
+            data["keys"][code] = (
+                {**info, "uses": uses + 1}
+                if isinstance(info, dict)
+                else {"uses": uses + 1, "vip": False}
+            )
+        hold["state"] = "refunded"
+
+    async def claim_dispatch(self, max_active=10):
+        async with self._lock:
+            data = self._load()
+            jobs = data.get("jobs", [])
+            active = [
+                j
+                for j in jobs
+                if j.get("status") in {"dispatching", "dispatched", "running", "in_progress"}
+                or (j.get("cancel_requested") and j.get("run_id") and not j.get("github_completed"))
+            ]
+            if len(active) >= max_active:
+                return None
+            buildsave_busy = any(j.get("type") == "buildsave" for j in active)
+            queued = sorted(
+                (j for j in jobs if j.get("status") in {"queued", "rebuild_queued"}),
+                key=lambda j: j.get("queued_at", j.get("created_at", "")),
+            )
+            for job in queued:
+                if job.get("type") == "buildsave" and buildsave_busy:
+                    continue
+                if (
+                    job.get("batch_id")
+                    and job.get("status") != "rebuild_queued"
+                    and any(
+                        other.get("batch_id") == job["batch_id"]
+                        and other.get("conclusion") == "cancelled"
+                        for other in jobs
+                    )
+                ):
+                    job.update(status="completed", conclusion="cancelled", notified=True)
+                    await self._save(data)
+                    continue
+                job.update(
+                    status="dispatching",
+                    run_id=None,
+                    conclusion=None,
+                    notified=False,
+                    dispatch_started_at=datetime.now(timezone.utc).isoformat(),
+                )
+                # Keep created_at stable: batch IDs shown in the UI depend on it.
+                job["dispatch_generation"] = uuid.uuid4().hex
+                job.pop("github_result", None)
+                job.pop("github_completed", None)
+                job.pop("catalog_pending", None)
+                for field in (
+                    "notification_enqueued",
+                    "notification_generation",
+                    "completion_text",
+                    "dispatch_error",
+                ):
+                    job.pop(field, None)
+                await self._save(data)
+                return job
+            return None
+
+    async def finish_dispatch(self, job_id, *, accepted, run_id=None, uncertain=False, error=""):
+        async with self._lock:
+            data = self._load()
+            job = next(j for j in data.get("jobs", []) if j.get("_id") == job_id)
+            cancelled = job.get("conclusion") == "cancelled" or job.get("cancel_requested")
+            hold = job.get("key_reservation", {})
+            if accepted or uncertain:
+                job.update(
+                    status="dispatched", notified=False, run_id=run_id, dispatch_uncertain=uncertain
+                )
+                if accepted and hold.get("state") == "reserved":
+                    hold["state"] = "consumed"
+                if cancelled:
+                    job["cancel_requested"] = True
+            else:
+                self._refund_reservation(data, job)
+                job.update(
+                    status="completed",
+                    conclusion="failure",
+                    notified=False,
+                    dispatch_error=error,
+                    completion_text="❌ Không thể gửi build tới GitHub. Lượt key đã được hoàn nếu có; hãy kiểm tra /st trước khi thử lại.",
+                )
+            await self._save(data)
+            return job
+
+    async def link_reconciled_run(self, job_id, run_id, generation=None):
+        """Bind a fallback match without overwriting a newer direct dispatch result."""
+        async with self._lock:
+            data = self._load()
+            jobs = data.get("jobs", [])
+            job = next((j for j in jobs if j.get("_id") == job_id), None)
+            if not job or job.get("dispatch_generation") != generation:
+                return None
+            if job.get("run_id"):
+                return job["run_id"]
+            if job.get("status") not in {"dispatching", "dispatched", "running", "in_progress"}:
+                return None
+            if any(
+                j.get("repo") == job.get("repo") and str(j.get("run_id")) == str(run_id)
+                for j in jobs
+            ):
+                return None
+            job["run_id"] = int(run_id)
+            await self._save(data)
+            return job["run_id"]
+
+    async def commit_reservation(self, job_id):
+        async with self._lock:
+            data = self._load()
+            job = next(j for j in data.get("jobs", []) if j.get("_id") == job_id)
+            hold = job.get("key_reservation", {})
+            if hold.get("state") == "reserved":
+                hold["state"] = "consumed"
+                await self._save(data)
+
+    async def cancel_local_job(self, job_id, user_id, admin=False):
+        async with self._lock:
+            data = self._load()
+            job = next((j for j in data.get("jobs", []) if j.get("_id") == job_id), None)
+            if not job or (not admin and job.get("user_id") != user_id):
+                raise ValueError("Không tìm thấy job thuộc quyền quản lý của bạn.")
+            if job.get("status") == "completed":
+                raise ValueError("Job đã kết thúc; không thể hủy bằng lệnh này.")
+            if job.get("status") in {"queued", "rebuild_queued"}:
+                self._refund_reservation(data, job)
+                job.update(status="completed", conclusion="cancelled", notified=True)
+            else:
+                job.update(cancel_requested=True, notified=False)
+            await self._save(data)
+            return job
+
+    async def resolve_job(self, job_id, run_id=None, refund=False):
+        """Operator-confirmed resolution of an ambiguous remote dispatch."""
+        async with self._lock:
+            data = self._load()
+            job = next((j for j in data.get("jobs", []) if j.get("_id") == job_id), None)
+            if not job:
+                raise ValueError("Không tìm thấy job.")
+            if job.get("run_id"):
+                raise ValueError("Job đã có run ID; không thể ghi đè hoặc hoàn lượt ở đây.")
+            if refund:
+                if job.get("status") != "completed" or job.get("conclusion") != "unknown":
+                    raise ValueError(
+                        "Chỉ hoàn lượt sau khi job chưa rõ kết quả đã chuyển sang cần kiểm tra."
+                    )
+                self._refund_reservation(data, job)
+                job.update(
+                    status="completed",
+                    conclusion="cancelled",
+                    notified=True,
+                    resolution="operator_confirmed_refund",
+                )
+            else:
+                if any(
+                    j.get("repo") == job.get("repo") and str(j.get("run_id")) == str(run_id)
+                    for j in data.get("jobs", [])
+                ):
+                    raise ValueError("Run này đã được gán cho job khác.")
+                job.update(
+                    status="dispatched",
+                    run_id=int(run_id),
+                    notified=False,
+                    dispatch_uncertain=False,
+                    resolution="operator_linked_run",
+                )
+                if job.get("key_reservation", {}).get("state") == "reserved":
+                    job["key_reservation"]["state"] = "consumed"
+            for key in ("notification_enqueued", "notification_generation", "completion_text"):
+                job.pop(key, None)
+            for record in data.get("outbox", []):
+                if job_id in record.get("job_ids", []) and record.get("status") == "pending":
+                    record["status"] = "superseded"
+            await self._save(data)
+            return job
+
     async def add_job(self, job: Dict[str, Any]) -> Any:
         async with self._lock:
             data = self._load()
@@ -375,6 +737,33 @@ class HybridStorage:
             data = self._load()
             for j in data.get("jobs", []):
                 if j.get("_id") == job_id:
+                    if (
+                        fields.get("status") == "completed"
+                        and fields.get("conclusion") == "cancelled"
+                    ):
+                        if j.get("status") in {"queued", "rebuild_queued"}:
+                            self._refund_reservation(data, j)
+                        elif j.get("status") in {
+                            "dispatching",
+                            "dispatched",
+                            "running",
+                            "in_progress",
+                        }:
+                            fields = dict(fields, cancel_requested=True, notified=False)
+                    if fields.get("status") == "rebuild_queued":
+                        for field in (
+                            "notification_enqueued",
+                            "completion_text",
+                            "dispatch_started_at",
+                            "cancel_requested",
+                        ):
+                            j.pop(field, None)
+                        for record in data.get("outbox", []):
+                            if (
+                                job_id in record.get("job_ids", [])
+                                and record.get("status") == "pending"
+                            ):
+                                record["status"] = "superseded"
                     j.update(fields)
                     break
             await self._save(data)
@@ -387,7 +776,11 @@ class HybridStorage:
     async def list_unnotified_jobs(self) -> List[Dict[str, Any]]:
         async with self._lock:
             data = self._load()
-            return [j for j in data.get("jobs", []) if not j.get("notified")]
+            return [
+                j
+                for j in data.get("jobs", [])
+                if not j.get("notified") and not j.get("notification_enqueued")
+            ]
 
     async def list_user_active_jobs(self, user_id: int) -> List[Dict[str, Any]]:
         async with self._lock:
@@ -396,7 +789,15 @@ class HybridStorage:
                 j
                 for j in data.get("jobs", [])
                 if j.get("user_id") == user_id
-                and j.get("status") in ["dispatched", "running", "in_progress", "queued"]
+                and j.get("status")
+                in [
+                    "dispatching",
+                    "dispatched",
+                    "running",
+                    "in_progress",
+                    "queued",
+                    "rebuild_queued",
+                ]
             ]
 
     async def get_job_by_run_id(self, run_id: int) -> Optional[Dict[str, Any]]:
@@ -432,6 +833,7 @@ class HybridStorage:
             active_statuses = (
                 "queued",
                 "rebuild_queued",
+                "dispatching",
                 "dispatched",
                 "running",
                 "in_progress",
@@ -444,7 +846,12 @@ class HybridStorage:
             kept_gki_oki = [
                 job
                 for index, job in enumerate(gki_oki_jobs_sorted)
-                if index < 30 or job.get("status") in active_statuses or not job.get("notified")
+                if index < 30
+                or job.get("status") in active_statuses
+                or not job.get("notified")
+                or job.get("conclusion") == "unknown"
+                or job.get("key_reservation", {}).get("state") == "reserved"
+                or job.get("catalog_pending")
             ]
 
             # --- Nhóm Buildsave: Chỉ giữ lại các job còn hiệu lực (queued, dispatched) hoặc mới hơn cutoff ---
@@ -452,7 +859,13 @@ class HybridStorage:
             kept_buildsave = []
             deleted_bs = 0
             for j in buildsave_jobs:
-                if j.get("status") in active_statuses or not j.get("notified"):
+                if (
+                    j.get("status") in active_statuses
+                    or not j.get("notified")
+                    or j.get("conclusion") == "unknown"
+                    or j.get("key_reservation", {}).get("state") == "reserved"
+                    or j.get("catalog_pending")
+                ):
                     kept_buildsave.append(j)  # Giữ lại nếu đang active
                     continue
                 try:
@@ -496,6 +909,198 @@ class HybridStorage:
     # ==========================
     # MESSAGES
     # ==========================
+    async def queue_notifications(self, job_ids, destinations, text):
+        """Atomically enqueue one delivery per destination, surviving restarts."""
+        async with self._lock:
+            data = self._load()
+            outbox = data.setdefault("outbox", [])
+            primary = job_ids[0]
+            primary_job = next((j for j in data.get("jobs", []) if j.get("_id") == primary), {})
+            generation = primary_job.get("notification_generation") or uuid.uuid4().hex
+            for destination in destinations:
+                record_id = f"job:{primary}:{generation}:{destination['chat_id']}"
+                if not any(record.get("id") == record_id for record in outbox):
+                    outbox.append(
+                        dict(
+                            destination,
+                            id=record_id,
+                            job_ids=job_ids,
+                            text=text,
+                            kind="completion",
+                            generation=generation,
+                            status="pending",
+                            attempts=0,
+                            created_at=time.time(),
+                            next_attempt=0,
+                        )
+                    )
+            for job in data.get("jobs", []):
+                if job.get("_id") in job_ids:
+                    job["notification_enqueued"] = True
+                    job["notification_generation"] = generation
+                    if not destinations:
+                        job.update(notified=True, notification_status="no_recipient")
+            await self._save(data)
+
+    async def queue_notice(self, record_id, chat_id, text):
+        async with self._lock:
+            data = self._load()
+            outbox = data.setdefault("outbox", [])
+            if any(record.get("id") == record_id for record in outbox):
+                return
+            outbox.append(
+                dict(
+                    id=record_id,
+                    chat_id=chat_id,
+                    job_ids=[],
+                    text=text,
+                    kind="notice",
+                    status="pending",
+                    attempts=0,
+                    created_at=time.time(),
+                    next_attempt=0,
+                )
+            )
+            await self._save(data)
+
+    async def queue_broadcast(self, batch_id, payload, targets, progress_chat, progress_message):
+        async with self._lock:
+            data = self._load()
+            batches = data.setdefault("broadcasts", {})
+            if batch_id in batches:
+                return
+            batches[batch_id] = dict(
+                payload=payload,
+                progress_chat=progress_chat,
+                progress_message=progress_message,
+                total=len(targets),
+                created_at=time.time(),
+                progress_done=False,
+            )
+            blocked = set(data.get("blocked_chats", []))
+            outbox = data.setdefault("outbox", [])
+            for chat_id in dict.fromkeys(targets):
+                outbox.append(
+                    dict(
+                        id=f"broadcast:{batch_id}:{chat_id}",
+                        chat_id=chat_id,
+                        job_ids=[],
+                        broadcast_id=batch_id,
+                        kind="broadcast",
+                        status="failed" if chat_id in blocked else "pending",
+                        attempts=0,
+                        created_at=time.time(),
+                        next_attempt=0,
+                    )
+                )
+            await self._save(data)
+
+    async def due_notifications(self, limit=20, kinds=None):
+        async with self._lock:
+            data = self._load()
+            due = [
+                record
+                for record in data.get("outbox", [])
+                if record.get("status") == "pending"
+                and record.get("next_attempt", 0) <= time.time()
+                and (kinds is None or record.get("kind") in kinds)
+            ]
+            due.sort(
+                key=lambda record: (record.get("kind") == "broadcast", record.get("created_at", 0))
+            )
+            for record in due[:limit]:
+                if record.get("broadcast_id"):
+                    record["payload"] = (
+                        data.get("broadcasts", {}).get(record["broadcast_id"], {}).get("payload")
+                    )
+            return due[:limit]
+
+    async def notification_is_pending(self, record_id):
+        async with self._lock:
+            return any(
+                record.get("id") == record_id and record.get("status") == "pending"
+                for record in self._load().get("outbox", [])
+            )
+
+    async def finish_notification(
+        self, record_id, *, success=False, permanent=False, delay=0, error=""
+    ):
+        async with self._lock:
+            data = self._load()
+            record = next((r for r in data.get("outbox", []) if r.get("id") == record_id), None)
+            if record is None or record.get("status") != "pending":
+                return
+            record["attempts"] += 1
+            record["error"] = error
+            record["status"] = "sent" if success else "failed" if permanent else "pending"
+            record["next_attempt"] = time.time() + delay
+            for job in data.get("jobs", []):
+                if job.get("_id") not in record.get("job_ids", []):
+                    continue
+                related = [
+                    r
+                    for r in data.get("outbox", [])
+                    if job["_id"] in r.get("job_ids", [])
+                    and r.get("generation") == job.get("notification_generation")
+                ]
+                if all(r.get("status") != "pending" for r in related):
+                    sent = sum(r.get("status") == "sent" for r in related)
+                    job["notified"] = True
+                    job["notification_status"] = (
+                        "delivered" if sent == len(related) else "partial" if sent else "failed"
+                    )
+            if error == "Forbidden":
+                data["blocked_chats"] = sorted(
+                    set(data.get("blocked_chats", [])) | {record["chat_id"]}
+                )
+            await self._save(data)
+
+    async def broadcast_progress(self):
+        async with self._lock:
+            data = self._load()
+            result = []
+            for batch_id, batch in data.get("broadcasts", {}).items():
+                if batch.get("progress_done"):
+                    continue
+                records = [r for r in data.get("outbox", []) if r.get("broadcast_id") == batch_id]
+                sent = sum(r.get("status") == "sent" for r in records)
+                failed = sum(r.get("status") == "failed" for r in records)
+                result.append(
+                    dict(
+                        batch,
+                        id=batch_id,
+                        sent=sent,
+                        failed=failed,
+                        done=sent + failed == len(records),
+                        total=len(records),
+                    )
+                )
+            return result
+
+    async def finish_broadcast_progress(self, batch_id):
+        async with self._lock:
+            data = self._load()
+            if batch_id in data.get("broadcasts", {}):
+                data["broadcasts"][batch_id]["progress_done"] = True
+                await self._save(data)
+
+    async def prune_outbox(self):
+        async with self._lock:
+            data = self._load()
+            cutoff = time.time() - 7 * 86400
+            data["outbox"] = [
+                r
+                for r in data.get("outbox", [])
+                if r.get("status") == "pending" or r.get("created_at", 0) >= cutoff
+            ]
+            active_batches = {r.get("broadcast_id") for r in data["outbox"]}
+            data["broadcasts"] = {
+                key: value
+                for key, value in data.get("broadcasts", {}).items()
+                if key in active_batches
+            }
+            await self._save(data)
+
     async def track_message(self, message_id: int, chat_id: int, user_id: int):
         async with self._lock:
             data = self._load()
@@ -581,6 +1186,9 @@ class HybridStorage:
         """Lưu user đã từng DM bot và cập nhật chat_id nếu dữ liệu thay đổi."""
         async with self._lock:
             data = self._load()
+            if chat_id in data.get("blocked_chats", []):
+                data["blocked_chats"].remove(chat_id)
+                await self._save(data)
             dm_users = data.setdefault("dm_users", [])
             existing = next((u for u in dm_users if u.get("user_id") == user_id), None)
             if existing:
@@ -636,6 +1244,9 @@ class HybridStorage:
         """Lưu nhóm mà bot đang hoạt động (deduplicate theo chat_id)."""
         async with self._lock:
             data = self._load()
+            if chat_id in data.get("blocked_chats", []):
+                data["blocked_chats"].remove(chat_id)
+                await self._save(data)
             groups = data.setdefault("group_chats", [])
             existing = next((g for g in groups if g.get("chat_id") == chat_id), None)
             if existing:

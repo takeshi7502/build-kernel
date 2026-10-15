@@ -1,10 +1,10 @@
-import asyncio
 import html
 import logging
 import time
 from datetime import datetime, timedelta, timezone
 
 from . import config
+from .status import cached_run
 
 
 def _enabled(value, default=False) -> bool:
@@ -52,7 +52,6 @@ async def get_realtime_data(app):
     """Render storage with cached GitHub status; never invent missing-run failures."""
     try:
         storage = app.bot_data.get("storage")
-        gh = app.bot_data.get("gh")
         if not storage:
             return {"status": "offline", "builds": []}
 
@@ -61,61 +60,27 @@ async def get_realtime_data(app):
             "last_ping": int(datetime.now(timezone.utc).timestamp()),
             "builds": [],
         }
+        supervisor = app.bot_data.get("supervisor")
+        if supervisor and supervisor.health()["status"] != "ok":
+            data["status"] = "degraded"
 
         jobs = await storage.get_jobs()
         # Sắp xếp mới nhất lên đầu
         jobs = sorted(jobs, key=lambda x: x.get("_id", 0), reverse=True)
 
-        cache = app.bot_data.setdefault("dashboard_runs", {})
-
-        # -------- BẮT ĐẦU ĐỒNG BỘ VỚI GITHUB --------
-        if gh:
-            lock = app.bot_data.setdefault("dashboard_runs_lock", asyncio.Lock())
-            async with lock:
-                now = time.monotonic()
-                if now - app.bot_data.get("dashboard_last_fetch", -float("inf")) > 30:
-                    repos = list(
-                        dict.fromkeys(repo for repo in (config.GKI_REPO, config.OKI_REPO) if repo)
-                    )
-                    for repo in repos:
-                        url = (
-                            f"{gh.base}/repos/{config.GITHUB_OWNER}/{repo}/actions/runs?per_page=50"
-                        )
-                        res = await gh._request("GET", url)
-                        if res.get("status") == 200:
-                            cache[repo] = {
-                                str(run["id"]): run
-                                for run in res.get("json", {}).get("workflow_runs", [])
-                            }
-                    # Back off on failure too; browsers must not retry in a loop.
-                    app.bot_data["dashboard_last_fetch"] = now
-
-            if cache:
-                active_jobs = []
-                for j in jobs:
-                    run_id = str(j.get("run_id", ""))
-                    repo_name = j.get("repo", config.GKI_REPO)
-                    repo_cache = cache.get(repo_name, {})
-                    if not run_id or run_id == "None":
-                        active_jobs.append(j)
-                        continue
-
-                    if run_id not in repo_cache:
-                        # Missing from the latest 50 runs is not a timeout.
-                        active_jobs.append(j)
-                        continue
-
-                    gh_run = repo_cache[run_id]
-                    # Nếu DB đã đánh dấu cancelled thì giữ nguyên, không để GH override
-                    if j.get("conclusion") == "cancelled":
-                        j["status"] = "completed"
-                    else:
-                        j["status"] = (
-                            "completed" if gh_run.get("status") == "completed" else "in_progress"
-                        )
-                        j["conclusion"] = gh_run.get("conclusion")
-                    active_jobs.append(j)
-                jobs = active_jobs
+        # API requests render a snapshot only. The shared worker fetches GitHub.
+        app.bot_data["dashboard_last_request"] = time.monotonic()
+        data["github_last_sync"] = app.bot_data.get("github_last_sync")
+        for job in jobs:
+            run = cached_run(app, job.get("repo", config.GKI_REPO), job.get("run_id"))
+            if run and job.get("status") not in {
+                "completed",
+                "queued",
+                "rebuild_queued",
+                "dispatching",
+            }:
+                job["status"] = "completed" if run.get("status") == "completed" else "in_progress"
+                job["conclusion"] = run.get("conclusion")
 
         data["active_builds"] = sum(
             job.get("status")
@@ -124,6 +89,7 @@ async def get_realtime_data(app):
                 "running",
                 "in_progress",
                 "queued",
+                "dispatching",
                 "rebuild_queued",
                 "waiting",
                 "pending",
@@ -218,7 +184,9 @@ async def get_realtime_data(app):
 
                 # Tính trạng thái tổng hợp của cả batch
                 if all(bj.get("status") == "completed" for bj in bjobs):
-                    if failed == 0:
+                    if any(bj.get("conclusion") == "unknown" for bj in bjobs):
+                        batch_status = "unknown"
+                    elif failed == 0:
                         batch_status = "success"
                     elif completed == 0:
                         batch_status = "failed"
@@ -256,6 +224,8 @@ async def get_realtime_data(app):
                             bj_st = "success"
                         elif bj_conclusion in ("cancelled", "stale"):
                             bj_st = "cancelled"
+                        elif bj_conclusion == "unknown":
+                            bj_st = "unknown"
                         else:
                             bj_st = "failed"
                     elif bj_status_raw in ("dispatched", "in_progress", "running"):
@@ -272,9 +242,12 @@ async def get_realtime_data(app):
                     run_id = str(bj.get("run_id", ""))
                     is_added_from_cache = False
 
-                    repo_cache = cache.get(bj.get("repo", config.GKI_REPO), {})
-                    if run_id in repo_cache:
-                        r = repo_cache[run_id]
+                    r = (
+                        bj.get("github_result")
+                        if bj.get("github_completed")
+                        else cached_run(app, bj.get("repo", config.GKI_REPO), run_id)
+                    )
+                    if r:
                         try:
                             t1_str = r.get("run_started_at") or r.get("created_at", "")
                             if t1_str:
@@ -322,7 +295,7 @@ async def get_realtime_data(app):
 
                 # Ẩn card nếu tất cả đã done nhưng không có cái nào success (toàn cancel/fail)
                 all_done_batch = all(bj.get("status") == "completed" for bj in bjobs)
-                if all_done_batch and completed == 0:
+                if all_done_batch and completed == 0 and batch_status != "unknown":
                     continue  # Xoá khỏi web, không hiển thị card thất bại/cancel hoàn toàn
 
                 _cid = _make_custom_id(variant, inputs, j.get("created_at", ""))
@@ -477,14 +450,25 @@ async def get_realtime_data(app):
 
             status = "building"
             if j.get("status") == "completed":
-                status = "success" if j.get("conclusion") == "success" else "failed"
+                status = (
+                    "success"
+                    if j.get("conclusion") == "success"
+                    else "unknown"
+                    if j.get("conclusion") == "unknown"
+                    else "failed"
+                )
+            elif j.get("status") in {"queued", "rebuild_queued"}:
+                status = "queued"
 
             duration = j.get("gh_duration", "")
             run_id = str(j.get("run_id", ""))
             repo_name = j.get("repo", config.GKI_REPO)
-            repo_cache = cache.get(repo_name, {})
-            if run_id in repo_cache:
-                r = repo_cache[run_id]
+            r = (
+                j.get("github_result")
+                if j.get("github_completed")
+                else cached_run(app, repo_name, run_id)
+            )
+            if r:
                 try:
                     t1_str = r.get("run_started_at") or r.get("created_at", "")
                     if t1_str:

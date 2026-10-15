@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote, urlencode
 
@@ -19,7 +20,7 @@ def parse_utc(value):
 
 def match_workflow_run(job, runs, jobs):
     """Match only unclaimed dispatches close to the original request time."""
-    created = parse_utc(job["created_at"])
+    created = parse_utc(job.get("dispatch_started_at") or job["created_at"])
     claimed = {
         str(other["run_id"])
         for other in jobs
@@ -44,7 +45,8 @@ def match_workflow_run(job, runs, jobs):
         # Never attach a forgotten job to an unrelated build hours later.
         if -2 <= delta <= 20 * 60:
             candidates.append((abs(delta), int(run["id"]), run))
-    return min(candidates, key=lambda item: item[:2])[2] if candidates else None
+    # Ambiguous fallback is deliberately left for operator review.
+    return candidates[0][2] if len(candidates) == 1 else None
 
 
 class GitHubAPI:
@@ -53,6 +55,7 @@ class GitHubAPI:
         self.owner = owner
         self.base = "https://api.github.com"
         self.session = None
+        self.last_success = None
 
     async def _get_session(self):
         if self.session is None or self.session.closed:
@@ -83,6 +86,7 @@ class GitHubAPI:
                     method, url, headers=headers, json=json_payload
                 ) as response:
                     if response.status == 204:
+                        self.last_success = time.time()
                         return {"status": 204, "json": None}
                     try:
                         data = await response.json()
@@ -97,6 +101,8 @@ class GitHubAPI:
                             delay = 2**attempt
                         await asyncio.sleep(delay)
                         continue
+                    if 200 <= response.status < 300:
+                        self.last_success = time.time()
                     return {"status": response.status, "json": data}
             except (aiohttp.ClientError, asyncio.TimeoutError) as error:
                 if attempt + 1 == attempts:
@@ -121,7 +127,9 @@ class GitHubAPI:
             if value is not None
         }
         url = f"{self._repo_url(repo)}/workflows/{quote(workflow_file, safe='')}/dispatches"
-        return await self._request("POST", url, {"ref": ref, "inputs": cleaned})
+        return await self._request(
+            "POST", url, {"ref": ref, "inputs": cleaned, "return_run_details": True}
+        )
 
     async def get_run(self, repo, run_id):
         return await self._request("GET", f"{self._repo_url(repo)}/runs/{int(run_id)}")

@@ -1,5 +1,5 @@
 python-telegram-bot[ext]==21.*
 aiohttp
 python-dotenv
-motor
+pymongo>=4.13,<5
 tzdata; sys_platform == "win32"

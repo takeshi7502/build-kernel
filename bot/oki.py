@@ -2,9 +2,8 @@
 # GitHub Workflow Bot - oki.py
 # ==============================
 import html
-import time
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import List
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.error import BadRequest
@@ -17,7 +16,6 @@ from telegram.ext import (
     filters,
 )
 
-from .config import send_admin_notification
 from .permissions import is_admin
 
 # States
@@ -508,81 +506,33 @@ class OKIFlow:
         dispatch_inputs = {
             k: str(v).lower() if isinstance(v, bool) else str(v) for k, v in inputs.items()
         }
-        dispatch_started_at = datetime.now(timezone.utc).isoformat()
-        res = await self.gh.dispatch_workflow(
-            repo=self.config.OKI_REPO,
-            workflow_file=dispatch_file,
-            ref=self.config.OKI_DEFAULT_BRANCH,
-            inputs=dispatch_inputs,
-        )
-
-        uncertain = bool((res.get("json") or {}).get("uncertain"))
-        if res.get("status") == 204 or uncertain:
-            job = {
-                "type": "oki",
-                "repo": self.config.OKI_REPO,
-                "workflow_file": dispatch_file,
-                "ref": self.config.OKI_DEFAULT_BRANCH,
-                "inputs": inputs,
-                "user_id": user.id,
-                "user_name": user.full_name,
-                "chat_id": update.effective_chat.id,
-                "message_thread_id": self._thread_id_from_update(update),
-                "created_at": dispatch_started_at,
-                "run_id": None,
-                "status": "dispatched",
-                "conclusion": None,
-                "notified": False,
-            }
-            if uncertain and not user_is_admin:
-                job["pending_key"] = key
-            await self.storage.add_job(job)
-            if not user_is_admin and key and not uncertain:
-                await self.storage.consume(key)
-
-            view_url = f"https://github.com/{self.config.GITHUB_OWNER}/{self.config.OKI_REPO}/actions/workflows/{dispatch_file}"
-
-            mention = f'<a href="tg://user?id={user.id}">{html.escape(user.full_name)}</a>'
-
-            dashboard_link = (
-                f" ┃ <a href='{html.escape(self.config.DASHBOARD_URL, quote=True)}'>Website</a>"
-                if self.config.DASHBOARD_URL
-                else ""
+        job = {
+            "type": "oki",
+            "repo": self.config.OKI_REPO,
+            "workflow_file": dispatch_file,
+            "ref": self.config.OKI_DEFAULT_BRANCH,
+            "inputs": inputs,
+            "dispatch_inputs": dispatch_inputs,
+            "user_id": user.id,
+            "user_name": user.full_name,
+            "chat_id": update.effective_chat.id,
+            "message_thread_id": self._thread_id_from_update(update),
+        }
+        request_id = f"oki:{q.message.chat_id}:{q.message.message_id}:{user.id}"
+        try:
+            saved = await self.storage.enqueue_job(
+                job, key=None if user_is_admin else key, request_id=request_id
             )
-            msg_text = (
-                f"<b>➲ Đã gửi OKI Build thành công!\n"
-                f"┃\n"
-                f"┠ Người gửi: {mention}\n"
-                f"┖ <i>Bạn sẽ nhận thông báo khi hoàn tất.</i>\n"
-                f'<blockquote>Xem thông tin: <a href="{view_url}">Github</a>{dashboard_link}</blockquote></b>'
-            )
-            await q.edit_message_text(
-                (
-                    "⚠️ GitHub chưa xác nhận yêu cầu. Bot sẽ kiểm tra tiến trình trước khi tính lượt key.\n\n"
-                    if uncertain
-                    else ""
-                )
-                + msg_text,
-                parse_mode="HTML",
-                disable_web_page_preview=True,
-            )
-
-            if str(user.id) != str(self.config.OWNER_ID):
-                await send_admin_notification(
-                    self.config.TELEGRAM_BOT_TOKEN,
-                    self.config.OWNER_ID,
-                    mention,
-                    view_url,
-                    job_type="OKI",
-                )
-        else:
-            m = await q.edit_message_text(f"⚠️ Dispatch lỗi: {res['status']} {res.get('json')}")
-            if context.job_queue:
-                context.job_queue.run_once(
-                    _del_msg_job, when=60, chat_id=m.chat_id, data=m.message_id
-                )
-
+        except ValueError as error:
+            _cleanup(context)
+            await q.edit_message_text(f"❌ {error}")
+            return ConversationHandler.END
         _cleanup(context)
+        await q.edit_message_text(
+            f"✅ Đã xếp hàng build OKI #{saved['_id']}.\n"
+            "Bot sẽ gửi GitHub khi có lượt trống và thông báo khi hoàn tất.\n"
+            "Lượt key được giữ trước; sẽ hoàn nếu GitHub xác nhận từ chối yêu cầu.",
+        )
         return ConversationHandler.END
 
     async def timeout(self, update: Update, context: ContextTypes.DEFAULT_TYPE):

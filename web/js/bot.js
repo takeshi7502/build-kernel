@@ -22,11 +22,13 @@ function formatDate(isoString) {
 // Hàm tạo mã HTML cho từng Card
 function createBuildCard(build) {
     let statusStyle = build.status === 'success' ? 'background:rgba(16,185,129,0.15);color:#10b981;border:1px solid rgba(16,185,129,0.3);' 
-        : build.status === 'building' ? 'background:rgba(234,179,8,0.15);color:#eab308;border:1px solid rgba(234,179,8,0.3);' 
+        : ['building', 'queued', 'unknown'].includes(build.status) ? 'background:rgba(234,179,8,0.15);color:#eab308;border:1px solid rgba(234,179,8,0.3);'
         : 'background:rgba(239,68,68,0.15);color:#ef4444;border:1px solid rgba(239,68,68,0.3);';
         
     let statusLabel = build.status === 'success' ? 'Success'
         : build.status === 'building' ? 'Building'
+        : build.status === 'queued' ? 'Queued'
+        : build.status === 'unknown' ? 'Needs review'
         : 'Failed';
 
     // Nút action (Download & Github)
@@ -36,6 +38,8 @@ function createBuildCard(build) {
             <a href="${build.nightly_link}" target="_blank" class="bot-btn btn-success"><i class="fa-solid fa-download"></i> Download</a>
             <a href="${build.github_link}" target="_blank" class="bot-btn"><i class="fa-brands fa-github"></i> Github</a>
         `;
+    } else if (build.status === 'queued' || build.status === 'unknown') {
+        actionButtons = `<button class="bot-btn" disabled><i class="fa-solid fa-clock"></i> ${build.status === 'queued' ? 'Waiting for dispatch' : 'Check GitHub with owner'}</button>`;
     } else if (build.status === 'building') {
         actionButtons = `
             <button class="bot-btn" disabled><i class="fa-solid fa-spinner fa-spin"></i> Compiling</button>
@@ -113,6 +117,8 @@ function createWebBuildCard(build) {
         badge = '<span class="badge" style="background:rgba(234,179,8,0.15);color:#eab308;border:1px solid rgba(234,179,8,0.3);">Building</span>';
     } else if (build.status === 'partial') {
         badge = '<span class="badge" style="background:rgba(59,130,246,0.15);color:#3b82f6;border:1px solid rgba(59,130,246,0.3);">Partial ✅</span>';
+    } else if (build.status === 'unknown') {
+        badge = '<span class="badge" style="color:#eab308;border:1px solid rgba(234,179,8,0.3);">Needs review</span>';
     } else if (build.status === 'cancelled') {
         badge = '<span class="badge" style="background:rgba(245,158,11,0.15);color:#f59e0b;border:1px solid rgba(245,158,11,0.3);">Cancelled</span>';
     } else {
@@ -124,6 +130,7 @@ function createWebBuildCard(build) {
         let stClass = '', stLabel = '';
         if (item.status === 'success') { stClass = 'color:#10b981'; stLabel = '✅ Success'; }
         else if (item.status === 'building') { stClass = 'color:#eab308'; stLabel = '🔄 Building...'; }
+        else if (item.status === 'unknown') { stClass = 'color:#eab308'; stLabel = 'Needs review'; }
         else if (item.status === 'cancelled') { stClass = 'color:#f59e0b'; stLabel = '🚫 Cancelled'; }
         else if (item.status === 'failed') { stClass = 'color:#ef4444'; stLabel = '❌ Failed'; }
         else { stClass = 'color:var(--text-muted)'; stLabel = '⏳ Waiting'; }
@@ -242,7 +249,7 @@ function updateStatusBadge(botStatus, lastPing) {
         if (textSpan) textSpan.innerText = "Online";
     } else {
         badge.className = "status-btn offline";
-        if (textSpan) textSpan.innerText = "Offline";
+        if (textSpan) textSpan.innerText = botStatus === "degraded" ? "Needs attention" : "Offline";
     }
 }
 

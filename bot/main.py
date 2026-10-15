@@ -10,12 +10,17 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
-import aiohttp
 import aiohttp.web as aiohttp_web
-from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Update, constants
+from telegram import (
+    BotCommand,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+    Update,
+    constants,
+)
 from telegram.ext import (
     AIORateLimiter,
     ApplicationBuilder,
@@ -31,15 +36,18 @@ from . import config
 from .backups import read_backup
 from .buildsave import build_buildsave_conversation
 from .catalog import load_downloads as _load_web_kernel_downloads
-from .catalog import rebuild_downloads as rebuild_catalog_downloads
-from .catalog import update_download as update_catalog_download
+from .dispatch import dispatch_worker
 from .github import GitHubAPI, match_workflow_run
 from .github import parse_utc as _parse_utc
 from .gki import SUB_LEVELS, _del_msg_job, build_gki_conversation
+from .maintenance import backup_worker, catalog_worker, cleanup_worker, cloud_worker
+from .notifications import broadcast_worker, notification_worker
 from .oki import build_oki_conversation
 from .permissions import is_admin, is_owner
+from .status import cached_run, status_worker
 from .storage import HybridStorage
 from .web_sync import _make_custom_id, get_realtime_data
+from .workers import WorkerSupervisor, heartbeat
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.WARNING
@@ -91,47 +99,22 @@ def _start_background_task(app, coroutine, name):
 
 
 async def _notify_job(app, job, text, duplicates=()):
-    """Deliver to the original chat and DM independently, without duplicate DMs."""
-    storage = app.bot_data["storage"]
-    delivered = []
-    destinations = dict.fromkeys(
+    """Queue completion deliveries; the notification worker owns retry state."""
+    destinations = []
+    for chat_id in dict.fromkeys(
         target for target in (job.get("chat_id"), job.get("user_id")) if target is not None
-    )
-    if not destinations:
-        await storage.update_job(
-            job["_id"],
-            {"notified": True, "notification_error": "Legacy job has no Telegram recipient"},
-        )
-        return True
-    for chat_id in destinations:
-        try:
-            message = await _bot_send_topic_safe(
-                app.bot,
-                chat_id,
-                text,
+    ):
+        destinations.append(
+            dict(
+                chat_id=chat_id,
                 message_thread_id=job.get("message_thread_id")
                 if chat_id == job.get("chat_id")
                 else None,
-                parse_mode=constants.ParseMode.HTML,
-                disable_web_page_preview=True,
             )
-            delivered.append((chat_id, message))
-        except Exception as error:
-            logger.warning(
-                "Notification delivery failed for job %s chat %s: %s",
-                job.get("_id"),
-                chat_id,
-                error,
-            )
-    if not delivered:
-        return False
-    for entry in (job, *duplicates):
-        await storage.update_job(entry["_id"], {"notified": True})
-    for chat_id, message in delivered:
-        try:
-            await storage.track_message(message.message_id, chat_id, job.get("user_id", 0))
-        except Exception:
-            logger.exception("Message tracking failed after successful notification")
+        )
+    await app.bot_data["storage"].queue_notifications(
+        [entry["_id"] for entry in (job, *duplicates)], destinations, text
+    )
     return True
 
 
@@ -160,6 +143,86 @@ async def safe_delete_message(context: ContextTypes.DEFAULT_TYPE, chat_id: int, 
         await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
     except Exception:
         pass
+
+
+async def cmd_jobs(update, context):
+    storage = context.application.bot_data["storage"]
+    admin = await is_admin(update.effective_user.id, storage)
+    jobs = [
+        job
+        for job in await storage.get_jobs()
+        if (admin or job.get("user_id") == update.effective_user.id)
+        and (job.get("status") != "completed" or job.get("conclusion") == "unknown")
+    ]
+    lines = ["📋 Hàng đợi / tiến trình của bot:"]
+    for job in sorted(jobs, key=lambda value: value.get("_id", 0), reverse=True)[:20]:
+        lines.append(
+            f"#{job['_id']} · {job.get('type', 'gki').upper()} · {job.get('status', '?')} · Run {job.get('run_id') or 'chưa xác định'}"
+        )
+    if not jobs:
+        lines.append("Không có job đang chờ/chạy.")
+    lines.append("Hủy job: /canceljob ID")
+    if admin:
+        lines.append(
+            "Job chưa rõ kết quả: /resolvejob ID RUN_ID hoặc /resolvejob ID refund (sau khi kiểm tra GitHub)."
+        )
+    await _send_msg(update, context, "\n".join(lines))
+
+
+async def cmd_cancel_local_job(update, context):
+    storage = context.application.bot_data["storage"]
+    try:
+        job_id = int(context.args[0])
+        job = await storage.cancel_local_job(
+            job_id,
+            update.effective_user.id,
+            admin=await is_admin(update.effective_user.id, storage),
+        )
+        text = (
+            "Đã hủy trước khi gửi GitHub; lượt key đã hoàn nếu có."
+            if job.get("status") == "completed"
+            else "Đã ghi nhận yêu cầu hủy. Bot sẽ đối chiếu và hủy GitHub run khi xác định được."
+        )
+    except (ValueError, IndexError) as error:
+        text = (
+            str(error)
+            if isinstance(error, ValueError) and context.args
+            else "Cú pháp: /canceljob ID"
+        )
+    await _send_msg(update, context, text)
+
+
+async def cmd_resolve_job(update, context):
+    storage = context.application.bot_data["storage"]
+    if not await is_admin(update.effective_user.id, storage):
+        return
+    try:
+        job_id, value = int(context.args[0]), context.args[1]
+        if value != "refund":
+            run_id = int(value)
+            job = next((job for job in await storage.get_jobs() if job.get("_id") == job_id), None)
+            if not job:
+                raise ValueError("Không tìm thấy job.")
+            result = await context.application.bot_data["gh"].get_run(job["repo"], run_id)
+            run = result.get("json") or {}
+            if (
+                result.get("status") != 200
+                or run.get("head_branch") != job.get("ref")
+                or str(run.get("path", "")).split("@", 1)[0].rsplit("/", 1)[-1]
+                != job.get("workflow_file")
+            ):
+                raise ValueError("Run không tồn tại hoặc không khớp workflow/branch của job.")
+            await storage.resolve_job(job_id, run_id=run_id)
+        else:
+            await storage.resolve_job(job_id, refund=True)
+        text = f"✅ Đã xử lý job #{job_id}."
+    except (ValueError, IndexError) as error:
+        text = (
+            str(error)
+            if isinstance(error, ValueError) and len(context.args) >= 2
+            else "Cú pháp: /resolvejob ID RUN_ID|refund"
+        )
+    await _send_msg(update, context, text)
 
 
 async def update_batch_message(batch_id: str, storage: HybridStorage, bot):
@@ -205,19 +268,19 @@ async def update_batch_message(batch_id: str, storage: HybridStorage, bot):
         if completed_count == total_count:
             if success_count == 0:
                 lines = [
-                    f"❌ <b>Đã huỷ/thất bại toàn bộ batch!</b>",
+                    "❌ <b>Đã huỷ/thất bại toàn bộ batch!</b>",
                     f"🔨 {variant} — {v_str}",
                     f"⏳ Tiến trình: {completed_count}/{total_count}",
                 ]
             else:
                 lines = [
-                    f"✅ <b>Đã hoàn thành batch build!</b>",
+                    "✅ <b>Đã hoàn thành batch build!</b>",
                     f"🔨 {variant} — {v_str}",
                     f"⏳ Tiến trình: {completed_count}/{total_count} ({success_count} thành công)",
                 ]
         else:
             lines = [
-                f"✅ <b>Đang build kernel cho lưu trữ!</b>",
+                "✅ <b>Đang build kernel cho lưu trữ!</b>",
                 f"🔨 {variant} — {v_str}",
                 f"⏳ Tiến trình: {completed_count}/{total_count}",
             ]
@@ -330,109 +393,15 @@ async def update_rebuild_message(rebuild_msg_id: str, storage, bot):
 
 
 async def poller(app):
-    gh: GitHubAPI = app.bot_data["gh"]
-    storage: HybridStorage = app.bot_data["storage"]
-
-    async def cleanup_task():
-        while True:
-            try:
-                deleted_msg = await storage.delete_old_messages(24)
-                deleted_jobs = await storage.delete_old_jobs(
-                    30
-                )  # Lưu lịch sử Bot Build trong 30 ngày thay vì 7 ngày
-                if deleted_msg or deleted_jobs:
-                    logger.info("Cleanup: %d messages, %d jobs", deleted_msg, deleted_jobs)
-            except Exception as e:
-                logger.error("Cleanup error: %s", e)
-            await asyncio.sleep(3600)
-
-    _start_background_task(app, cleanup_task(), "storage-cleanup")
-    _start_background_task(
-        app, rebuild_catalog_downloads(storage, app, max_age_days=90), "catalog-rebuild"
-    )
-
+    gh = app.bot_data["gh"]
+    storage = app.bot_data["storage"]
     while True:
+        heartbeat(app, "poller")
         try:
-            # 1. Dispatch buildsave queue
-            active_bs = await storage.get_active_buildsave_count()
-            if active_bs == 0:
-                next_bs = await storage.get_next_queued_buildsave()
-
-                # --- Thử lấy job rebuild_queued nếu không có job queued thường ---
-                if not next_bs:
-                    all_j = await storage.get_jobs()
-                    rb_pending = [
-                        j
-                        for j in all_j
-                        if j.get("type") == "buildsave" and j.get("status") == "rebuild_queued"
-                    ]
-                    if rb_pending:
-                        rb_pending.sort(key=lambda x: x.get("created_at", ""))
-                        next_bs = rb_pending[0]
-                        next_bs["_is_rebuild"] = True  # Flag nội bộ để bỏ check cancelled-sibling
-
-                if next_bs:
-                    _batch_id = next_bs.get("batch_id")
-                    _skip = False
-                    # Chỉ kiểm tra cancelled-sibling cho job quţ queue mới, đặt biệt chunk
-                    if _batch_id and not next_bs.get("_is_rebuild"):
-                        _siblings = await storage.get_jobs_by_batch(_batch_id)
-                        if any(j.get("conclusion") == "cancelled" for j in _siblings):
-                            # Batch đã huỷ → bỏ qua, đánh dấu cancelled luôn
-                            await storage.update_job(
-                                next_bs["_id"],
-                                {
-                                    "status": "completed",
-                                    "conclusion": "cancelled",
-                                    "notified": True,
-                                },
-                            )
-                            await update_batch_message(_batch_id, storage, app.bot)
-                            _skip = True
-
-                    if not _skip:
-                        inputs = next_bs.get("inputs", {})
-                        now_iso = datetime.now(timezone.utc).isoformat()
-                        res = await gh.dispatch_workflow(
-                            repo=next_bs["repo"],
-                            workflow_file=next_bs["workflow_file"],
-                            ref=next_bs["ref"],
-                            inputs=inputs,
-                        )
-                        if res.get("status") in (201, 202, 204) or (res.get("json") or {}).get(
-                            "uncertain"
-                        ):
-                            await storage.update_job(
-                                next_bs["_id"],
-                                {
-                                    "status": "dispatched",
-                                    "run_id": None,
-                                    "conclusion": None,
-                                    "notified": False,
-                                    "created_at": now_iso,
-                                },
-                            )
-                        else:
-                            await storage.update_job(
-                                next_bs["_id"],
-                                {
-                                    "status": "completed",
-                                    "conclusion": "failure",
-                                    "notified": True,
-                                    "created_at": now_iso,
-                                },
-                            )
-                        batch_id = next_bs.get("batch_id")
-                        if batch_id:
-                            await update_batch_message(batch_id, storage, app.bot)
-                        if next_bs.get("rebuild_msg_id"):
-                            await update_rebuild_message(
-                                next_bs["rebuild_msg_id"], storage, app.bot
-                            )
-
             # 2. Polling for unnotified jobs
             jobs = await storage.list_unnotified_jobs()
             for job in jobs:
+                heartbeat(app, "poller")
                 try:
                     # Re-check state: the snapshot may contain a duplicate job
                     # already notified or a batch cancelled earlier this cycle.
@@ -441,16 +410,25 @@ async def poller(app):
                         (entry for entry in current_jobs if entry.get("_id") == job.get("_id")),
                         None,
                     )
-                    if job is None or job.get("notified"):
+                    if job is None or job.get("notified") or job.get("notification_enqueued"):
                         continue
                     if job.get("status") in ("queued", "rebuild_queued"):
+                        continue
+                    if job["_id"] in app.bot_data.get("dispatch_inflight", set()):
+                        continue
+                    if job.get("completion_text"):
+                        await _notify_job(app, job, job["completion_text"])
+                        if job.get("batch_id"):
+                            await update_batch_message(job["batch_id"], storage, app.bot)
+                        if job.get("rebuild_msg_id"):
+                            await update_rebuild_message(job["rebuild_msg_id"], storage, app.bot)
                         continue
 
                     repo = job["repo"]
                     run_id = job.get("run_id")
                     ref = job.get("ref", "main")
                     workflow_file = job.get("workflow_file")
-                    job_created_at_iso = job.get("created_at")
+                    job_created_at_iso = job.get("dispatch_started_at") or job.get("created_at")
 
                     runs_resp = None
                     if not run_id and ref and workflow_file and job_created_at_iso:
@@ -463,8 +441,9 @@ async def poller(app):
                                 job, runs_resp["json"].get("workflow_runs", []), all_jobs
                             )
                             if best_match:
-                                run_id = best_match["id"]
-                                await storage.update_job(job["_id"], {"run_id": run_id})
+                                run_id = await storage.link_reconciled_run(
+                                    job["_id"], best_match["id"], job.get("dispatch_generation")
+                                )
 
                     if not run_id:
                         if (
@@ -478,14 +457,19 @@ async def poller(app):
                                 job["_id"],
                                 {
                                     "status": "completed",
-                                    "conclusion": "failure",
+                                    "conclusion": "unknown",
                                     "error": "No matching GitHub workflow run was found within 20 minutes",
                                 },
                             )
                             await _notify_job(
                                 app,
                                 job,
-                                "❌ Không tìm thấy tiến trình GitHub khớp với yêu cầu build sau 20 phút. Dùng /st để kiểm tra trước khi gửi lại.",
+                                "⚠️ Chưa xác định được GitHub run sau 20 phút. Bot không tự gửi lại để tránh build trùng; hãy nhờ owner kiểm tra. Lượt key đang giữ sẽ không tự hoàn khi kết quả còn chưa rõ.",
+                            )
+                            await storage.queue_notice(
+                                f"unknown-job:{job['_id']}:{job.get('dispatch_generation', '')}",
+                                config.OWNER_ID,
+                                f"⚠️ Job #{job['_id']} chưa xác định được run. Kiểm tra GitHub rồi dùng /resolvejob {job['_id']} RUN_ID hoặc /resolvejob {job['_id']} refund nếu chắc chắn không có build.",
                             )
                             if job.get("batch_id"):
                                 await update_batch_message(job["batch_id"], storage, app.bot)
@@ -500,8 +484,20 @@ async def poller(app):
                             logger.warning(
                                 "Deferred key charge could not be completed for job %s", job["_id"]
                             )
+                    await storage.commit_reservation(job["_id"])
 
-                    rn = await gh.get_run(repo, int(run_id))
+                    if job.get("cancel_requested"):
+                        await gh.cancel_run(repo, int(run_id))
+                    cached = (
+                        job.get("github_result")
+                        if job.get("github_completed")
+                        else cached_run(app, repo, run_id)
+                    )
+                    rn = (
+                        {"status": 200, "json": cached}
+                        if cached
+                        else await gh.get_run(repo, int(run_id))
+                    )
 
                     if rn["status"] == 404:
                         logger.warning("Run %s not found (deleted?), marking cancelled", run_id)
@@ -536,6 +532,7 @@ async def poller(app):
                                     and j.get("user_id") == job.get("user_id")
                                     and str(j.get("run_id")) == str(run_id)
                                     and not j.get("notified")
+                                    and not j.get("notification_enqueued")
                                 ]
                             except Exception as e:
                                 logger.warning(
@@ -603,6 +600,21 @@ async def poller(app):
                             "status": "completed",
                             "conclusion": conclusion,
                             "gh_duration": gh_dur,
+                            "catalog_pending": conclusion == "success"
+                            and job.get("type") in ("gki", "buildsave"),
+                            "cancel_requested": False,
+                            "github_completed": True,
+                            "github_result": {
+                                key: rn["json"].get(key)
+                                for key in (
+                                    "status",
+                                    "conclusion",
+                                    "html_url",
+                                    "run_started_at",
+                                    "created_at",
+                                    "updated_at",
+                                )
+                            },
                         }
                         await storage.update_job(job["_id"], completion_fields)
                         for dup in duplicate_jobs:
@@ -618,12 +630,6 @@ async def poller(app):
                             await storage.add_successful_build(
                                 run_id, user_id, job.get("ref", "unknown"), user_name
                             )
-                            if job.get("type") in ("gki", "buildsave"):
-                                completed_job = {**job, **completion_fields, "run_id": run_id}
-                                try:
-                                    await update_catalog_download(completed_job, run_id, app)
-                                except Exception:
-                                    logger.exception("Catalog update failed for run %s", run_id)
 
                         if not await _notify_job(app, job, text, duplicate_jobs):
                             logger.warning(
@@ -634,7 +640,7 @@ async def poller(app):
         except Exception as e:
             logger.error("Poller error: %s", e, exc_info=True)
 
-        await asyncio.sleep(45)
+        await asyncio.sleep(config.POLL_INTERVAL)
 
 
 async def _send_msg(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, **kwargs):
@@ -882,6 +888,8 @@ async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def _send_broadcast_content(bot, chat_id: int, payload: dict):
     """Gửi lại nội dung thành tin mới, không phụ thuộc message_id và không lộ nguồn."""
     source = payload.get("source_message")
+    if isinstance(source, dict):
+        source = Message.de_json(source, bot)
     if source is None:
         return await bot.send_message(chat_id=chat_id, text=payload["text"])
 
@@ -1010,57 +1018,19 @@ async def cb_broadcast_target(update: Update, context: ContextTypes.DEFAULT_TYPE
     total = len(targets)
     labels = {"dm": "DM", "group": "Nhóm", "all": "Cả hai"}
 
-    async def render_progress(processed, dm_ok, dm_fail, grp_ok, grp_fail, done=False):
-        icon = "✅" if done else "⏳"
-        title = "Broadcast hoàn thành" if done else "Đang Broadcast"
-        text = (
-            f"{icon} <b>{title}</b>\n"
-            f"<blockquote>Phạm vi: <b>{labels[scope]}</b>\n"
-            f"Tiến trình: <b>{processed}/{total}</b>\n"
-            f"👤 DM: <b>{dm_ok}</b> thành công · <b>{dm_fail}</b> thất bại\n"
-            f"👥 Nhóm: <b>{grp_ok}</b> thành công · <b>{grp_fail}</b> thất bại</blockquote>"
-        )
-        try:
-            await query.message.edit_text(text, parse_mode=constants.ParseMode.HTML)
-        except BadRequest as exc:
-            if "message is not modified" not in str(exc).lower():
-                logger.warning("Không thể cập nhật tiến trình Broadcast: %s", exc)
-
-    await render_progress(0, 0, 0, 0, 0)
-    if not total:
-        await render_progress(0, 0, 0, 0, 0, done=True)
-        return
-
-    dm_ok = dm_fail = grp_ok = grp_fail = 0
-    loop = asyncio.get_running_loop()
-    last_edit = loop.time()
-
-    progress_interval = max(1, (total + 14) // 15)
-    for processed, (target_type, chat_id, user_id) in enumerate(targets, 1):
-        try:
-            await _send_broadcast_content(context.bot, chat_id, payload)
-            if target_type == "dm":
-                dm_ok += 1
-            else:
-                grp_ok += 1
-        except Exception as exc:
-            if target_type == "dm":
-                dm_fail += 1
-            else:
-                grp_fail += 1
-            logger.warning(
-                "Broadcast tới %s chat_id=%s thất bại: %s",
-                target_type,
-                chat_id,
-                exc,
-            )
-
-        now = loop.time()
-        if processed == total or processed % progress_interval == 0 or now - last_edit >= 0.8:
-            await render_progress(processed, dm_ok, dm_fail, grp_ok, grp_fail)
-            last_edit = loop.time()
-
-    await render_progress(total, dm_ok, dm_fail, grp_ok, grp_fail, done=True)
+    source = payload.get("source_message")
+    payload = {**payload, "source_message": json.loads(source.to_json()) if source else None}
+    batch_id = f"{query.message.chat_id}:{query.message.message_id}"
+    await storage.queue_broadcast(
+        batch_id,
+        payload,
+        [chat_id for _, chat_id, _ in targets],
+        query.message.chat_id,
+        query.message.message_id,
+    )
+    await query.message.edit_text(
+        f"⏳ Đã xếp hàng Broadcast tới {total} chat. Tiến trình sẽ tự cập nhật."
+    )
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1076,6 +1046,8 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>/gki</b> <code>&lt;key&gt;</code> — Build GKI Kernel\n"
         "<b>/oki</b> <code>&lt;key&gt;</code> — Build OKI Kernel\n"
         "<b>/dl</b> <code>&lt;version&gt;</code> — Lấy link tải Kernel\n"
+        "<b>/jobs</b> — Xem hàng đợi và tiến trình của bạn\n"
+        "<b>/canceljob</b> <code>ID</code> — Hủy job của bạn\n"
         "<b>/ping</b> — Kiểm tra bot hoạt động\n"
         "<b>/help</b> — Hiện hướng dẫn này\n"
         "</blockquote>"
@@ -1091,6 +1063,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "<b>/keys</b> — Xem danh sách key\n"
             "<b>/st</b> — Xem build đang chạy\n"
             "<b>/list</b> — Lịch sử build thành công\n"
+            "<b>/resolvejob</b> <code>ID RUN_ID|refund</code> — Xử lý job chưa rõ kết quả sau khi kiểm tra GitHub\n"
             "<b>/rb</b> hoặc <b>/rebuild</b> — Build lại run đã lưu\n"
             "<b>/data</b> — Khôi phục data từ JSON\n"
             "<b>/bc</b> hoặc <b>/broadcast</b> — Broadcast thông báo\n"
@@ -1242,7 +1215,7 @@ async def cmd_status(
             bj_list = sorted(bj_list, key=lambda x: x.get("batch_index", 0))
             vers = [j.get("bs_full_ver", "?") for j in bj_list[:5]]
             lines.append("")
-            lines.append(f"<b>🗂 [Web Build — Hàng chờ]</b>")
+            lines.append("<b>🗂 [Web Build — Hàng chờ]</b>")
             lines.append(
                 f"┠ ⏳ {', '.join(vers)}" + (f" (+{len(bj_list) - 5})" if len(bj_list) > 5 else "")
             )
@@ -1343,7 +1316,7 @@ async def show_list_page(
     else:
         message_to_edit = await _send_msg(update, context, "⏳ Đang tải thông tin trang...")
 
-    text = f"🗂 <b>Danh sách các bản build GKI:</b>\n\n"
+    text = "🗂 <b>Danh sách các bản build GKI:</b>\n\n"
 
     # Render text for the 5 items
     for i, r in enumerate(current_builds):
@@ -1662,7 +1635,7 @@ async def send_saved_config(app, run_id, job, chat_id):
         except:
             pass
     else:
-        lines.append(f"🕒 <b>Ngày build</b>: <code>Chưa rõ</code>\n")
+        lines.append("🕒 <b>Ngày build</b>: <code>Chưa rõ</code>\n")
 
     lines.append(
         f"• <b>KernelSU Variant</b>: <code>{inputs.get('kernelsu_variant', 'None')}</code>"
@@ -1689,7 +1662,7 @@ async def send_saved_config(app, run_id, job, chat_id):
         target_flags.append("A15 (6.6)")
 
     if inputs.get("build_all"):
-        lines.append(f"• <b>Phiên bản Android</b>: <code>Tất cả (A12-A15)</code>")
+        lines.append("• <b>Phiên bản Android</b>: <code>Tất cả (A12-A15)</code>")
     elif target_flags:
         lines.append(f"• <b>Phiên bản Android</b>: <code>{', '.join(target_flags)}</code>")
 
@@ -1699,7 +1672,7 @@ async def send_saved_config(app, run_id, job, chat_id):
             f"• <b>Sub-versions (chỉ định)</b>: <code>{sub_levels.replace(',', ', ')}</code>"
         )
     else:
-        lines.append(f"• <b>Sub-versions</b>: <code>Tất cả các bản cập nhật phụ</code>")
+        lines.append("• <b>Sub-versions</b>: <code>Tất cả các bản cập nhật phụ</code>")
 
     # Tạo Inline Keyboard cho tin nhắn lưu cấu hình
     save_kb = InlineKeyboardMarkup(
@@ -1798,7 +1771,7 @@ async def cmd_cancel_batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     j["_id"], {"status": "completed", "conclusion": "cancelled", "notified": True}
                 )
                 cancelled += 1
-        elif status in ("dispatched", "in_progress", "running"):
+        elif status in ("dispatching", "dispatched", "in_progress", "running"):
             # Huỷ trên GitHub nếu có run_id
             if run_id:
                 try:
@@ -2266,6 +2239,28 @@ async def start_web_server(app_bot):
     """Khởi chạy API Web Server cục bộ phục vụ Dashboard Realtime"""
     app = aiohttp_web.Application()
 
+    async def health(request):
+        supervisor = app_bot.bot_data.get("supervisor")
+        data = supervisor.health() if supervisor else {"status": "starting", "workers": {}}
+        storage = app_bot.bot_data["storage"]
+        try:
+            await asyncio.wait_for(storage.snapshot(), timeout=1.5)
+            data["storage"] = "error" if storage.last_write_error else "ok"
+            if storage.last_write_error:
+                data["status"] = "degraded"
+        except Exception:
+            data.update(status="degraded", storage="error")
+        data["last_backup"] = app_bot.bot_data.get("last_backup")
+        data["last_github_success"] = getattr(app_bot.bot_data.get("gh"), "last_success", None)
+        data["cloud_sync"] = storage.cloud_error or ("ok" if storage.mongo_uri else "disabled")
+        return aiohttp_web.json_response(
+            data,
+            status=200 if data["status"] == "ok" else 503,
+            headers={"Cache-Control": "no-store"},
+        )
+
+    app.router.add_get("/healthz", health)
+
     async def api_data(request):
         try:
             data = await get_realtime_data(app_bot)
@@ -2309,6 +2304,8 @@ async def _register_bot_commands(app):
         BotCommand("dl", "Lấy link tải Kernel"),
         BotCommand("ping", "Kiểm tra bot hoạt động"),
         BotCommand("help", "Hiện hướng dẫn lệnh"),
+        BotCommand("jobs", "Xem hàng đợi và tiến trình bot"),
+        BotCommand("canceljob", "Hủy job theo ID nội bộ"),
     ]
     try:
         await app.bot.set_my_commands(commands)
@@ -2355,6 +2352,9 @@ def main():
 
     # Admin commands (owner + static admins in .env)
     app.add_handler(CommandHandler("st", cmd_status))
+    app.add_handler(CommandHandler("jobs", cmd_jobs))
+    app.add_handler(CommandHandler("canceljob", cmd_cancel_local_job))
+    app.add_handler(CommandHandler("resolvejob", cmd_resolve_job))
     app.add_handler(CommandHandler("list", cmd_list))
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("ping", cmd_ping))
@@ -2455,38 +2455,55 @@ def main():
     )
 
     async def _post_init(app_):
-        # Resolve the initial local/cloud snapshot before any seed, poll or web
-        # reader mutates it. Background initialization can overwrite live jobs.
-        await app_.bot_data["storage"]._sync_with_cloud()
-        # Seed dm_users từ lịch sử jobs cũ
-        seeded = await app_.bot_data["storage"].seed_dm_users_from_jobs()
-        if seeded:
-            logger.warning("Seeded %d DM users from job history", seeded)
-        # Seed group_chats từ lịch sử jobs cũ (chat_id < 0)
-        seeded_grp = await app_.bot_data["storage"].seed_groups_from_jobs()
-        if seeded_grp:
-            logger.warning("Seeded %d group chats from job history", seeded_grp)
+        await storage._sync_with_cloud()
+        await storage.seed_dm_users_from_jobs()
+        await storage.seed_groups_from_jobs()
         await _register_bot_commands(app_)
-        _start_background_task(app_, poller(app_), "github-poller")
+        app_.bot_data["send_broadcast"] = _send_broadcast_content
+        supervisor = WorkerSupervisor(storage, config.OWNER_ID, config.WORKER_STALE_SECONDS)
+        app_.bot_data["supervisor"] = supervisor
+        for name, factory, critical in (
+            ("dispatcher", dispatch_worker, True),
+            ("poller", poller, True),
+            ("notifications", notification_worker, True),
+            ("broadcast", broadcast_worker, False),
+            ("github-cache", status_worker, False),
+            ("catalog", catalog_worker, False),
+            ("backups", backup_worker, False),
+            ("cloud-sync", cloud_worker, False),
+            ("cleanup", cleanup_worker, False),
+        ):
+            supervisor.start(name, lambda factory=factory: factory(app_), critical=critical)
+        supervisor.monitor_task = asyncio.create_task(supervisor.monitor(), name="worker-monitor")
         await start_web_server(app_)
-        logger.warning(
-            "Telegram bot initialized; dashboard at %s:%s", config.WEB_HOST, config.WEB_PORT
-        )
+        logger.warning("Bot initialized; dashboard at %s:%s", config.WEB_HOST, config.WEB_PORT)
 
-    app.post_init = _post_init
-
-    async def _post_shutdown(app_):
+    async def _stop_workers(app_):
+        if app_.bot_data.get("workers_stopped"):
+            return
+        app_.bot_data["workers_stopped"] = True
+        supervisor = app_.bot_data.get("supervisor")
+        if supervisor:
+            await supervisor.stop()
         workers = tuple(app_.bot_data.get("background_tasks", ()))
         for worker in workers:
             worker.cancel()
-        if workers:
-            await asyncio.gather(*workers, return_exceptions=True)
+        await asyncio.gather(*workers, return_exceptions=True)
         runner = app_.bot_data.pop("web_runner", None)
-        if runner is not None:
+        if runner:
             await runner.cleanup()
-        await app_.bot_data["gh"].close()
-        app_.bot_data["storage"].close()
+        try:
+            await asyncio.wait_for(storage.flush_cloud(), timeout=10)
+        except Exception:
+            logger.warning("Final cloud sync failed; durable local state is preserved")
 
+    async def _post_shutdown(app_):
+        await _stop_workers(app_)
+        await gh.close()
+        await storage.close()
+
+    app.post_init = _post_init
+    app.post_stop = _stop_workers
     app.post_shutdown = _post_shutdown
 
     logger.warning("Starting Telegram bot...")

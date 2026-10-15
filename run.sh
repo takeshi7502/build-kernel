@@ -17,6 +17,9 @@ Usage: bash run.sh [command] [bot]
   deploy    Safe update, install dependencies, build dashboard and restart
   migrate   Remove the legacy gki-userbot PM2 entry; preserve all data files
   web       Cấu hình domain, Nginx, HTTPS và link dashboard tự động
+  health    Kiểm tra worker và dữ liệu qua /healthz
+  backup    Tạo một bản backup ZIP đã kiểm tra
+  backups   Liệt kê các bản backup local
 No command opens the interactive menu. Optional 'bot' is backward compatible.
 EOF
 }
@@ -76,7 +79,7 @@ migrate_legacy_process() {
 
 interactive_menu() {
     local choice
-    printf '\nGKI bot\n  1) Status\n  2) Logs\n  3) Restart\n  4) Update code\n  5) Deploy\n  6) Migrate legacy PM2 entry\n  7) Cấu hình domain + Nginx + HTTPS\n'
+    printf '\nGKI bot\n  1) Status\n  2) Logs\n  3) Restart\n  4) Update code\n  5) Deploy\n  6) Migrate legacy PM2 entry\n  7) Cấu hình domain + Nginx + HTTPS\n  8) Kiểm tra health\n  9) Liệt kê backup\n  10) Tạo backup ngay\n'
     read -r -p "Choice [1]: " choice
     case "${choice:-1}" in
         1) command_name=status ;;
@@ -86,6 +89,9 @@ interactive_menu() {
         5) command_name=deploy ;;
         6) command_name=migrate ;;
         7) command_name=web ;;
+        8) command_name=health ;;
+        9) command_name=backups ;;
+        10) command_name=backup ;;
         *) echo "Invalid choice." >&2; exit 2 ;;
     esac
 }
@@ -110,5 +116,13 @@ case "$command_name" in
     web)
         if [ -n "${2:-}" ]; then bash scripts/configure_web.sh "$2"; else bash scripts/configure_web.sh; fi
         ;;
+    health)
+        if [ ! -x venv/bin/python ]; then echo "Run bash start.sh first." >&2; exit 1; fi
+        port="$(venv/bin/python scripts/web_config.py port)"
+        curl --noproxy '*' --fail --silent --show-error --max-time 5 "http://127.0.0.1:$port/healthz"
+        printf '\n'
+        ;;
+    backup) venv/bin/python tools/manage_backups.py create ;;
+    backups) venv/bin/python tools/manage_backups.py list ;;
     *) echo "Unknown command: $command_name" >&2; usage; exit 2 ;;
 esac

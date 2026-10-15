@@ -1,8 +1,7 @@
 import html
-from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import Dict, List
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, constants
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.error import BadRequest
 from telegram.ext import (
     CallbackQueryHandler,
@@ -13,7 +12,6 @@ from telegram.ext import (
     filters,
 )
 
-from .config import send_admin_notification
 from .permissions import is_admin
 
 # States
@@ -1120,59 +1118,6 @@ class GKIFlow:
         wf_files = list(self.config.GKI_WORKFLOWS.values())
         wf = wf_files[0] if wf_files else "main.yml"
 
-        # Kiểm tra concurrency (chống đè build dẫn tới bị hủy)
-        await q.edit_message_text("⏳ Đang kiểm tra trạng thái server...")
-        active_runs_count = 0
-        busy_run = None
-        for status in ["in_progress", "queued"]:
-            url = f"{self.gh.base}/repos/{self.config.GITHUB_OWNER}/{self.config.GKI_REPO}/actions/runs?status={status}&per_page=20"
-            check_res = await self.gh._request("GET", url)
-            if check_res.get("status") == 200:
-                runs = check_res["json"].get("workflow_runs", [])
-                for r in runs:
-                    if r.get("head_branch") == self.config.GKI_DEFAULT_BRANCH and str(
-                        r.get("path", "")
-                    ).split("@", 1)[0].rsplit("/", 1)[-1] in {wf, CUSTOM_WORKFLOW}:
-                        active_runs_count += 1
-                        if not busy_run:
-                            busy_run = r
-
-        # Giới hạn toàn bộ server tối đa 10 job chạy cùng lúc
-        max_concurrent_jobs = 10
-        is_busy = active_runs_count >= max_concurrent_jobs
-
-        if is_busy:
-            # Tính thời gian ước tính còn lại (giả sử tổng ~45 phút) cho run cũ nhất
-            eta_line = ""
-            if busy_run and busy_run.get("created_at"):
-                try:
-                    created_dt = datetime.fromisoformat(
-                        busy_run["created_at"].replace("Z", "+00:00")
-                    )
-                    elapsed = (datetime.now(timezone.utc) - created_dt).total_seconds()
-                    remaining = max(0, 2700 - elapsed)  # 2700s = 45 phút
-                    rem_m = int(remaining // 60)
-                    if rem_m > 0:
-                        eta_line = f"• Ước tính hoàn tất tiến trình cũ nhất sau: ~{rem_m} phút.\n"
-                    else:
-                        eta_line = "• Ước tính sắp hoàn tất.\n"
-                except Exception:
-                    pass
-            msg = (
-                "❌ <b>Máy chủ đang quá tải!</b>\n\n"
-                f"• Hiện tại đang có {active_runs_count} tiến trình đang chạy.\n"
-                "• Vui lòng chờ các tiến trình trước hoàn tất rồi thử lại.\n"
-                f"{eta_line}\n"
-                "<i>Dùng /st để kiểm tra các tiến trình đang chạy.</i>"
-            )
-            await q.edit_message_text(msg, parse_mode="HTML")
-            if context.job_queue:
-                context.job_queue.run_once(
-                    _del_msg_job, when=60, chat_id=q.message.chat_id, data=q.message.message_id
-                )
-            _cleanup(context)
-            return ConversationHandler.END
-
         # Smart dispatch: use kernel-custom.yml for single target + single sub_level
         target_keys = [
             k
@@ -1245,79 +1190,33 @@ class GKIFlow:
             }
             dispatch_inputs = {k: v for k, v in inputs.items() if k in _MAIN_WF_ALLOWED}
 
-        dispatch_started_at = datetime.now(timezone.utc).isoformat()
-        res = await self.gh.dispatch_workflow(
-            repo=self.config.GKI_REPO,
-            workflow_file=dispatch_file,
-            ref=self.config.GKI_DEFAULT_BRANCH,
-            inputs=dispatch_inputs,
-        )
-        uncertain = bool((res.get("json") or {}).get("uncertain"))
-        if res["status"] in (201, 202, 204) or uncertain:
-            job = {
-                "type": "gki",
-                "repo": self.config.GKI_REPO,
-                "workflow_file": dispatch_file,
-                "ref": self.config.GKI_DEFAULT_BRANCH,
-                "inputs": inputs,
-                "user_id": user.id,
-                "user_name": user.full_name,
-                "chat_id": update.effective_chat.id,
-                "message_thread_id": _thread_id_from_update(update),
-                "created_at": dispatch_started_at,
-                "run_id": None,
-                "status": "dispatched",
-                "conclusion": None,
-                "notified": False,
-            }
-            if uncertain and not user_is_admin:
-                job["pending_key"] = key
-            await self.storage.add_job(job)
-            if not user_is_admin and not uncertain:
-                await self.storage.consume(key)
-            view_url = f"https://github.com/{self.config.GITHUB_OWNER}/{self.config.GKI_REPO}/actions/workflows/{dispatch_file}"
-
-            mention = f'<a href="tg://user?id={user.id}">{html.escape(user.full_name)}</a>'
-
-            dashboard_link = (
-                f" ┃ <a href='{html.escape(self.config.DASHBOARD_URL, quote=True)}'>Website</a>"
-                if self.config.DASHBOARD_URL
-                else ""
+        job = {
+            "type": "gki",
+            "repo": self.config.GKI_REPO,
+            "workflow_file": dispatch_file,
+            "ref": self.config.GKI_DEFAULT_BRANCH,
+            "inputs": inputs,
+            "dispatch_inputs": dispatch_inputs,
+            "user_id": user.id,
+            "user_name": user.full_name,
+            "chat_id": update.effective_chat.id,
+            "message_thread_id": _thread_id_from_update(update),
+        }
+        request_id = f"gki:{q.message.chat_id}:{q.message.message_id}:{user.id}"
+        try:
+            saved = await self.storage.enqueue_job(
+                job, key=None if user_is_admin else key, request_id=request_id
             )
-            msg_text = (
-                f"<b>➲ Đã gửi GKI Build thành công!\n"
-                f"┃\n"
-                f"┠ Người gửi: {mention}\n"
-                f"┖ <i>Bạn sẽ nhận thông báo khi hoàn tất.</i>\n"
-                f"<blockquote>Xem thông tin: "
-                f"<a href='{view_url}'>Github</a>{dashboard_link}</blockquote></b>"
-            )
-            await q.edit_message_text(
-                (
-                    "⚠️ GitHub chưa xác nhận yêu cầu. Bot sẽ kiểm tra tiến trình trước khi tính lượt key.\n\n"
-                    if uncertain
-                    else ""
-                )
-                + msg_text,
-                parse_mode="HTML",
-                disable_web_page_preview=True,
-            )
-
-            if str(user.id) != str(self.config.OWNER_ID):
-                await send_admin_notification(
-                    self.config.TELEGRAM_BOT_TOKEN,
-                    self.config.OWNER_ID,
-                    mention,
-                    view_url,
-                    job_type="GKI",
-                )
-        else:
-            m = await q.edit_message_text(f"⚠️ Dispatch lỗi: {res['status']} {res.get('json')}")
-            if context.job_queue:
-                context.job_queue.run_once(
-                    _del_msg_job, when=60, chat_id=m.chat_id, data=m.message_id
-                )
+        except ValueError as error:
+            _cleanup(context)
+            await q.edit_message_text(f"❌ {error}")
+            return ConversationHandler.END
         _cleanup(context)
+        await q.edit_message_text(
+            f"✅ Đã xếp hàng build GKI #{saved['_id']}.\n"
+            "Bot sẽ gửi GitHub khi có lượt trống và thông báo khi hoàn tất.\n"
+            "Lượt key được giữ trước; sẽ hoàn nếu GitHub xác nhận từ chối yêu cầu.",
+        )
         return ConversationHandler.END
 
 

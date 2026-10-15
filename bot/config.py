@@ -1,18 +1,13 @@
 """Validated runtime settings; environment variables override root .env."""
 
-import asyncio
-import html
-import logging
 import os
 import socket
 from pathlib import Path
 
-import aiohttp
 from dotenv import load_dotenv
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT_DIR / ".env")
-logger = logging.getLogger(__name__)
 
 
 def _required(key: str) -> str:
@@ -86,27 +81,17 @@ DASHBOARD_URL = os.getenv("DASHBOARD_URL", "").strip().rstrip("/")
 if DASHBOARD_URL and not DASHBOARD_URL.startswith(("http://", "https://")):
     raise SystemExit("[CONFIG] DASHBOARD_URL phải bắt đầu bằng http:// hoặc https://.")
 
-
-async def send_admin_notification(
-    bot_token: str, owner_id: int, mention: str, view_url: str, job_type: str = ""
-):
-    """Send a bounded, best-effort build notification to the owner."""
-    job_prefix = f" {html.escape(job_type)}" if job_type else ""
-    links = f"<a href='{html.escape(view_url, quote=True)}'>Github</a>"
-    if DASHBOARD_URL:
-        links += f" | <a href='{html.escape(DASHBOARD_URL, quote=True)}'>Dashboard</a>"
-    payload = {
-        "chat_id": owner_id,
-        "text": f"🚀 <b>Có build{job_prefix} mới từ {mention}!</b>\n<blockquote><b>Xem: {links}</b></blockquote>",
-        "parse_mode": "HTML",
-        "disable_web_page_preview": True,
-    }
-    try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session:
-            async with session.post(
-                f"https://api.telegram.org/bot{bot_token}/sendMessage", json=payload
-            ) as response:
-                if response.status != 200:
-                    logger.warning("Owner notification failed: HTTP %s", response.status)
-    except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
-        logger.warning("Owner notification failed (%s)", type(exc).__name__)
+# Worker limits and local, versioned backups. Existing .env files need no edits.
+MAX_ACTIVE_BUILDS = _integer("MAX_ACTIVE_BUILDS", default=10, maximum=50)
+POLL_INTERVAL = _integer("POLL_INTERVAL", default=30, minimum=5, maximum=300)
+WORKER_STALE_SECONDS = _integer("WORKER_STALE_SECONDS", default=600, minimum=60)
+NOTIFICATION_MAX_ATTEMPTS = _integer("NOTIFICATION_MAX_ATTEMPTS", default=8, maximum=20)
+CLOUD_SYNC_INTERVAL = _integer("CLOUD_SYNC_INTERVAL", default=30, minimum=5)
+BACKUP_INTERVAL_HOURS = _integer("BACKUP_INTERVAL_HOURS", default=24)
+BACKUP_KEEP = _integer("BACKUP_KEEP", default=14, minimum=2)
+_backup_path = Path(os.getenv("BACKUP_DIR", "data/backups").strip() or "data/backups")
+BACKUP_DIR = (_backup_path if _backup_path.is_absolute() else ROOT_DIR / _backup_path).resolve()
+if BACKUP_DIR.is_relative_to((ROOT_DIR / "web").resolve()):
+    raise SystemExit(
+        "[CONFIG] BACKUP_DIR không được nằm trong web/ vì backup chứa dữ liệu riêng tư."
+    )
