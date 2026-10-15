@@ -1,5 +1,6 @@
 """Permission helpers — tách riêng để tránh circular import."""
-import config
+
+from . import config
 
 
 def is_owner(user_id: int) -> bool:

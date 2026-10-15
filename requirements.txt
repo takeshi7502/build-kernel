@@ -1,8 +1,5 @@
 python-telegram-bot[ext]==21.*
 aiohttp
-aiodns
 python-dotenv
-telethon
-ruamel.yaml
 motor
-aiofiles 
+tzdata; sys_platform == "win32"

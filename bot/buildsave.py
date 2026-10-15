@@ -7,76 +7,103 @@ Cấu hình cố định: Stable, no custom version, ZRAM/BBG/SUSFS=on, KPM=off,
 """
 
 import html
-from typing import Dict, Any
 from datetime import datetime, timezone
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, constants
+from typing import Any, Dict
+
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, constants
 from telegram.ext import (
-    ContextTypes, ConversationHandler, CallbackQueryHandler, CommandHandler, MessageHandler, filters
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+    ConversationHandler,
+    MessageHandler,
+    filters,
 )
-from permissions import is_admin
-from config import send_admin_notification
-from gki import (
-    VARIANTS, TARGET_META, SUB_LEVELS, SUB_LEVEL_META,
-    CUSTOM_WORKFLOW, _del_msg_job, TOGGLE_FEATURES, SUPP_OP_TARGETS
+
+from .gki import (
+    CUSTOM_WORKFLOW,
+    SUB_LEVEL_META,
+    SUB_LEVELS,
+    SUPP_OP_TARGETS,
+    TARGET_META,
+    TOGGLE_FEATURES,
+    VARIANTS,
+    _del_msg_job,
 )
+from .permissions import is_admin
 
 # States
 BS_VARIANT = 1
-BS_TARGET  = 2
-BS_SUB     = 3
+BS_TARGET = 2
+BS_SUB = 3
 BS_TOGGLES = 4
+
 
 def _bs_toggles_keyboard(inputs: dict, selected_target: str) -> InlineKeyboardMarkup:
     rows = []
     btns = []
     for label, key, _ in TOGGLE_FEATURES:
-        if key == "supp_op" and selected_target not in SUPP_OP_TARGETS: continue
-        if key == "cancel_susfs": active = not inputs.get(key, True)
-        else: active = inputs.get(key, False)
+        if key == "supp_op" and selected_target not in SUPP_OP_TARGETS:
+            continue
+        if key == "cancel_susfs":
+            active = not inputs.get(key, True)
+        else:
+            active = inputs.get(key, False)
         icon = "✅" if active else "⬜"
         btns.append(InlineKeyboardButton(f"{icon} {label}", callback_data=f"bstog:{key}"))
-    for i in range(0, len(btns), 2): rows.append(btns[i:i+2])
-    rows.append([
-        InlineKeyboardButton("⬅️ Quay lại", callback_data="bsback:target"),
-        InlineKeyboardButton("🚀 Xác nhận Build", callback_data="bs:confirm")
-    ])
+    for i in range(0, len(btns), 2):
+        rows.append(btns[i : i + 2])
+    rows.append(
+        [
+            InlineKeyboardButton("⬅️ Quay lại", callback_data="bsback:target"),
+            InlineKeyboardButton("🚀 Xác nhận Build", callback_data="bs:confirm"),
+        ]
+    )
     rows.append([InlineKeyboardButton("❌ Hủy", callback_data="bs:cancel")])
     return InlineKeyboardMarkup(rows)
 
+
 # Cấu hình cố định cho build lưu trữ
 _FIXED_CONFIG = {
-    "kernelsu_branch":  "Stable(标准)",
-    "version":          "",          # mặc định
-    "use_zram":         True,
-    "use_bbg":          True,
-    "use_kpm":          False,
-    "cancel_susfs":     False,       # SUSFS bật
-    "release_type":     "Actions",
+    "kernelsu_branch": "Stable(标准)",
+    "version": "",  # mặc định
+    "use_zram": True,
+    "use_bbg": True,
+    "use_kpm": False,
+    "cancel_susfs": False,  # SUSFS bật
+    "release_type": "Actions",
 }
 
 _TARGET_LABELS = [
-    ("A12 — 5.10",  "build_a12_5_10"),
-    ("A13 — 5.15",  "build_a13_5_15"),
-    ("A14 — 6.1",   "build_a14_6_1"),
-    ("A15 — 6.6",   "build_a15_6_6"),
-    ("A16 — 6.12",  "build_a16_6_12"),
+    ("A12 — 5.10", "build_a12_5_10"),
+    ("A13 — 5.15", "build_a13_5_15"),
+    ("A14 — 6.1", "build_a14_6_1"),
+    ("A15 — 6.6", "build_a15_6_6"),
+    ("A16 — 6.12", "build_a16_6_12"),
 ]
+
 
 def _cancel_kb():
     return InlineKeyboardMarkup([[InlineKeyboardButton("❌ Hủy", callback_data="bs:cancel")]])
 
+
 def _back_cancel_kb(back_cb: str):
-    return InlineKeyboardMarkup([[
-        InlineKeyboardButton("⬅️ Quay lại", callback_data=back_cb),
-        InlineKeyboardButton("❌ Hủy", callback_data="bs:cancel"),
-    ]])
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("⬅️ Quay lại", callback_data=back_cb),
+                InlineKeyboardButton("❌ Hủy", callback_data="bs:cancel"),
+            ]
+        ]
+    )
 
 
 class BuildSaveFlow:
-    def __init__(self, gh, storage, config):
+    def __init__(self, gh, storage, config, update_batch_message):
         self.gh = gh
         self.storage = storage
         self.config = config
+        self.update_batch_message = update_batch_message
 
     # ─── /build entry ────────────────────────────────────────────────
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -91,7 +118,7 @@ class BuildSaveFlow:
                 "use_bbg": _FIXED_CONFIG["use_bbg"],
                 "use_kpm": _FIXED_CONFIG["use_kpm"],
                 "cancel_susfs": _FIXED_CONFIG["cancel_susfs"],
-                "supp_op": False
+                "supp_op": False,
             }
         }
 
@@ -107,19 +134,26 @@ class BuildSaveFlow:
             await update.message.delete()
         except Exception:
             pass
-        thread_id = update.effective_message.message_thread_id if (update.effective_message and update.effective_message.is_topic_message) else None
-        await context.bot.send_message(
+        thread_id = (
+            update.effective_message.message_thread_id
+            if (update.effective_message and update.effective_message.is_topic_message)
+            else None
+        )
+        sent = await context.bot.send_message(
             chat_id=update.effective_chat.id,
             message_thread_id=thread_id,
             text="🔨 <b>Build Kernel Lưu Trữ</b>\n\nChọn <b>KernelSU Variant</b>:",
             reply_markup=InlineKeyboardMarkup(rows),
-            parse_mode="HTML"
+            parse_mode="HTML",
         )
+        context.user_data["bs_message_id"] = sent.message_id
+        context.user_data["bs_chat_id"] = sent.chat_id
         return BS_VARIANT
 
     # ─── Chọn Variant ────────────────────────────────────────────────
     async def set_variant(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        q = update.callback_query; await q.answer()
+        q = update.callback_query
+        await q.answer()
         variant = q.data.split(":", 1)[1]
         context.user_data["bs"]["variant"] = variant
 
@@ -129,32 +163,35 @@ class BuildSaveFlow:
             while len(rows) <= row_idx:
                 rows.append([])
             rows[row_idx].append(InlineKeyboardButton(label, callback_data=f"bstgt:{key}"))
-        rows.append([
-            InlineKeyboardButton("⬅️", callback_data="bsback:variant"),
-            InlineKeyboardButton("❌ Hủy", callback_data="bs:cancel"),
-        ])
+        rows.append(
+            [
+                InlineKeyboardButton("⬅️", callback_data="bsback:variant"),
+                InlineKeyboardButton("❌ Hủy", callback_data="bs:cancel"),
+            ]
+        )
 
         await q.edit_message_text(
             f"🔨 <b>Build Kernel Lưu Trữ</b>\n"
             f"• Variant: <b>{variant}</b>\n\n"
             "Chọn <b>Android Target</b>:",
             reply_markup=InlineKeyboardMarkup(rows),
-            parse_mode="HTML"
+            parse_mode="HTML",
         )
         return BS_TARGET
 
     # ─── Chọn Target ─────────────────────────────────────────────────
     async def set_target(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        q = update.callback_query; await q.answer()
+        q = update.callback_query
+        await q.answer()
         target_key = q.data.split(":", 1)[1]
         context.user_data["bs"]["target_key"] = target_key
 
         label = next((l for l, k in _TARGET_LABELS if k == target_key), target_key)
         context.user_data["bs"]["target_label"] = label
         context.user_data["bs"]["subs"] = []  # Khởi tạo list trống
-        
+
         return await self.render_sub_menu(q, context)
-        
+
     async def render_sub_menu(self, q, context):
         bs = context.user_data["bs"]
         target_key = bs.get("target_key", "")
@@ -162,53 +199,64 @@ class BuildSaveFlow:
         label = bs.get("target_label", "")
         subs_list = SUB_LEVELS.get(target_key, [])
         selected = bs.get("subs", [])
-        
+
         _, kernel_ver = TARGET_META.get(target_key, ("", "?"))
         rows, row = [], []
-        
+
         for sv in subs_list:
             is_selected = sv in selected
             icon = "✅" if is_selected else "⬜"
             btn_label = f"{icon} {kernel_ver}.{sv}" if sv != "X" else f"{icon} {kernel_ver}.X (LTS)"
             row.append(InlineKeyboardButton(btn_label, callback_data=f"bstoggle:{sv}"))
             if len(row) == 3:
-                rows.append(row); row = []
-        if row: rows.append(row)
-        
+                rows.append(row)
+                row = []
+        if row:
+            rows.append(row)
+
         # Nút chọn tất cả / Bỏ chọn
         if len(selected) == len(subs_list) and subs_list:
             rows.append([InlineKeyboardButton("✖️ Bỏ Chọn Tất Cả", callback_data="bstoggle:none")])
         else:
             rows.append([InlineKeyboardButton("✨ Chọn Tất Cả", callback_data="bstoggle:all")])
-            
+
         if selected:
-            rows.append([InlineKeyboardButton(f"➡️ Tiếp tục ({len(selected)} bản)", callback_data="bs:next_toggles")])
-            
-        rows.append([
-            InlineKeyboardButton("⬅️", callback_data="bsback:target"),
-            InlineKeyboardButton("❌ Hủy", callback_data="bs:cancel"),
-        ])
-        
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        f"➡️ Tiếp tục ({len(selected)} bản)", callback_data="bs:next_toggles"
+                    )
+                ]
+            )
+
+        rows.append(
+            [
+                InlineKeyboardButton("⬅️", callback_data="bsback:target"),
+                InlineKeyboardButton("❌ Hủy", callback_data="bs:cancel"),
+            ]
+        )
+
         await q.edit_message_text(
             f"🔨 <b>Build Kernel Lưu Trữ</b>\n"
             f"• Variant: <b>{variant}</b>\n"
             f"• Target: <b>{label}</b>\n\n"
             "Chọn <b>Sub-level</b> (chọn nhiều để xếp hàng đợi):",
             reply_markup=InlineKeyboardMarkup(rows),
-            parse_mode="HTML"
+            parse_mode="HTML",
         )
         return BS_SUB
 
     # ─── Chọn Sub-level ─────────────────────────────────────────────
     async def toggle_sub(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        q = update.callback_query; await q.answer()
+        q = update.callback_query
+        await q.answer()
         sv = q.data.split(":", 1)[1]
         bs = context.user_data["bs"]
-        
+
         target_key = bs["target_key"]
         subs_list = SUB_LEVELS.get(target_key, [])
         selected = bs.get("subs", [])
-        
+
         if sv == "all":
             bs["subs"] = list(subs_list)
         elif sv == "none":
@@ -218,133 +266,136 @@ class BuildSaveFlow:
                 selected.remove(sv)
             else:
                 selected.append(sv)
-                
+
         return await self.render_sub_menu(q, context)
 
     # ─── Màn hình Tính năng chung ────────────────────────────────────
     async def next_toggles(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        q = update.callback_query; await q.answer()
+        q = update.callback_query
+        await q.answer()
         bs = context.user_data.get("bs", {})
         selected_subs = bs.get("subs", [])
-        if not selected_subs: return BS_SUB
-        
+        if not selected_subs:
+            return BS_SUB
+
         target_key = bs.get("target_key", "")
         inputs = bs.get("inputs", {})
         await q.edit_message_text(
             f"🔨 <b>Build Kernel Lưu Trữ</b>\n\n<b>Tùy chỉnh tính năng chung cho {len(selected_subs)} bản build:</b>",
             reply_markup=_bs_toggles_keyboard(inputs, target_key),
-            parse_mode="HTML"
+            parse_mode="HTML",
         )
         return BS_TOGGLES
 
     async def toggle_feature(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        q = update.callback_query; await q.answer()
+        q = update.callback_query
+        await q.answer()
         _, key = q.data.split(":", 1)
         bs = context.user_data.get("bs", {})
         inputs = bs.setdefault("inputs", {})
         target_key = bs.get("target_key", "")
-        
+
         inputs[key] = not inputs.get(key, False)
-        
+
         await q.edit_message_text(
             f"🔨 <b>Build Kernel Lưu Trữ</b>\n\n<b>Tùy chỉnh tính năng chung cho {len(bs.get('subs', []))} bản build:</b>",
             reply_markup=_bs_toggles_keyboard(inputs, target_key),
-            parse_mode="HTML"
+            parse_mode="HTML",
         )
         return BS_TOGGLES
 
     # ─── Confirm → Queue Dispatch ───────────────────────────────────
     async def do_dispatch(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         import uuid
-        q = update.callback_query; await q.answer()
+
+        q = update.callback_query
+        await q.answer()
         user = update.effective_user
         bs = context.user_data.get("bs", {})
 
         variant = bs.get("variant", "SukiSU")
         target_key = bs.get("target_key", "")
         selected_subs = bs.get("subs", [])
-        
+
         if not selected_subs:
             await q.answer("Bạn chưa chọn bản nào!", show_alert=True)
             return BS_SUB
 
         android_ver, kernel_ver = TARGET_META.get(target_key, ("", ""))
         batch_id = str(uuid.uuid4())
-        
+
         msg = await q.edit_message_text(
             f"⏳ Đang xếp hàng đợi {len(selected_subs)} bản build vào hệ thống..."
         )
         batch_msg_id = msg.message_id
-        
+
         inputs = bs.get("inputs", {})
-        
+
         now_iso = datetime.now(timezone.utc).isoformat()
         jobs_to_create = []
         index = 1
-        
+
         for sv in selected_subs:
             meta = SUB_LEVEL_META.get(target_key, {}).get(sv, ("lts", ""))
             full_ver = f"{kernel_ver}.{sv}" if sv != "X" else f"{kernel_ver}.X"
 
             dispatch_inputs = {
-                "android_version":   android_ver,
-                "kernel_version":    kernel_ver,
-                "sub_level":         sv,
-                "os_patch_level":    meta[0],
-                "revision":          meta[1],
-                "kernelsu_variant":  variant,
-                "kernelsu_branch":   _FIXED_CONFIG["kernelsu_branch"],
-                "version":           _FIXED_CONFIG["version"],
-                "use_zram":          inputs.get("use_zram", True),
-                "use_bbg":           inputs.get("use_bbg", True),
-                "use_kpm":           inputs.get("use_kpm", False),
-                "cancel_susfs":      inputs.get("cancel_susfs", False),
-                "supp_op":           inputs.get("supp_op", False)
+                "android_version": android_ver,
+                "kernel_version": kernel_ver,
+                "sub_level": sv,
+                "os_patch_level": meta[0],
+                "revision": meta[1],
+                "kernelsu_variant": variant,
+                "kernelsu_branch": _FIXED_CONFIG["kernelsu_branch"],
+                "version": _FIXED_CONFIG["version"],
+                "use_zram": inputs.get("use_zram", True),
+                "use_bbg": inputs.get("use_bbg", True),
+                "use_kpm": inputs.get("use_kpm", False),
+                "cancel_susfs": inputs.get("cancel_susfs", False),
+                "supp_op": inputs.get("supp_op", False),
             }
 
             job = {
-                "type":          "buildsave",
-                "repo":          self.config.GKI_REPO,
+                "type": "buildsave",
+                "repo": self.config.GKI_REPO,
                 "workflow_file": CUSTOM_WORKFLOW,
-                "ref":           self.config.GKI_DEFAULT_BRANCH,
-                "inputs":        dispatch_inputs,
-                "user_id":       user.id,
-                "user_name":     user.full_name,
-                "chat_id":       update.effective_chat.id,
-                "created_at":    now_iso,
-                "run_id":        None,
-                "status":        "queued",
-                "conclusion":    None,
-                "notified":      False,
-                
-                "batch_id":      batch_id,
-                "batch_msg_id":  batch_msg_id,
+                "ref": self.config.GKI_DEFAULT_BRANCH,
+                "inputs": dispatch_inputs,
+                "user_id": user.id,
+                "user_name": user.full_name,
+                "chat_id": update.effective_chat.id,
+                "created_at": now_iso,
+                "run_id": None,
+                "status": "queued",
+                "conclusion": None,
+                "notified": False,
+                "batch_id": batch_id,
+                "batch_msg_id": batch_msg_id,
                 "message_thread_id": msg.message_thread_id,
-                "batch_total":   len(selected_subs),
-                "batch_index":   index,
-                
-                "bs_variant":    variant,
-                "bs_android":    android_ver,
+                "batch_total": len(selected_subs),
+                "batch_index": index,
+                "bs_variant": variant,
+                "bs_android": android_ver,
                 "bs_kernel_ver": kernel_ver,
-                "bs_sub_level":  sv,
-                "bs_full_ver":   full_ver,
+                "bs_sub_level": sv,
+                "bs_full_ver": full_ver,
             }
             jobs_to_create.append(job)
             index += 1
 
         for j in jobs_to_create:
-             await self.storage.add_job(j)
-             
+            await self.storage.add_job(j)
+
         # Gửi thông điệp cập nhật lần đầu tiên
-        from main import update_batch_message
-        await update_batch_message(batch_id, self.storage, context.bot)
+        await self.update_batch_message(batch_id, self.storage, context.bot)
 
         context.user_data.pop("bs", None)
         return ConversationHandler.END
 
     # ─── Back navigation ────────────────────────────────────────────
     async def back(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        q = update.callback_query; await q.answer()
+        q = update.callback_query
+        await q.answer()
         step = q.data.split(":", 1)[1]
         if step == "variant":
             context.user_data["bs"] = {}
@@ -367,7 +418,7 @@ class BuildSaveFlow:
         await q.edit_message_text(
             "🔨 <b>Build Kernel Lưu Trữ</b>\n\nChọn <b>KernelSU Variant</b>:",
             reply_markup=InlineKeyboardMarkup(rows),
-            parse_mode="HTML"
+            parse_mode="HTML",
         )
         return BS_VARIANT
 
@@ -379,14 +430,16 @@ class BuildSaveFlow:
             while len(rows) <= row_idx:
                 rows.append([])
             rows[row_idx].append(InlineKeyboardButton(label, callback_data=f"bstgt:{key}"))
-        rows.append([
-            InlineKeyboardButton("⬅️", callback_data="bsback:variant"),
-            InlineKeyboardButton("❌ Hủy", callback_data="bs:cancel"),
-        ])
+        rows.append(
+            [
+                InlineKeyboardButton("⬅️", callback_data="bsback:variant"),
+                InlineKeyboardButton("❌ Hủy", callback_data="bs:cancel"),
+            ]
+        )
         await q.edit_message_text(
             f"🔨 <b>Build Kernel Lưu Trữ</b>\n• Variant: <b>{variant}</b>\n\nChọn <b>Android Target</b>:",
             reply_markup=InlineKeyboardMarkup(rows),
-            parse_mode="HTML"
+            parse_mode="HTML",
         )
         return BS_TARGET
 
@@ -396,13 +449,17 @@ class BuildSaveFlow:
 
     # ─── Cancel ─────────────────────────────────────────────────────
     async def cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        q = update.callback_query; await q.answer()
+        q = update.callback_query
+        await q.answer()
         context.user_data.pop("bs", None)
         await q.edit_message_text("❌ Đã hủy lệnh build lưu trữ.")
         return ConversationHandler.END
+
     async def timeout(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = update.effective_user
-        mention = f'<a href="tg://user?id={user.id}">{html.escape(user.full_name)}</a>' if user else 'Bạn'
+        mention = (
+            f'<a href="tg://user?id={user.id}">{html.escape(user.full_name)}</a>' if user else "Bạn"
+        )
         notice = f"<b><blockquote>⏳ {mention}, phiên /build đã hết hạn sau 60s.</blockquote></b>"
         q = update.callback_query
         if q:
@@ -420,27 +477,30 @@ class BuildSaveFlow:
         return ConversationHandler.END
 
 
-
-def build_buildsave_conversation(gh, storage, cfg):
-    flow = BuildSaveFlow(gh, storage, cfg)
+def build_buildsave_conversation(gh, storage, cfg, update_batch_message):
+    flow = BuildSaveFlow(gh, storage, cfg, update_batch_message)
     cancel_h = CallbackQueryHandler(flow.cancel, pattern=r"^bs:cancel$")
     back_h = CallbackQueryHandler(flow.back, pattern=r"^bsback:.+$")
-    return ConversationHandler(
+    conversation = ConversationHandler(
         entry_points=[CommandHandler("build", flow.start)],
         states={
-            BS_VARIANT:  [CallbackQueryHandler(flow.set_variant, pattern=r"^bsvar:.+$"), cancel_h],
-            BS_TARGET:   [CallbackQueryHandler(flow.set_target,  pattern=r"^bstgt:.+$"), back_h, cancel_h],
-            BS_SUB:      [
-                CallbackQueryHandler(flow.toggle_sub,   pattern=r"^bstoggle:.+$"), 
-                CallbackQueryHandler(flow.next_toggles, pattern=r"^bs:next_toggles$"), 
-                back_h, 
-                cancel_h
-            ],
-            BS_TOGGLES:  [
-                CallbackQueryHandler(flow.toggle_feature, pattern=r"^bstog:.+$"),
-                CallbackQueryHandler(flow.do_dispatch,    pattern=r"^bs:confirm$"),
+            BS_VARIANT: [CallbackQueryHandler(flow.set_variant, pattern=r"^bsvar:.+$"), cancel_h],
+            BS_TARGET: [
+                CallbackQueryHandler(flow.set_target, pattern=r"^bstgt:.+$"),
                 back_h,
-                cancel_h
+                cancel_h,
+            ],
+            BS_SUB: [
+                CallbackQueryHandler(flow.toggle_sub, pattern=r"^bstoggle:.+$"),
+                CallbackQueryHandler(flow.next_toggles, pattern=r"^bs:next_toggles$"),
+                back_h,
+                cancel_h,
+            ],
+            BS_TOGGLES: [
+                CallbackQueryHandler(flow.toggle_feature, pattern=r"^bstog:.+$"),
+                CallbackQueryHandler(flow.do_dispatch, pattern=r"^bs:confirm$"),
+                back_h,
+                cancel_h,
             ],
             ConversationHandler.TIMEOUT: [
                 CallbackQueryHandler(flow.timeout),
@@ -453,3 +513,31 @@ def build_buildsave_conversation(gh, storage, cfg):
         persistent=False,
         conversation_timeout=60,
     )
+
+    def guarded(callback):
+        async def dispatch(update, context):
+            message = update.effective_message
+            owned = (
+                message is not None
+                and context.user_data.get("bs") is not None
+                and message.message_id == context.user_data.get("bs_message_id")
+                and message.chat_id == context.user_data.get("bs_chat_id")
+            )
+            if not owned or not await is_admin(update.effective_user.id, storage):
+                await update.callback_query.answer(
+                    "Phiên này không thuộc về bạn hoặc đã hết hạn.", show_alert=True
+                )
+                return None
+            return await callback(update, context)
+
+        return dispatch
+
+    wrapped = set()
+    for state, handlers in conversation.states.items():
+        if state == ConversationHandler.TIMEOUT:
+            continue
+        for handler in handlers:
+            if id(handler) not in wrapped:
+                handler.callback = guarded(handler.callback)
+                wrapped.add(id(handler))
+    return conversation

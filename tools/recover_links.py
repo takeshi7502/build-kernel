@@ -1,92 +1,120 @@
-import os
+"""Recover dashboard links from recent GitHub artifacts (preview by default)."""
+
+import argparse
 import json
-import urllib.request
+import os
 import re
-import time
+import sys
+import tempfile
+import urllib.error
+import urllib.request
+from pathlib import Path
 
-def load_env():
-    env = {}
+from dotenv import load_dotenv
+
+
+def gh_api(url, token):
+    headers = {"User-Agent": "kernel-bot-maintenance", "Accept": "application/vnd.github+json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    request = urllib.request.Request(url, headers=headers)
     try:
-        with open('bot/.env', 'r') as f:
-            for line in f:
-                if '=' in line and not line.startswith('#'):
-                    k, v = line.strip().split('=', 1)
-                    env[k] = v.strip('"\'')
-    except Exception:
-        pass
-    return env
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return json.load(response)
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(
+            f"GitHub trả HTTP {exc.code}; kiểm tra token, quyền truy cập hoặc rate limit."
+        ) from exc
 
-env = load_env()
-gh_token = env.get('GITHUB_TOKEN', '')
 
-def gh_api(url):
-    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-    if gh_token:
-        req.add_header('Authorization', f'Bearer {gh_token}')
-    while True:
+def recover_links(android, kernel, filepath, owner, repo, token, *, apply=False):
+    data = json.loads(filepath.read_text(encoding="utf-8"))
+    if not isinstance(data, dict) or not isinstance(data.get("entries"), list):
+        raise ValueError("File dashboard phải chứa danh sách entries.")
+    repository = f"{owner}/{repo}"
+    url = f"https://api.github.com/repos/{repository}/actions/runs?status=success&event=workflow_dispatch&per_page=100"
+    runs = gh_api(url, token).get("workflow_runs", [])
+    pattern = re.compile(
+        r"^(SukiSU|ReSukiSU|KittiSU|MKSU|Next)_kernel-"
+        + re.escape(android)
+        + "-"
+        + re.escape(kernel)
+        + r"-(\d+)(?:\D|$)"
+    )
+    found = {}
+    for run in runs:
+        artifacts = gh_api(
+            f"https://api.github.com/repos/{repository}/actions/runs/{int(run['id'])}/artifacts?per_page=100",
+            token,
+        )
+        for artifact in artifacts.get("artifacts", []):
+            if artifact.get("expired"):
+                continue
+            match = pattern.match(artifact.get("name", ""))
+            if match:
+                # API returns newest first: keep the newest run for each variant.
+                found.setdefault(f"{kernel}.{match.group(2)}", {}).setdefault(
+                    match.group(1), run["id"]
+                )
+    changed = 0
+    for entry in data["entries"]:
+        for variant, run_id in found.get(entry.get("kernel"), {}).items():
+            downloads = entry.setdefault("downloads", {})
+            link = f"https://nightly.link/{repository}/actions/runs/{run_id}"
+            if downloads.get(variant) != link:
+                downloads[variant] = link
+                changed += 1
+                print(f"{entry['kernel']} / {variant} -> {link}")
+    if apply and changed:
+        temporary = None
         try:
-            with urllib.request.urlopen(req) as res:
-                return json.loads(res.read().decode())
-        except urllib.error.HTTPError as e:
-            if e.code in (403, 429):
-                print(f"Rate limited by GitHub. Sleeping 60s...")
-                time.sleep(60)
-            else:
-                raise e
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=filepath.parent, delete=False
+            ) as stream:
+                temporary = Path(stream.name)
+                json.dump(data, stream, indent=2, ensure_ascii=False)
+                stream.write("\n")
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, filepath)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+    print(
+        f"{'Đã cập nhật' if apply else 'Sẽ cập nhật'} {changed} link; chỉ xét 100 run thành công gần nhất."
+    )
 
-def recover_for_android(android_ver_name, kernel_version, filepath):
-    print(f"\n--- RECOVERING FOR {android_ver_name} {kernel_version} ---")
-    if not os.path.exists(filepath):
-        print(f"File {filepath} does not exist.")
-        return
-        
-    print(f"Using Token: {'YES' if gh_token else 'NO (Expect rate limits after 60 reqs)'}")
-    
-    # 1. Fetch runs
-    print("Fetching successful workflow_dispatch runs from GitHub API...")
-    url = "https://api.github.com/repos/takeshi7502/GKI_KernelSU_SUSFS/actions/runs?status=success&event=workflow_dispatch&per_page=100"
-    runs_data = gh_api(url)
-    
-    total_runs = runs_data.get('workflow_runs', [])
-    print(f"Loaded {len(total_runs)} recent successful runs.")
-    
-    found_map = {}
-    
-    for i, r in enumerate(total_runs, 1):
-        try:
-            artifacts = gh_api(r['artifacts_url'])
-            has_related = False
-            for a in artifacts.get('artifacts', []):
-                # match names like: MKSU_kernel-android12-5.10-246
-                pattern = r'^(SukiSU|ReSukiSU|KittiSU|MKSU|Next)_kernel-' + android_ver_name + r'-' + kernel_version.replace('.', r'\.') + r'-(\d+)'
-                m = re.match(pattern, a['name'])
-                if m:
-                    var = m.group(1)
-                    ver = f"{kernel_version}.{m.group(2)}"
-                    if ver not in found_map.get(var, []):
-                        found_map.setdefault(ver, {})[var] = r['id']
-                        print(f"  [{i}/{len(total_runs)}] Mapped: {ver} {var} -> Run {r['id']}")
-                        has_related = True
-        except Exception as e:
-            print(f"Error fetching artifacts for run {r['id']}: {e}")
-            
-    # 2. Patch JSON
-    data = json.load(open(filepath, encoding='utf-8'))
-    patched = 0
-    
-    for e in data.get('entries', []):
-        k = e['kernel']
-        if k in found_map:
-            dl = e.get('downloads', {})
-            for var, rid in found_map[k].items():
-                dl[var] = f"https://nightly.link/takeshi7502/GKI_KernelSU_SUSFS/actions/runs/{rid}"
-            e['downloads'] = dl
-            patched += 1
 
-    with open(filepath, 'w', encoding='utf-8') as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-        
-    print(f"Successfully patched {patched} entries in {filepath}!")
+def main():
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("android", help="Ví dụ: android12")
+    parser.add_argument("kernel", help="Ví dụ: 5.10")
+    parser.add_argument("file", type=Path, help="File web/data/...json cần khôi phục")
+    parser.add_argument("--owner")
+    parser.add_argument("--repo")
+    parser.add_argument("--apply", action="store_true", help="Ghi file; mặc định chỉ xem trước")
+    args = parser.parse_args()
+    load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+    owner = args.owner or os.getenv("GITHUB_OWNER", "").strip()
+    repo = args.repo or os.getenv("GKI_REPO", "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", owner) or not re.fullmatch(r"[A-Za-z0-9_.-]+", repo):
+        parser.error("Cần GITHUB_OWNER và GKI_REPO trong .env hoặc --owner/--repo hợp lệ.")
+    try:
+        recover_links(
+            args.android,
+            args.kernel,
+            args.file.resolve(),
+            owner,
+            repo,
+            os.getenv("GITHUB_TOKEN", "").strip(),
+            apply=args.apply,
+        )
+    except (OSError, ValueError, RuntimeError) as exc:
+        parser.exit(1, f"Lỗi: {exc}\n")
 
-if __name__ == '__main__':
-    recover_for_android("android12", "5.10", "web/data/android12/5.10.json")
+
+if __name__ == "__main__":
+    main()

@@ -1,125 +1,174 @@
-# 🔧 GKI Kernel Build System
+# Kernel Build Telegram Bot
 
-Hệ thống tự động hóa quá trình compile GKI & Custom Kernel thông qua GitHub Actions, quản lý bằng Telegram Bot và theo dõi qua Web Dashboard Realtime.
+Bot Telegram quản lý build GKI/OnePlus bằng GitHub Actions và cung cấp dashboard theo dõi tiến trình. Kernel được biên dịch trên runner của GitHub Actions; máy chạy bot chỉ điều phối, lưu trạng thái và gửi thông báo.
 
-## ✨ Tính năng nổi bật
+Source hiện chỉ chạy một bot Telegram qua Bot API. Không cần tài khoản Telegram cá nhân, API ID/hash, string session hay tiến trình Telethon.
 
-- 🤖 **Telegram Bot Management** — Tự động deploy Kernel Build flow thông qua hội thoại (`/gki`) hoặc lệnh (`/build`). 
-- 🌐 **Web Dashboard Realtime** — Giao diện hiển thị trực tiếp tiến trình build của toàn bộ server, trạng thái queue, và logs của từng phiên bản.
-- 📦 **Batch Queue System** — Lên lịch build cùng lúc hàng loạt version (ví dụ: 20 bản 5.10.x), hệ thống tự xếp hàng và quản lý slot GitHub.
-- 🗄️ **Hybrid Storage** — Lưu trữ mượt mà kết hợp tính linh hoạt của Local JSON + MongoDB cho độ nạp tối ưu, lưu trữ lâu dài.
-- 📰 **Telegraph & Downloads** — Tự động get artifacts và tạo link tải trực tiếp vô cùng sạch sẽ thông qua bài viết Telegraph.
-- 🗑️ **Cancel & Cleanup** — Dừng một chuỗi build đang chạy (`/cancelbatch`) hoặc huỷ đơn lẻ các tiến trình lỗi, bot sẽ tự dọn rác cả trên GitHub Actions để tiết kiệm bộ nhớ.
-- 🔐 **Multi-role Permission** — Quản trị viên/User whitelist, cấp key giới hạn lượt build cho mem.
-
-## 📂 Kiến trúc hệ thống
+## Cấu trúc source
 
 ```text
-├── bot/                 # Source code Bot Telegram (Python)
-│   ├── main.py          # Entry point chính của Bot & Poller
-│   ├── web_sync.py      # Core đồng bộ trạng thái Realtime cho Web Dashboard
-│   ├── buildsave.py     # Flow dành riêng cho chức năng Batch Build (hàng đợi)
-│   ├── gki.py           # Flow tạo phân nhánh build đơn cơ bản
-│   └── userbot.py       # Module telethon dự phòng
-├── web/                 # Source code Web Dashboard (Node.js/React/Vite)
-│   ├── index.html       
-│   ├── js/              # Mã nguồn xử lý render giao diện thẻ Masonry theo từng Batch
-│   ├── src/             # Component mở rộng
-│   └── data/            # Thư mục giao tiếp CSDL JSON JSON giữa Bot và Frontend
-├── ecosystem.config.js  # Cấu hình PM2 để Start đồng loạt nhiều dịch vụ
-└── requirements.txt     # Python Dependencies
+bot/                         Backend Python
+  __main__.py                Entry point: python -m bot
+  config.py                  Đọc và kiểm tra cấu hình .env
+  main.py                    Telegram handlers, poller, HTTP server
+  github.py                  GitHub API client dùng chung
+  catalog.py                 Cập nhật link tải kernel, giữ catalog đã có
+  backups.py                 Kiểm tra ZIP backup trước khi khôi phục
+  gki.py                     Hội thoại /gki
+  oki.py                     Hội thoại /oki
+  buildsave.py               Hội thoại build hàng loạt
+  permissions.py             Quyền owner/admin/member
+  storage.py                 Local JSON và đồng bộ MongoDB tùy chọn
+  web_sync.py                Tạo dữ liệu dashboard từ lịch sử build
+deploy/                      Cấu hình chạy dịch vụ bằng PM2
+scripts/                     Tự cấu hình domain, Nginx, HTTPS và .env
+docs/                        Kiến trúc, vận hành và chuyển từ bản cũ
+tools/                       Công cụ bảo trì tùy chọn; không chạy cùng bot
+web/                         Dashboard HTML/JavaScript/SCSS, build bằng Webpack
+  data/                      Catalog JSON do bot tạo/cập nhật
+  dist/                      Bundle tự build, không theo dõi Git
+tests/                       Kiểm tra local, không đẩy lên Git
+.env.example                 Mẫu cấu hình có giải thích
+requirements.txt             Dependency để chạy bot
+start.sh                     Cài đặt/cập nhật dependency và khởi chạy
+run.sh                       Thao tác hằng ngày
 ```
 
-## 📝 Danh sách lệnh chính trên Telegram
+Đọc thêm [kiến trúc và dữ liệu](docs/architecture.md), [nâng cấp từ bản cũ](docs/migration.md) và [công cụ bảo trì](tools/README.md).
 
-| Lệnh | Role | Mô tả |
-|------|------|-------|
-| `/gki` | Admin / User | Bắt đầu tạo 1 bản build riêng lẻ bằng giao diện bấm nút |
-| `/build` | Admin | Tạo Batch Queue (build hàng loạt nhiều version cùng lúc vào lưu trữ) |
-| `/st` | Admin | Kiểm tra tiến trình tất cả các job đang chờ/đang build |
-| `/list` | Admin | Lịch sử build thành công & Lấy link tải Telegraph |
-| `/cancel _id` | Admin | Huỷ 1 tiến trình đang chạy đơn lẻ |
-| `/cancelbatch_id` | Admin | Huỷ toàn bộ một đợt batch queuing đang chạy để clear slot |
-| `/key` | Owner | Quản lý whitelist member (Tạo thêm lượt build cho mem) |
+## Cài mới trên Ubuntu/Debian
 
----
+Chuẩn bị Python 3.10 trở lên, Node.js/npm phù hợp dependency trong `web/package.json`, Git và quyền `sudo` để cài package. Chạy bot bằng user thường, dùng cùng user đó cho mọi lệnh PM2.
 
-## 🚀 Hướng dẫn Triển khai Server (VPS Ubuntu/Debian)
-
-Hệ thống được thiết kế tối ưu nhất khi chạy với **PM2** và có **MongoDB**.
-
-### Bước 1: Cài đặt phần mềm cơ sở
-```bash
-sudo apt update && sudo apt upgrade -y
-sudo apt install python3 python3-pip python3-venv git curl -y
-
-# Cài Node.js & PM2
-curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
-sudo apt-get install -y nodejs
-sudo npm install -g pm2
-```
-
-### Bước 2: Clone Repo
 ```bash
 git clone https://github.com/takeshi7502/build-kernel.git
 cd build-kernel
-```
-
-### Bước 3: Build Web Dashboard (Frontend)
-```bash
-cd web
-npm install
-npm run build
-cd ..
-```
-
-### Bước 4: Môi trường ảo Bot (Backend Python)
-```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-```
-
-### Bước 5: Cấu hình Môi trường `.env`
-Thiết lập file cấu hình bí mật:
-```bash
 cp .env.example .env
 nano .env
 ```
-Nội dung file `.env` cần chuẩn bị:
-```env
-TELEGRAM_BOT_TOKEN=7xxx:AAHxxx...
-GITHUB_TOKEN=ghp_...
-GITHUB_OWNER=Quản_trị_viên_repo_Github
-GKI_REPO=Tên_Repo_Action_Của_Bạn
-MONGO_URI=mongodb://localhost:27017/gki_build
-OWNER_ID=ID_Telegram_Của_Bạn
-ADMIN_IDS=Các_Admin_Khác
+
+Điền các giá trị bắt buộc:
+
+| Biến | Nội dung |
+| --- | --- |
+| `TELEGRAM_BOT_TOKEN` | Token bot từ BotFather |
+| `OWNER_ID` | ID Telegram dạng số của owner |
+| `GITHUB_TOKEN` | Token có quyền truy cập repository và thao tác Actions cần dùng |
+| `GITHUB_OWNER` | Owner/organization chứa repository build |
+| `GKI_REPO` | Tên repository chứa workflow GKI |
+
+Kiểm tra `GKI_DEFAULT_BRANCH`, `GKI_WORKFLOWS` và cấu hình `OKI_*` khớp repository thực tế. Token cần quyền Actions để chạy/xem/hủy workflow; các chức năng sửa file/sync fork còn cần quyền Contents tương ứng. Không dùng `GITHUB_RUNNER_TOKEN` thay cho `GITHUB_TOKEN`.
+
+```bash
+bash start.sh
+bash run.sh status
+bash run.sh logs
 ```
 
-### Bước 6: Khởi chạy toàn bộ hệ thống
-Sử dụng PM2 ecosystem để spawn toàn bộ các process liên quan:
+`start.sh` cài dependency còn thiếu trên Ubuntu/Debian, tạo `venv`, build frontend, kiểm tra cấu hình và chạy duy nhất PM2 process `gki-bot`. Thư mục dữ liệu có sẵn được giữ lại. Sau khi chạy ổn, bật khởi động cùng hệ thống theo lệnh PM2 hướng dẫn:
+
 ```bash
-pm2 start ecosystem.config.js
-pm2 save
 pm2 startup
+# Thực hiện đúng lệnh sudo PM2 vừa in ra, sau đó:
+pm2 save
 ```
 
-Kiểm tra trạng thái hệ thống:
+Dashboard mặc định chỉ lắng nghe `127.0.0.1:5000`. Muốn xem từ máy cá nhân mà chưa có domain, dùng SSH tunnel:
+
 ```bash
-pm2 status
+ssh -L 5000:127.0.0.1:5000 ubuntu@IP_VPS
 ```
 
----
+Sau đó mở `http://localhost:5000`. Để đưa web lên domain, trỏ DNS về đúng VPS và cho phép cổng 80/443 trong firewall/security group của nhà cung cấp. Nếu có nhiều bản ghi A/AAAA, mọi địa chỉ đều phải phục vụ đúng VPS; xóa bản ghi cũ. Nếu Cloudflare chặn/redirect ACME, tạm chuyển DNS only khi cấp chứng chỉ.
 
-## 🎨 Tích hợp Userbot (Telethon)
-Nếu Bot API bị giới hạn tín hiệu vì lý do nào đó, bạn có thể triển khai thêm `userbot.py` để gửi tín hiệu bypass API bot. Chỉnh sửa `.env`:
-```env
-TELEGRAM_API_ID=...
-TELEGRAM_API_HASH=...
-TELEGRAM_SESSION=gki_user
+Bot đã cài rồi thì mở `bash run.sh`, chọn **7**, hoặc chạy trực tiếp:
+
+```bash
+bash run.sh web kernel.takeshi.dev
 ```
-Khởi chạy `pm2 start bot/userbot.py --name gki-userbot`.
 
-## 📄 Bản quyền
-MIT License. Cảm ơn sự hỗ trợ từ các Open Source Repository và The Android Open Source Project. Mọi thắc mắc kỹ thuật có thể mở Issue.
+Cũng có thể nhập `https://kernel.takeshi.dev/`. Email gia hạn là tùy chọn. Script tự cài/bật Nginx và Certbot, kiểm tra ACME trên từng IP DNS, cấp SSL, chuyển HTTP sang HTTPS, bật gia hạn, lưu `DASHBOARD_URL` và `WEB_HOST=127.0.0.1` vào `.env`, rồi restart riêng bot và kiểm tra web. `.env` cũ được giữ tại `.env.bak`; cấu hình Nginx cũ được lưu trong `/etc/nginx/gki-bot-backups/`. Khi lỗi, script báo bước chưa xong và phục hồi cấu hình cũ nếu có.
+
+Cài mới cả bot và HTTPS trong một lần:
+
+```bash
+bash start.sh --domain kernel.takeshi.dev
+```
+
+`bash start.sh` không tham số cũng có menu lựa chọn khi chạy trong terminal; `--ssl` vẫn được hỗ trợ. Script không tự thay DNS hay security group của nhà cung cấp vì không có quyền truy cập tài khoản đó. Dashboard hiển thị thông tin build; không đưa dữ liệu bí mật vào tên build.
+
+## Chạy thủ công để phát triển
+
+```bash
+python -m venv venv
+source venv/bin/activate
+python -m pip install -r requirements.txt
+cd web
+npm ci
+npm run build
+cd ..
+python -m bot
+```
+
+PowerShell kích hoạt môi trường bằng `.\venv\Scripts\Activate.ps1`; entry point vẫn là `python -m bot`. Chỉ chạy một instance cho mỗi bot token và file dữ liệu. Chạy đồng thời PM2 và một phiên thủ công sẽ gây xung đột Telegram polling.
+
+## Vận hành
+
+| Lệnh | Tác dụng |
+| --- | --- |
+| `bash run.sh` | Mở menu thao tác |
+| `bash run.sh status` | Xem trạng thái process |
+| `bash run.sh logs` | Xem log trực tiếp; Ctrl+C để thoát |
+| `bash run.sh restart` | Khởi động lại bot và nạp cấu hình mới |
+| `bash run.sh update` | Cập nhật source bằng fast-forward, chưa restart |
+| `bash run.sh deploy` | Cập nhật source, cài dependency, build dashboard và restart |
+| `bash run.sh web [domain]` | Tự cấu hình domain, Nginx, SSL và link dashboard |
+
+Script update không ghi đè thay đổi local. Nếu Git báo worktree chưa sạch, kiểm tra và lưu thay đổi trước khi cập nhật. Khi sửa `.env`, dùng `restart`; khi dependency/frontend thay đổi, dùng `start.sh` hoặc `deploy`.
+
+Sao lưu `.env`, `data.json` (hoặc đường dẫn `STORAGE_PATH`) và `web/data/` trước khi nâng cấp. Không commit `.env`, token, dữ liệu runtime hay file session cũ.
+
+## Lệnh Telegram
+
+| Lệnh | Mục đích |
+| --- | --- |
+| `/start`, `/help`, `/ping` | Khởi tạo chat, xem trợ giúp và kiểm tra bot |
+| `/gki`, `/oki` | Tạo build qua hội thoại; quyền và hạn mức được kiểm tra |
+| `/dl` | Tra cứu link tải kernel |
+| `/build` | Build nhiều phiên bản theo batch, dành cho admin |
+| `/st`, `/list` | Theo dõi job và lịch sử build |
+| `/rb`, `/rebuild` | Chức năng rebuild dành cho admin |
+| `/key`, `/keyvip`, `/keys` | Quản lý key dành cho owner |
+| `/bc`, `/broadcast` | Gửi thông báo theo quyền quản trị |
+| `/data` | Khôi phục dữ liệu theo quyền quản trị |
+
+Các thao tác hủy job/batch hiển thị trong giao diện quản lý của bot. Dùng `/help` để xem cú pháp và quyền cụ thể theo phiên bản hiện tại.
+
+## Dữ liệu và MongoDB
+
+`STORAGE_PATH=data.json` mặc định lưu state tại thư mục gốc repository, không phụ thuộc thư mục làm việc khi khởi chạy. Local JSON là trạng thái hoạt động; `web/data/` là dữ liệu đã chuyển đổi cho dashboard, không thay thế backup state.
+
+MongoDB là tùy chọn. Để chạy local-only, để trống `MONGODB_URI` và đặt `MONGODB_SYNC_MODE=off`. Khi dùng MongoDB, chọn chế độ và hostname writer theo `.env.example`; chỉ dùng một instance ghi cho cùng bộ dữ liệu. `pull` tải snapshot cloud lúc khởi tạo, thay state local nếu cloud có dữ liệu; đây không phải cơ chế đồng bộ realtime hai chiều. Chi tiết ở [kiến trúc](docs/architecture.md).
+
+## Kiểm tra source
+
+```bash
+python -m compileall -q bot tools scripts
+# Nếu còn thư mục kiểm thử local:
+python -m unittest discover -s tests -t .
+cd web
+npm ci
+npm run build
+```
+
+Định dạng và kiểm tra Python thống nhất qua `pyproject.toml`:
+
+```bash
+python -m pip install -r requirements-dev.txt
+python -m ruff check bot tools scripts
+python -m ruff format --check bot tools scripts
+```
+
+Kiểm tra tự động không thay thế một lượt build thử với repository/token của bạn. Có thể kiểm tra HTTP server bằng `curl http://127.0.0.1:5000/api/data` sau khi bot chạy.
+
+`.gitignore` loại tests local, cache, dữ liệu runtime, backup, secrets và bundle `web/dist/`. Các bundle vẫn còn trên ổ đĩa; `start.sh` tự build lại khi triển khai. Giữ `web/package-lock.json`, `.env.example` và cấu hình build trong Git vì đây là đầu vào để dựng source.

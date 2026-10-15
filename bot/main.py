@@ -1,272 +1,54 @@
-import os
 import html
-# Xóa proxy để tránh lỗi kết nối trên môi trường Termux/VPS có proxy hệ thống
-os.environ.pop("HTTPS_PROXY", None)
-os.environ.pop("HTTP_PROXY", None)
-os.environ.pop("ALL_PROXY", None)
-os.environ["AIOHTTP_NO_EXTENSIONS"] = "1"
+import os
+import sys
 
-import socket
+if __package__ in (None, ""):
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    __package__ = "bot"
 
-# Force IPv4 globally to prevent 10-second request timeouts on VPS with broken IPv6
-old_getaddrinfo = socket.getaddrinfo
-def new_getaddrinfo(*args, **kwargs):
-    responses = old_getaddrinfo(*args, **kwargs)
-    # Filter to only IPv4 (AF_INET) to prevent timeout fallbacks
-    ipv4_responses = [r for r in responses if r[0] == socket.AF_INET]
-    return ipv4_responses if ipv4_responses else responses
-socket.getaddrinfo = new_getaddrinfo
-
-import aiohttp
 import asyncio
-import warnings
-from telegram.warnings import PTBUserWarning
-warnings.filterwarnings("ignore", category=PTBUserWarning)
 import json
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
-from typing import Dict, Any, Optional, List
 
-from telegram import (
-    Update, InlineKeyboardButton, InlineKeyboardMarkup, constants, BotCommand
-)
-from telegram.ext import (
-    ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler,
-    ContextTypes, ConversationHandler, filters
-)
-from telegram.request import HTTPXRequest
-
-import config
-from web_sync import _make_custom_id
-from gki import build_gki_conversation, _del_msg_job, SUB_LEVELS, TARGET_META, SUB_LEVEL_META
-from oki import build_oki_conversation
-from buildsave import build_buildsave_conversation
-from permissions import is_owner, is_admin
+import aiohttp
 import aiohttp.web as aiohttp_web
-from storage import HybridStorage
-from web_sync import get_realtime_data
+from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Update, constants
+from telegram.ext import (
+    AIORateLimiter,
+    ApplicationBuilder,
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+    ConversationHandler,
+    MessageHandler,
+    filters,
+)
+
+from . import config
+from .backups import read_backup
+from .buildsave import build_buildsave_conversation
+from .catalog import load_downloads as _load_web_kernel_downloads
+from .catalog import rebuild_downloads as rebuild_catalog_downloads
+from .catalog import update_download as update_catalog_download
+from .github import GitHubAPI, match_workflow_run
+from .github import parse_utc as _parse_utc
+from .gki import SUB_LEVELS, _del_msg_job, build_gki_conversation
+from .oki import build_oki_conversation
+from .permissions import is_admin, is_owner
+from .storage import HybridStorage
+from .web_sync import _make_custom_id, get_realtime_data
 
 logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.WARNING
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.WARNING
 )
 logger = logging.getLogger("gww-bot")
 
-from telegram.ext import ExtBot
-from telegram.error import RetryAfter, BadRequest
-import asyncio
+from telegram.error import BadRequest
 
-_original_do_post = ExtBot._do_post
-
-async def _safe_do_post(self, *args, **kwargs):
-    for attempt in range(4):
-        try:
-            return await _original_do_post(self, *args, **kwargs)
-        except RetryAfter as e:
-            logger.warning(f"Telegram Rate Limit! ⏳ Sleeping {e.retry_after}s... (Attempt {attempt+1}/4)")
-            await asyncio.sleep(e.retry_after + 1.0)
-    return await _original_do_post(self, *args, **kwargs)
-
-ExtBot._do_post = _safe_do_post
-
-import os
-DATA_JSON = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data.json")
-
-
-class TelegraphAPI:
-    """Tạo trang Telegraph chứa link tải artifacts."""
-    BASE = "https://api.telegra.ph"
-
-    def __init__(self, storage):
-        self.storage = storage
-        self._token = None
-
-    async def _ensure_token(self):
-        if self._token:
-            return
-        self._token = self.storage.get_telegraph_token()
-        if self._token:
-            return
-        # Tạo tài khoản mới
-        async with aiohttp.ClientSession() as s:
-            resp = await s.post(f"{self.BASE}/createAccount", json={
-                "short_name": "GKI Bot",
-                "author_name": "GKI Build Bot"
-            })
-            data = await resp.json()
-            if data.get("ok"):
-                self._token = data["result"]["access_token"]
-                self.storage.set_telegraph_token(self._token)
-
-    @staticmethod
-    def _format_build_config(config_inputs: Dict[str, Any]) -> str:
-        if not isinstance(config_inputs, dict) or not config_inputs:
-            return "Khong co du lieu cau hinh."
-
-        # Keep the same order users see in confirmation, then append unknown keys.
-        preferred_order = [
-            "kernelsu_variant",
-            "kernelsu_branch",
-            "version",
-            "use_zram",
-            "use_bbg",
-            "use_kpm",
-            "cancel_susfs",
-            "build_a12_5_10",
-            "build_a13_5_15",
-            "build_a14_6_1",
-            "build_a15_6_6",
-            "build_all",
-            "release_type",
-            "sub_levels",
-        ]
-
-        ordered_keys = [k for k in preferred_order if k in config_inputs]
-        ordered_keys.extend(k for k in config_inputs.keys() if k not in ordered_keys)
-
-        lines = []
-        for key in ordered_keys:
-            value = config_inputs.get(key, "")
-            if isinstance(value, bool):
-                value_text = "True" if value else "False"
-            elif value is None:
-                value_text = ""
-            else:
-                value_text = str(value)
-            lines.append(f"- {key}: {value_text}")
-        return "\n".join(lines)
-
-    async def create_artifacts_page(self, title: str, artifacts: list, repo: str, run_id, owner: str, config_inputs: Optional[Dict[str, Any]] = None) -> Optional[str]:
-        """Tạo trang Telegraph với danh sách artifacts. Trả về URL."""
-        await self._ensure_token()
-        if not self._token:
-            return None
-
-        # Xây dựng nội dung trang
-        content = [
-            {"tag": "h4", "children": ["Cau hinh build"]},
-            {"tag": "pre", "children": [self._format_build_config(config_inputs or {})]},
-            {"tag": "hr"},
-            {"tag": "h4", "children": [f"📦 Danh sách file tải về"]},
-            {"tag": "p", "children": [f"Build: {title}"]},
-            {"tag": "hr"},
-        ]
-        for a in artifacts:
-            name = a["name"]
-            dl_url = f"https://nightly.link/{owner}/{repo}/actions/runs/{run_id}/{name}.zip"
-            content.append({"tag": "p", "children": [
-                {"tag": "a", "attrs": {"href": dl_url}, "children": [f"📥 {name}.zip"]}
-            ]})
-        
-        content.append({"tag": "hr"})
-        gh_url = f"https://github.com/{owner}/{repo}/actions/runs/{run_id}"
-        content.append({"tag": "p", "children": [
-            {"tag": "a", "attrs": {"href": gh_url}, "children": ["🔗 Xem trên GitHub"]}
-        ]})
-
-        async with aiohttp.ClientSession() as s:
-            resp = await s.post(f"{self.BASE}/createPage", json={
-                "access_token": self._token,
-                "title": title[:256],
-                "author_name": "GKI Build Bot",
-                "content": content,
-                "return_content": False
-            })
-            data = await resp.json()
-            if data.get("ok"):
-                return data["result"]["url"]
-        return None
-
-class GitHubAPI:
-    def __init__(self, token: str, owner: str):
-        self.token = token
-        self.owner = owner
-        self.base = "https://api.github.com"
-        self.session = None
-
-    async def _get_session(self):
-        if not self.session or self.session.closed:
-            timeout = aiohttp.ClientTimeout(total=60)
-            resolver = aiohttp.AsyncResolver(nameservers=["8.8.8.8", "1.1.1.1"])
-            connector = aiohttp.TCPConnector(resolver=resolver, limit=10)
-            self.session = aiohttp.ClientSession(timeout=timeout, connector=connector)
-        return self.session
-
-    async def close(self):
-        if self.session and not self.session.closed:
-            await self.session.close()
-
-    async def _request(self, method: str, url: str, json_payload: Optional[dict] = None):
-        headers = {
-            "Authorization": f"Bearer {self.token}",
-            "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2022-11-28",
-            "User-Agent": "workflow-bot/1.2"
-        }
-        for attempt in range(3):
-            try:
-                sess = await self._get_session()
-                async with sess.request(method, url, headers=headers, json=json_payload) as resp:
-                    if resp.status == 429:
-                        retry_after = int(resp.headers.get("Retry-After", "60"))
-                        logger.warning("Rate limited, retry after %s seconds", retry_after)
-                        await asyncio.sleep(retry_after)
-                        continue
-                    if resp.status == 204:
-                        return {"status": 204, "json": None}
-                    try:
-                        data = await resp.json()
-                    except Exception:
-                        data = {"text": await resp.text()}
-                    return {"status": resp.status, "json": data}
-            except Exception as e:
-                if attempt == 2:
-                    logger.error("GitHub request failed: %s", e)
-                    return {"status": 500, "json": {"error": str(e)}}
-                await asyncio.sleep(2 ** attempt)
-        return {"status": 500, "json": {}}
-
-    async def dispatch_workflow(self, repo: str, workflow_file: str, ref: str, inputs: Dict[str, Any]):
-        cleaned = {}
-        for k, v in inputs.items():
-            if v is None or str(v).strip() in ("", "none"):
-                continue
-            cleaned[k] = str(v).lower() if isinstance(v, bool) else str(v)
-        str_inputs = {k: str(v) for k, v in cleaned.items()}
-        url = f"{self.base}/repos/{config.GITHUB_OWNER}/{repo}/actions/workflows/{workflow_file}/dispatches"
-        payload = {"ref": ref, "inputs": str_inputs}
-        result = await self._request("POST", url, json_payload=payload)
-        if result["status"] not in (200, 201, 202, 204):
-            logger.error("Dispatch FAILED: %s %s → %s %s", workflow_file, ref, result["status"], result.get("json"))
-        return result
-
-    async def get_run(self, repo: str, run_id: int):
-        url = f"{self.base}/repos/{config.GITHUB_OWNER}/{repo}/actions/runs/{run_id}"
-        return await self._request("GET", url)
-
-    async def cancel_workflow_run(self, run_id: int):
-        url = f"{self.base}/repos/{config.GITHUB_OWNER}/{config.GKI_REPO}/actions/runs/{run_id}/cancel"
-        return await self._request("POST", url, {})
-
-    async def list_artifacts_for_run(self, repo: str, run_id: int):
-        url = f"{self.base}/repos/{config.GITHUB_OWNER}/{repo}/actions/runs/{run_id}/artifacts"
-        return await self._request("GET", url)
-
-    async def list_runs_for_repo(self, repo: str, ref: str, created_iso: str):
-        ts = _parse_utc(created_iso) - timedelta(seconds=10)
-        created_filter = ts.isoformat()
-        url = f"{self.base}/repos/{config.GITHUB_OWNER}/{repo}/actions/runs?branch={ref}&per_page=10&created=%3E{created_filter}"
-        return await self._request("GET", url)
-
-    async def cancel_run(self, repo: str, run_id: int):
-        url = f"{self.base}/repos/{config.GITHUB_OWNER}/{repo}/actions/runs/{run_id}/cancel"
-        return await self._request("POST", url)
-
-    async def delete_run(self, repo: str, run_id: int):
-        url = f"{self.base}/repos/{config.GITHUB_OWNER}/{repo}/actions/runs/{run_id}"
-        return await self._request("DELETE", url)
-
+DATA_JSON = config.STORAGE_PATH
 
 
 def tg_mention_html(user) -> str:
@@ -282,12 +64,76 @@ def _html_user_mention(user_id, user_name) -> str:
         return label
 
 
-def _parse_utc(value: str) -> datetime:
-    """Parse stored GitHub/ISO timestamps into timezone-aware UTC datetimes."""
-    parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+def _dashboard_link(label="Dashboard"):
+    if not config.DASHBOARD_URL:
+        return ""
+    return f"<a href='{html.escape(config.DASHBOARD_URL, quote=True)}'>{html.escape(label)}</a>"
+
+
+def _start_background_task(app, coroutine, name):
+    """Track long-lived workers separately from PTB's awaited handler tasks."""
+    task = asyncio.create_task(coroutine, name=name)
+    workers = app.bot_data.setdefault("background_tasks", set())
+    workers.add(task)
+
+    def finished(completed):
+        workers.discard(completed)
+        if not completed.cancelled() and completed.exception() is not None:
+            error = completed.exception()
+            logger.error(
+                "Background worker %s failed",
+                name,
+                exc_info=(type(error), error, error.__traceback__),
+            )
+
+    task.add_done_callback(finished)
+    return task
+
+
+async def _notify_job(app, job, text, duplicates=()):
+    """Deliver to the original chat and DM independently, without duplicate DMs."""
+    storage = app.bot_data["storage"]
+    delivered = []
+    destinations = dict.fromkeys(
+        target for target in (job.get("chat_id"), job.get("user_id")) if target is not None
+    )
+    if not destinations:
+        await storage.update_job(
+            job["_id"],
+            {"notified": True, "notification_error": "Legacy job has no Telegram recipient"},
+        )
+        return True
+    for chat_id in destinations:
+        try:
+            message = await _bot_send_topic_safe(
+                app.bot,
+                chat_id,
+                text,
+                message_thread_id=job.get("message_thread_id")
+                if chat_id == job.get("chat_id")
+                else None,
+                parse_mode=constants.ParseMode.HTML,
+                disable_web_page_preview=True,
+            )
+            delivered.append((chat_id, message))
+        except Exception as error:
+            logger.warning(
+                "Notification delivery failed for job %s chat %s: %s",
+                job.get("_id"),
+                chat_id,
+                error,
+            )
+    if not delivered:
+        return False
+    for entry in (job, *duplicates):
+        await storage.update_job(entry["_id"], {"notified": True})
+    for chat_id, message in delivered:
+        try:
+            await storage.track_message(message.message_id, chat_id, job.get("user_id", 0))
+        except Exception:
+            logger.exception("Message tracking failed after successful notification")
+    return True
+
 
 async def _bot_send_topic_safe(bot, chat_id: int, text: str, message_thread_id=None, **kwargs):
     """Send to a forum topic when possible, falling back if that topic is closed."""
@@ -321,19 +167,21 @@ async def update_batch_message(batch_id: str, storage: HybridStorage, bot):
         jobs = await storage.get_jobs_by_batch(batch_id)
         if not jobs:
             return
-            
+
         first_job = jobs[0]
         chat_id = first_job.get("chat_id")
         msg_id = first_job.get("batch_msg_id")
         variant = first_job.get("bs_variant", "")
-        
+
         if not chat_id or not msg_id:
             return
-            
+
         completed_count = sum(1 for j in jobs if j.get("status") == "completed")
-        success_count = sum(1 for j in jobs if j.get("status") == "completed" and j.get("conclusion") == "success")
+        success_count = sum(
+            1 for j in jobs if j.get("status") == "completed" and j.get("conclusion") == "success"
+        )
         total_count = len(jobs)
-        
+
         # Danh sách version rút gọn
         vers = [j.get("bs_full_ver", "") for j in jobs]
         prefix = ""
@@ -344,10 +192,10 @@ async def update_batch_message(batch_id: str, storage: HybridStorage, bot):
                 prefix = f"{parts[0]}.{parts[1]}."
             for v in vers:
                 if v.startswith(prefix):
-                    short_vers.append(v[len(prefix):])
+                    short_vers.append(v[len(prefix) :])
                 else:
                     short_vers.append(v)
-        
+
         if len(short_vers) > 3:
             v_str = f"{prefix}{','.join(short_vers[:3])}..."
         else:
@@ -359,23 +207,23 @@ async def update_batch_message(batch_id: str, storage: HybridStorage, bot):
                 lines = [
                     f"❌ <b>Đã huỷ/thất bại toàn bộ batch!</b>",
                     f"🔨 {variant} — {v_str}",
-                    f"⏳ Tiến trình: {completed_count}/{total_count}"
+                    f"⏳ Tiến trình: {completed_count}/{total_count}",
                 ]
             else:
                 lines = [
                     f"✅ <b>Đã hoàn thành batch build!</b>",
                     f"🔨 {variant} — {v_str}",
-                    f"⏳ Tiến trình: {completed_count}/{total_count} ({success_count} thành công)"
+                    f"⏳ Tiến trình: {completed_count}/{total_count} ({success_count} thành công)",
                 ]
         else:
             lines = [
                 f"✅ <b>Đang build kernel cho lưu trữ!</b>",
                 f"🔨 {variant} — {v_str}",
-                f"⏳ Tiến trình: {completed_count}/{total_count}"
+                f"⏳ Tiến trình: {completed_count}/{total_count}",
             ]
-            
-        import config
-        
+
+        from . import config
+
         # Determine the current running github link
         current_run_id = None
         for j in jobs:
@@ -387,21 +235,24 @@ async def update_batch_message(batch_id: str, storage: HybridStorage, bot):
             github_url = f"https://github.com/{config.GITHUB_OWNER}/{config.GKI_REPO}/actions/runs/{current_run_id}"
         else:
             github_url = f"https://github.com/{config.GITHUB_OWNER}/{config.GKI_REPO}/actions"
-            
-        lines.append(f"<blockquote>Xem: <a href='{github_url}'>Github</a> | <a href='https://kernel.takeshi.dev/'>Dashboard</a> ❞</blockquote>")
-        
+
+        lines.append(
+            f"<blockquote>Xem: <a href='{github_url}'>Github</a> | {_dashboard_link()} ❞</blockquote>"
+        )
+
         text = "\n".join(lines)
-        
+
         await bot.edit_message_text(
             chat_id=chat_id,
             message_id=msg_id,
             text=text,
             parse_mode="HTML",
-            disable_web_page_preview=True
+            disable_web_page_preview=True,
         )
     except Exception as e:
         if "is not modified" not in str(e) and "not found" not in str(e).lower():
             logger.error(f"update_batch_message error: {e}")
+
 
 async def update_rebuild_message(rebuild_msg_id: str, storage, bot):
     """Cập nhật tin nhắn rebuild tiến trình khi có job rebuild_queued hoặc complete."""
@@ -419,19 +270,25 @@ async def update_rebuild_message(rebuild_msg_id: str, storage, bot):
             # Format cũ: lấy phần đầu là msg_id, phần còn lại (kể cả dấu âm) là chat_id
             dash_idx = rebuild_msg_id.index("-")
             msg_id_int = int(rebuild_msg_id[:dash_idx])
-            chat_id_int = int(rebuild_msg_id[dash_idx + 1:])
+            chat_id_int = int(rebuild_msg_id[dash_idx + 1 :])
             custom_id = ""
 
         all_jobs = await storage.get_jobs()
-        rjobs = [j for j in all_jobs if j.get("rebuild_msg_id") == rebuild_msg_id and j.get("type") == "buildsave"]
+        rjobs = [
+            j
+            for j in all_jobs
+            if j.get("rebuild_msg_id") == rebuild_msg_id and j.get("type") == "buildsave"
+        ]
         if not rjobs:
             return
 
         variant = rjobs[0].get("bs_variant", "")
         total = len(rjobs)
         done = sum(1 for j in rjobs if j.get("status") == "completed")
-        success = sum(1 for j in rjobs if j.get("status") == "completed" and j.get("conclusion") == "success")
-        
+        success = sum(
+            1 for j in rjobs if j.get("status") == "completed" and j.get("conclusion") == "success"
+        )
+
         # Lấy run_id của job đang chạy để taoj link Github động
         active_run_id = None
         for rj in rjobs:
@@ -440,11 +297,13 @@ async def update_rebuild_message(rebuild_msg_id: str, storage, bot):
                 break
         repo_name = rjobs[0].get("repo", config.GKI_REPO) if rjobs else config.GKI_REPO
         if active_run_id:
-            github_url = f"https://github.com/{config.GITHUB_OWNER}/{repo_name}/actions/runs/{active_run_id}"
+            github_url = (
+                f"https://github.com/{config.GITHUB_OWNER}/{repo_name}/actions/runs/{active_run_id}"
+            )
         else:
             github_url = f"https://github.com/{config.GITHUB_OWNER}/{repo_name}/actions"
 
-        link_line = f"<blockquote>Xem: <a href='{github_url}'><b>Github</b></a> | <a href='https://kernel.takeshi.dev/'><b>Dashboard</b></a></blockquote>"
+        link_line = f"<blockquote>Xem: <a href='{github_url}'><b>Github</b></a> | {_dashboard_link()}</blockquote>"
 
         if done == total:
             text = (
@@ -455,17 +314,20 @@ async def update_rebuild_message(rebuild_msg_id: str, storage, bot):
         else:
             text = (
                 f"\ud83d\udd04 <b>\u0110ang Rebuild... {custom_id}</b>\n"
-                f"<b>\u23f3 Ti\u1ebfn tr\u00ecnh: {done}/{total}</b>\n"
-                + link_line
+                f"<b>\u23f3 Ti\u1ebfn tr\u00ecnh: {done}/{total}</b>\n" + link_line
             )
 
         await bot.edit_message_text(
-            text=text, chat_id=chat_id_int, message_id=msg_id_int,
-            parse_mode="HTML", disable_web_page_preview=True
+            text=text,
+            chat_id=chat_id_int,
+            message_id=msg_id_int,
+            parse_mode="HTML",
+            disable_web_page_preview=True,
         )
     except Exception as e:
         if "is not modified" not in str(e):
             logger.error(f"update_rebuild_message error: {e}")
+
 
 async def poller(app):
     gh: GitHubAPI = app.bot_data["gh"]
@@ -475,47 +337,22 @@ async def poller(app):
         while True:
             try:
                 deleted_msg = await storage.delete_old_messages(24)
-                deleted_jobs = await storage.delete_old_jobs(30) # Lưu lịch sử Bot Build trong 30 ngày thay vì 7 ngày
+                deleted_jobs = await storage.delete_old_jobs(
+                    30
+                )  # Lưu lịch sử Bot Build trong 30 ngày thay vì 7 ngày
                 if deleted_msg or deleted_jobs:
                     logger.info("Cleanup: %d messages, %d jobs", deleted_msg, deleted_jobs)
             except Exception as e:
                 logger.error("Cleanup error: %s", e)
             await asyncio.sleep(3600)
 
-    app.create_task(cleanup_task())
-    app.create_task(_rebuild_web_downloads_from_recent_gki_jobs(storage, app, max_age_days=90))
+    _start_background_task(app, cleanup_task(), "storage-cleanup")
+    _start_background_task(
+        app, rebuild_catalog_downloads(storage, app, max_age_days=90), "catalog-rebuild"
+    )
 
     while True:
         try:
-            # 0. Dọn ghost buildsave jobs (dispatched không có run_id quá 10 phút)
-            _now = datetime.now(timezone.utc)
-            _all_jobs = await storage.get_jobs()
-            for _gj in _all_jobs:
-                if _gj.get("type") != "buildsave":
-                    continue
-                _gst = _gj.get("status", "")
-                if _gst not in ("dispatched", "in_progress", "running"):
-                    continue
-                _grun = _gj.get("run_id")
-                try:
-                    _gcat = _parse_utc(_gj.get("created_at", ""))
-                    _gmin = (_now - _gcat).total_seconds() / 60
-                    # A kernel build may legitimately take more than two hours.
-                    # Only a dispatched job that never receives a GitHub run ID
-                    # is considered orphaned here; jobs with a run ID are
-                    # reconciled against GitHub in the normal polling path.
-                    _is_ghost = not _grun and _gmin > 20
-                except Exception:
-                    _is_ghost = not _grun
-                if _is_ghost:
-                    logger.warning("Poller: ghost buildsave job detected _id=%s, marking cancelled", _gj.get("_id"))
-                    await storage.update_job(_gj["_id"], {
-                        "status": "completed", "conclusion": "cancelled", "notified": True
-                    })
-                    _gbid = _gj.get("batch_id")
-                    if _gbid:
-                        await update_batch_message(_gbid, storage, app.bot)
-
             # 1. Dispatch buildsave queue
             active_bs = await storage.get_active_buildsave_count()
             if active_bs == 0:
@@ -524,7 +361,11 @@ async def poller(app):
                 # --- Thử lấy job rebuild_queued nếu không có job queued thường ---
                 if not next_bs:
                     all_j = await storage.get_jobs()
-                    rb_pending = [j for j in all_j if j.get("type") == "buildsave" and j.get("status") == "rebuild_queued"]
+                    rb_pending = [
+                        j
+                        for j in all_j
+                        if j.get("type") == "buildsave" and j.get("status") == "rebuild_queued"
+                    ]
                     if rb_pending:
                         rb_pending.sort(key=lambda x: x.get("created_at", ""))
                         next_bs = rb_pending[0]
@@ -538,101 +379,136 @@ async def poller(app):
                         _siblings = await storage.get_jobs_by_batch(_batch_id)
                         if any(j.get("conclusion") == "cancelled" for j in _siblings):
                             # Batch đã huỷ → bỏ qua, đánh dấu cancelled luôn
-                            await storage.update_job(next_bs["_id"], {
-                                "status": "completed", "conclusion": "cancelled", "notified": True
-                            })
+                            await storage.update_job(
+                                next_bs["_id"],
+                                {
+                                    "status": "completed",
+                                    "conclusion": "cancelled",
+                                    "notified": True,
+                                },
+                            )
                             await update_batch_message(_batch_id, storage, app.bot)
                             _skip = True
 
                     if not _skip:
                         inputs = next_bs.get("inputs", {})
+                        now_iso = datetime.now(timezone.utc).isoformat()
                         res = await gh.dispatch_workflow(
                             repo=next_bs["repo"],
                             workflow_file=next_bs["workflow_file"],
                             ref=next_bs["ref"],
-                            inputs=inputs
+                            inputs=inputs,
                         )
-                        now_iso = datetime.now(timezone.utc).isoformat()
-                        if res.get("status") in (201, 202, 204):
-                            await storage.update_job(next_bs["_id"], {
-                                "status": "dispatched",
-                                "run_id": None,
-                                "conclusion": None,
-                                "notified": False,
-                                "created_at": now_iso
-                            })
+                        if res.get("status") in (201, 202, 204) or (res.get("json") or {}).get(
+                            "uncertain"
+                        ):
+                            await storage.update_job(
+                                next_bs["_id"],
+                                {
+                                    "status": "dispatched",
+                                    "run_id": None,
+                                    "conclusion": None,
+                                    "notified": False,
+                                    "created_at": now_iso,
+                                },
+                            )
                         else:
-                            await storage.update_job(next_bs["_id"], {
-                                "status": "completed",
-                                "conclusion": "failure",
-                                "notified": True,
-                                "created_at": now_iso
-                            })
+                            await storage.update_job(
+                                next_bs["_id"],
+                                {
+                                    "status": "completed",
+                                    "conclusion": "failure",
+                                    "notified": True,
+                                    "created_at": now_iso,
+                                },
+                            )
                         batch_id = next_bs.get("batch_id")
                         if batch_id:
                             await update_batch_message(batch_id, storage, app.bot)
                         if next_bs.get("rebuild_msg_id"):
-                            await update_rebuild_message(next_bs["rebuild_msg_id"], storage, app.bot)
+                            await update_rebuild_message(
+                                next_bs["rebuild_msg_id"], storage, app.bot
+                            )
 
-            
             # 2. Polling for unnotified jobs
             jobs = await storage.list_unnotified_jobs()
             for job in jobs:
                 try:
-                    if job.get("status") == "queued":
+                    # Re-check state: the snapshot may contain a duplicate job
+                    # already notified or a batch cancelled earlier this cycle.
+                    current_jobs = await storage.get_jobs()
+                    job = next(
+                        (entry for entry in current_jobs if entry.get("_id") == job.get("_id")),
+                        None,
+                    )
+                    if job is None or job.get("notified"):
+                        continue
+                    if job.get("status") in ("queued", "rebuild_queued"):
                         continue
 
-                    if job.get("notify_via") == "userbot":
-                        continue
-                        
                     repo = job["repo"]
                     run_id = job.get("run_id")
                     ref = job.get("ref", "main")
                     workflow_file = job.get("workflow_file")
                     job_created_at_iso = job.get("created_at")
 
+                    runs_resp = None
                     if not run_id and ref and workflow_file and job_created_at_iso:
-                        runs_resp = await gh.list_runs_for_repo(repo, ref, job_created_at_iso)
+                        runs_resp = await gh.list_runs_for_repo(
+                            repo, ref, job_created_at_iso, workflow_file
+                        )
                         if runs_resp["status"] == 200:
                             all_jobs = await storage.get_jobs()
-                            claimed_run_ids = {
-                                str(existing.get("run_id"))
-                                for existing in all_jobs
-                                if existing.get("_id") != job.get("_id") and existing.get("run_id")
-                            }
-                            possible_runs = []
-                            job_created_dt = _parse_utc(job_created_at_iso)
-                            for run in runs_resp["json"].get("workflow_runs", []):
-                                if run.get("event") != "workflow_dispatch":
-                                    continue
-                                if workflow_file not in run.get("path", ""):
-                                    continue
-                                if str(run.get("id")) in claimed_run_ids:
-                                    continue
-                                run_created_dt = _parse_utc(run["created_at"])
-                                if run_created_dt >= (job_created_dt - timedelta(seconds=15)):
-                                    possible_runs.append(run)
-                            if possible_runs:
-                                # Prefer the nearest unclaimed run after dispatch.
-                                best_match = min(
-                                    possible_runs,
-                                    key=lambda x: abs((_parse_utc(x["created_at"]) - job_created_dt).total_seconds()),
-                                )
+                            best_match = match_workflow_run(
+                                job, runs_resp["json"].get("workflow_runs", []), all_jobs
+                            )
+                            if best_match:
                                 run_id = best_match["id"]
                                 await storage.update_job(job["_id"], {"run_id": run_id})
 
                     if not run_id:
+                        if (
+                            runs_resp
+                            and runs_resp["status"] == 200
+                            and job_created_at_iso
+                            and datetime.now(timezone.utc) - _parse_utc(job_created_at_iso)
+                            > timedelta(minutes=20)
+                        ):
+                            await storage.update_job(
+                                job["_id"],
+                                {
+                                    "status": "completed",
+                                    "conclusion": "failure",
+                                    "error": "No matching GitHub workflow run was found within 20 minutes",
+                                },
+                            )
+                            await _notify_job(
+                                app,
+                                job,
+                                "❌ Không tìm thấy tiến trình GitHub khớp với yêu cầu build sau 20 phút. Dùng /st để kiểm tra trước khi gửi lại.",
+                            )
+                            if job.get("batch_id"):
+                                await update_batch_message(job["batch_id"], storage, app.bot)
+                            if job.get("rebuild_msg_id"):
+                                await update_rebuild_message(
+                                    job["rebuild_msg_id"], storage, app.bot
+                                )
                         continue
 
+                    if job.get("pending_key"):
+                        if not await storage.consume_job_key(job["_id"]):
+                            logger.warning(
+                                "Deferred key charge could not be completed for job %s", job["_id"]
+                            )
+
                     rn = await gh.get_run(repo, int(run_id))
-                    
+
                     if rn["status"] == 404:
                         logger.warning("Run %s not found (deleted?), marking cancelled", run_id)
-                        await storage.update_job(job["_id"], {
-                            "status": "completed",
-                            "conclusion": "cancelled",
-                            "notified": True
-                        })
+                        await storage.update_job(
+                            job["_id"],
+                            {"status": "completed", "conclusion": "cancelled", "notified": True},
+                        )
                         if job.get("batch_id"):
                             await update_batch_message(job["batch_id"], storage, app.bot)
                         if job.get("rebuild_msg_id"):
@@ -642,27 +518,37 @@ async def poller(app):
                         continue
 
                     status = rn["json"].get("status")
+                    if status != "completed":
+                        local_status = "in_progress" if status == "in_progress" else "dispatched"
+                        if job.get("status") != local_status:
+                            await storage.update_job(job["_id"], {"status": local_status})
                     if status == "completed":
                         duplicate_jobs = []
                         if run_id:
                             try:
                                 all_jobs = await storage.get_jobs()
                                 duplicate_jobs = [
-                                    j for j in all_jobs
+                                    j
+                                    for j in all_jobs
                                     if j.get("_id") != job.get("_id")
                                     and j.get("repo") == job.get("repo")
+                                    and j.get("chat_id") == job.get("chat_id")
+                                    and j.get("user_id") == job.get("user_id")
                                     and str(j.get("run_id")) == str(run_id)
                                     and not j.get("notified")
                                 ]
                             except Exception as e:
-                                logger.warning("Duplicate job lookup failed for run_id=%s: %s", run_id, e)
-                        conclusion = rn["json"].get("conclusion")
+                                logger.warning(
+                                    "Duplicate job lookup failed for run_id=%s: %s", run_id, e
+                                )
+                        conclusion = rn["json"].get("conclusion") or "unknown"
                         html_url = rn["json"].get("html_url")
-                        telegraph_url = None
-                        
+
                         gh_dur = ""
                         try:
-                            t1_str = rn["json"].get("run_started_at") or rn["json"].get("created_at", "")
+                            t1_str = rn["json"].get("run_started_at") or rn["json"].get(
+                                "created_at", ""
+                            )
                             if t1_str:
                                 t1 = datetime.fromisoformat(t1_str.replace("Z", "+00:00"))
                                 t2_str = rn["json"].get("updated_at")
@@ -670,34 +556,42 @@ async def poller(app):
                                     t2 = datetime.fromisoformat(t2_str.replace("Z", "+00:00"))
                                     diff = int((t2 - t1).total_seconds())
                                     if diff > 0:
-                                        gh_dur = f"{diff//60}m {diff%60}s"
+                                        gh_dur = f"{diff // 60}m {diff % 60}s"
                         except Exception:
                             pass
 
-
-                        chat_id = job["chat_id"]
-                        user_id = job["user_id"]
+                        user_id = job.get("user_id")
                         user_name = job.get("user_name", "")
                         if not user_name:
                             user_name = str(user_id)
                         mention = _html_user_mention(user_id, user_name)
-                        icon = "✅" if conclusion == "success" else "❌" if conclusion == "failure" else "⚠️"
-                        
-                        created_at_dt = _parse_utc(job.get("created_at", datetime.now(timezone.utc).isoformat()))
-                        elapsed = int((datetime.now(timezone.utc) - created_at_dt).total_seconds() // 60)
+                        icon = (
+                            "✅"
+                            if conclusion == "success"
+                            else "❌"
+                            if conclusion == "failure"
+                            else "⚠️"
+                        )
 
-                        download_link = telegraph_url or f"https://nightly.link/{config.GITHUB_OWNER}/{repo}/actions/runs/{run_id}"
+                        created_at_dt = _parse_utc(
+                            job.get("created_at", datetime.now(timezone.utc).isoformat())
+                        )
+                        elapsed = int(
+                            (datetime.now(timezone.utc) - created_at_dt).total_seconds() // 60
+                        )
+
+                        download_link = f"https://nightly.link/{config.GITHUB_OWNER}/{repo}/actions/runs/{run_id}"
                         github_link = html.escape(str(html_url or "#"), quote=True)
                         download_link = html.escape(str(download_link), quote=True)
                         text = (
-                            f"<b>{icon} Build {job.get('type','?').upper()} kết thúc!\n"
+                            f"<b>{icon} Build {job.get('type', '?').upper()} kết thúc!\n"
                             f"┃\n"
                             f"┠ Người nhận: {mention}\n"
                             f"┠ Trạng thái: {conclusion.upper()}\n"
                             f"┖ Thời gian: {elapsed} phút\n"
                             f"<blockquote>Xem thông tin: "
                             f"<a href='{github_link}'>Github</a>┃"
-                            f"<a href='https://kernel.takeshi.dev/'>Website</a>┃"
+                            f"{_dashboard_link()}┃"
                             f"<a href='{download_link}'>Download</a></blockquote></b>"
                         )
 
@@ -718,84 +612,39 @@ async def poller(app):
                         if job.get("rebuild_msg_id"):
                             await update_rebuild_message(job["rebuild_msg_id"], storage, app.bot)
 
-                        try:
-                            msg = await _bot_send_topic_safe(
-                                app.bot,
-                                chat_id,
-                                text,
-                                message_thread_id=job.get("message_thread_id"),
-                                parse_mode=constants.ParseMode.HTML,
-                                disable_web_page_preview=True
+                        # Catalog/history must progress even when Telegram is
+                        # unavailable. These writes are safe to repeat on retry.
+                        if conclusion == "success":
+                            await storage.add_successful_build(
+                                run_id, user_id, job.get("ref", "unknown"), user_name
                             )
-                            await storage.track_message(msg.message_id, chat_id, user_id)
-
-                            try:
-                                await app.bot.send_message(
-                                    chat_id=user_id,
-                                    text=text,
-                                    parse_mode=constants.ParseMode.HTML,
-                                    disable_web_page_preview=True,
-                                )
-                            except Exception as e:
-                                logger.warning("Completion DM failed for user_id=%s: %s", user_id, e)
-
-                            await storage.update_job(job["_id"], {"notified": True})
-                            for dup in duplicate_jobs:
-                                await storage.update_job(dup["_id"], {"notified": True})
-
-                            if conclusion == "success":
-                                await storage.add_successful_build(run_id, user_id, job.get("ref", "unknown"), user_name)
-
-                                # Web catalog: dùng build /gki của user làm nguồn link tải xuống.
-                                if job.get("type") == "gki":
-                                    try:
-                                        await _rebuild_web_downloads_from_recent_gki_jobs(storage, app, max_age_days=90)
-                                    except Exception as e:
-                                        logger.error("GKI web catalog rebuild failed: %s", e)
-
-                                # /build buildsave cũ vẫn giữ nguyên chức năng, nhưng không còn ghi link web.
-                                if job.get("type") == "buildsave":
-                                    logger.info("buildsave JSON update skipped; web catalog now uses qualifying user /gki builds")
-
-                        except Exception as e:
-                            # Keep notified=False so the next polling cycle can
-                            # retry. This is safer than silently losing a build
-                            # completion notification.
-                            logger.error("Send completion notification failed; will retry: %s", e)
-
-                        # Báo cho những người đang đợi
-                        waiters = await storage.get_waiters()
-                        if waiters:
-                            for w in waiters:
-                                w_user_id = w["user_id"]
-                                w_chat_id = w["chat_id"]
-                                w_name = w.get("user_name", str(w_user_id))
-                                w_mention = _html_user_mention(w_user_id, w_name)
-                                msg_waiter = f"🔔 {w_mention} ơi, tiến trình đã hoàn tất! Bạn có thể dùng lệnh /gki lại ngay bây giờ nhé."
+                            if job.get("type") in ("gki", "buildsave"):
+                                completed_job = {**job, **completion_fields, "run_id": run_id}
                                 try:
-                                    await _bot_send_topic_safe(
-                                        app.bot,
-                                        w_chat_id,
-                                        msg_waiter,
-                                        message_thread_id=w.get("message_thread_id"),
-                                        parse_mode=constants.ParseMode.HTML
-                                    )
+                                    await update_catalog_download(completed_job, run_id, app)
                                 except Exception:
-                                    pass
-                            await storage.clear_waiters()
+                                    logger.exception("Catalog update failed for run %s", run_id)
 
+                        if not await _notify_job(app, job, text, duplicate_jobs):
+                            logger.warning(
+                                "Completion notification will be retried for job %s", job["_id"]
+                            )
                 except Exception as e:
                     logger.error("Job %s error: %s", job.get("_id"), e, exc_info=True)
         except Exception as e:
             logger.error("Poller error: %s", e, exc_info=True)
-            
+
         await asyncio.sleep(45)
 
 
 async def _send_msg(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, **kwargs):
-    kwargs.pop('quote', None)
+    kwargs.pop("quote", None)
     chat_id = update.effective_chat.id
-    thread_id = update.effective_message.message_thread_id if (update.effective_message and update.effective_message.is_topic_message) else None
+    thread_id = (
+        update.effective_message.message_thread_id
+        if (update.effective_message and update.effective_message.is_topic_message)
+        else None
+    )
     return await _bot_send_topic_safe(
         context.bot,
         chat_id,
@@ -803,6 +652,7 @@ async def _send_msg(update: Update, context: ContextTypes.DEFAULT_TYPE, text: st
         message_thread_id=thread_id,
         **kwargs,
     )
+
 
 async def _safe_delete_user_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Silently delete the user's message immediately."""
@@ -825,20 +675,35 @@ async def cmd_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
             raise ValueError()
         code = parts[1]
         action = parts[2].lower()
-        
+
         if action == "delete":
             if await storage.delete_key(code):
-                await _send_msg(update, context, f"🗑️ Đã xoá key <code>{code}</code>.", parse_mode=constants.ParseMode.HTML)
+                await _send_msg(
+                    update,
+                    context,
+                    f"🗑️ Đã xoá key <code>{code}</code>.",
+                    parse_mode=constants.ParseMode.HTML,
+                )
             else:
-                await _send_msg(update, context, f"⚠️ Key <code>{code}</code> không tồn tại.", parse_mode=constants.ParseMode.HTML)
+                await _send_msg(
+                    update,
+                    context,
+                    f"⚠️ Key <code>{code}</code> không tồn tại.",
+                    parse_mode=constants.ParseMode.HTML,
+                )
             return
         else:
             uses = int(action)
     except Exception:
         return await _send_msg(update, context, "Cú pháp: /key {mã} {số_lượt|delete}")
-        
+
     await storage.set_key(code, uses, vip=False)
-    await _send_msg(update, context, f"✅ Đã set key <code>{code}</code> với {uses} lượt.", parse_mode=constants.ParseMode.HTML)
+    await _send_msg(
+        update,
+        context,
+        f"✅ Đã set key <code>{code}</code> với {uses} lượt.",
+        parse_mode=constants.ParseMode.HTML,
+    )
 
 
 async def cmd_keyvip(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -853,9 +718,11 @@ async def cmd_keyvip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         return await _send_msg(update, context, "Cú pháp: /keyvip {mã} {số_lượt}")
     await storage.set_key(code, uses, vip=True)
-    await _send_msg(update, context,
+    await _send_msg(
+        update,
+        context,
         f"💎 Đã tạo VIP key <code>{code}</code> với {uses} lượt (không giới hạn 1h).",
-        parse_mode=constants.ParseMode.HTML
+        parse_mode=constants.ParseMode.HTML,
     )
 
 
@@ -874,7 +741,7 @@ async def cmd_keys(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for i, (code, info) in enumerate(keys.items(), 1):
         uses = info["uses"]
         vip = info.get("vip", False)
-        
+
         status = f"còn {uses} lượt" if uses > 0 else "Hết lượt"
         if vip:
             icon = "💎"
@@ -882,14 +749,20 @@ async def cmd_keys(update: Update, context: ContextTypes.DEFAULT_TYPE):
             icon = "✅"
         else:
             icon = "❌"
-            
+
         lines.append(f"{i}. {icon}- <code>{code}</code> - {status}")
-    kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Đóng", callback_data=f"closemsg:{update.message.message_id}")]])
-    await _send_msg(update, context, "\n".join(lines), parse_mode=constants.ParseMode.HTML, reply_markup=kb)
+    kb = InlineKeyboardMarkup(
+        [[InlineKeyboardButton("❌ Đóng", callback_data=f"closemsg:{update.message.message_id}")]]
+    )
+    await _send_msg(
+        update, context, "\n".join(lines), parse_mode=constants.ParseMode.HTML, reply_markup=kb
+    )
+
 
 async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message:
         import time
+
         start_time = time.time()
         msg = await _send_msg(
             update,
@@ -899,7 +772,7 @@ async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         end_time = time.time()
         ping_ms = int((end_time - start_time) * 1000)
-        
+
         if msg:
             await msg.edit_text(
                 f"<b>🏓 Pong!\n<blockquote>Độ trễ: {ping_ms}ms</blockquote></b>",
@@ -979,11 +852,15 @@ async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    kb = InlineKeyboardMarkup([[
-        InlineKeyboardButton("1️⃣ DM", callback_data="broadcast:dm"),
-        InlineKeyboardButton("2️⃣ Nhóm", callback_data="broadcast:group"),
-        InlineKeyboardButton("3️⃣ Cả hai", callback_data="broadcast:all"),
-    ]])
+    kb = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("1️⃣ DM", callback_data="broadcast:dm"),
+                InlineKeyboardButton("2️⃣ Nhóm", callback_data="broadcast:group"),
+                InlineKeyboardButton("3️⃣ Cả hai", callback_data="broadcast:all"),
+            ]
+        ]
+    )
     status = await _send_msg(
         update,
         context,
@@ -1019,7 +896,9 @@ async def _send_broadcast_content(bot, chat_id: int, payload: dict):
             entities=source.entities,
         )
     if source.photo:
-        return await bot.send_photo(chat_id=chat_id, photo=source.photo[-1].file_id, **common_caption)
+        return await bot.send_photo(
+            chat_id=chat_id, photo=source.photo[-1].file_id, **common_caption
+        )
     if source.video:
         return await bot.send_video(
             chat_id=chat_id,
@@ -1031,7 +910,9 @@ async def _send_broadcast_content(bot, chat_id: int, payload: dict):
             **common_caption,
         )
     if source.document:
-        return await bot.send_document(chat_id=chat_id, document=source.document.file_id, **common_caption)
+        return await bot.send_document(
+            chat_id=chat_id, document=source.document.file_id, **common_caption
+        )
     if source.audio:
         return await bot.send_audio(
             chat_id=chat_id,
@@ -1117,7 +998,8 @@ async def cb_broadcast_target(update: Update, context: ContextTypes.DEFAULT_TYPE
     group_targets = []
     if scope in ("dm", "all"):
         dm_targets = [
-            u for u in await storage.get_dm_users()
+            u
+            for u in await storage.get_dm_users()
             if u.get("user_id") not in admin_ids and u.get("chat_id")
         ]
     if scope in ("group", "all"):
@@ -1168,7 +1050,9 @@ async def cb_broadcast_target(update: Update, context: ContextTypes.DEFAULT_TYPE
                 grp_fail += 1
             logger.warning(
                 "Broadcast tới %s chat_id=%s thất bại: %s",
-                target_type, chat_id, exc,
+                target_type,
+                chat_id,
+                exc,
             )
 
         now = loop.time()
@@ -1177,8 +1061,6 @@ async def cb_broadcast_target(update: Update, context: ContextTypes.DEFAULT_TYPE
             last_edit = loop.time()
 
     await render_progress(total, dm_ok, dm_fail, grp_ok, grp_fail, done=True)
-
-
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1212,37 +1094,43 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "<b>/rb</b> hoặc <b>/rebuild</b> — Build lại run đã lưu\n"
             "<b>/data</b> — Khôi phục data từ JSON\n"
             "<b>/bc</b> hoặc <b>/broadcast</b> — Broadcast thông báo\n"
-
             "</blockquote>"
         )
 
-    text += (
-        "\n🌐 <b>Dashboard:</b> "
-        "<a href='https://kernel.takeshi.dev/'>kernel.takeshi.dev</a>"
-    )
+    if config.DASHBOARD_URL:
+        text += "\n🌐 " + _dashboard_link()
 
-    msg = await _send_msg(update, context, text,
-        parse_mode=constants.ParseMode.HTML,
-        disable_web_page_preview=True
+    msg = await _send_msg(
+        update, context, text, parse_mode=constants.ParseMode.HTML, disable_web_page_preview=True
     )
     if context.job_queue:
-        context.job_queue.run_once(_del_msg_job, when=60, chat_id=update.effective_chat.id, data=msg.message_id)
+        context.job_queue.run_once(
+            _del_msg_job, when=60, chat_id=update.effective_chat.id, data=msg.message_id
+        )
         if update.message:
-            context.job_queue.run_once(_del_msg_job, when=60, chat_id=update.effective_chat.id, data=update.message.message_id)
+            context.job_queue.run_once(
+                _del_msg_job,
+                when=60,
+                chat_id=update.effective_chat.id,
+                data=update.message.message_id,
+            )
 
-async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE, message_to_edit=None, cmd_msg_id=0):
+
+async def cmd_status(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, message_to_edit=None, cmd_msg_id=0
+):
     if not message_to_edit:
         await _safe_delete_user_msg(update, context)
         cmd_msg_id = update.message.message_id if update.message else 0
-        
+
     user = update.effective_user
     storage: HybridStorage = context.application.bot_data["storage"]
-    
+
     if not await is_admin(user.id, storage):
         return
 
     gh: GitHubAPI = context.application.bot_data["gh"]
-    
+
     # Lấy thông tin run trực tiếp từ GitHub để luôn chính xác nhất
     active_runs = []
     for status in ["in_progress", "queued"]:
@@ -1255,9 +1143,14 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE, message
 
     if not active_runs:
         text = "ℹ️ Hiện không có tiến trình build nào đang chạy."
-        kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔄 Làm mới", callback_data=f"refresh_st:{cmd_msg_id}"), InlineKeyboardButton("❌ Đóng", callback_data=f"closemsg:{cmd_msg_id}")]
-        ])
+        kb = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton("🔄 Làm mới", callback_data=f"refresh_st:{cmd_msg_id}"),
+                    InlineKeyboardButton("❌ Đóng", callback_data=f"closemsg:{cmd_msg_id}"),
+                ]
+            ]
+        )
         if message_to_edit:
             try:
                 await message_to_edit.edit_text(text, reply_markup=kb)
@@ -1266,11 +1159,14 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE, message
         else:
             m = await _send_msg(update, context, text, reply_markup=kb)
             if context.job_queue:
-                context.job_queue.run_once(_del_msg_job, when=60, chat_id=m.chat_id, data=m.message_id)
+                context.job_queue.run_once(
+                    _del_msg_job, when=60, chat_id=m.chat_id, data=m.message_id
+                )
                 if update.message:
-                    context.job_queue.run_once(_del_msg_job, when=60, chat_id=update.message.chat_id, data=cmd_msg_id)
+                    context.job_queue.run_once(
+                        _del_msg_job, when=60, chat_id=update.message.chat_id, data=cmd_msg_id
+                    )
         return
-
 
     # Lấy danh sách jobs local để map user_id nếu có
     jobs = await storage.get_jobs()
@@ -1305,7 +1201,9 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE, message
 
         user_id = job.get("user_id", "Unknown")
         user_name = job.get("user_name", "Unknown")
-        mention = _html_user_mention(user_id, user_name) if user_id != "Unknown" else "GitHub / Manual"
+        mention = (
+            _html_user_mention(user_id, user_name) if user_id != "Unknown" else "GitHub / Manual"
+        )
 
         job_type = job.get("type", "gki")
         if job_type == "buildsave":
@@ -1329,9 +1227,12 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE, message
             lines.append(f"┠ 🔄 Đang build: <code>{current_ver}</code>")
             if q_jobs:
                 wv = [j.get("bs_full_ver", "?") for j in q_jobs[:5]]
-                lines.append(f"┠ ⏳ Hàng chờ: <code>{', '.join(wv)}</code>" + (f" (+{len(q_jobs)-5})" if len(q_jobs) > 5 else ""))
+                lines.append(
+                    f"┠ ⏳ Hàng chờ: <code>{', '.join(wv)}</code>"
+                    + (f" (+{len(q_jobs) - 5})" if len(q_jobs) > 5 else "")
+                )
             lines.append(f"┠ Huỷ sub này → /cancel_{run_id}")
-            lines.append(f"┖ Huỷ TOÀN BỘ batch → /cancelbatch_{batch_id.replace('-','')[:16]}")
+            lines.append(f"┖ Huỷ TOÀN BỘ batch → /cancelbatch_{batch_id.replace('-', '')[:16]}")
         else:
             lines.append(f"┖ Huỷ job → /cancel_{run_id}")
 
@@ -1339,26 +1240,35 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE, message
     for bid, bj_list in batch_queued.items():
         if bid not in seen_batches and bj_list:
             bj_list = sorted(bj_list, key=lambda x: x.get("batch_index", 0))
-            vers = [j.get("bs_full_ver","?") for j in bj_list[:5]]
+            vers = [j.get("bs_full_ver", "?") for j in bj_list[:5]]
             lines.append("")
             lines.append(f"<b>🗂 [Web Build — Hàng chờ]</b>")
-            lines.append(f"┠ ⏳ {', '.join(vers)}" + (f" (+{len(bj_list)-5})" if len(bj_list) > 5 else ""))
-            lines.append(f"┖ Huỷ TOÀN BỘ → /cancelbatch_{bid.replace('-','')[:16]}")
+            lines.append(
+                f"┠ ⏳ {', '.join(vers)}" + (f" (+{len(bj_list) - 5})" if len(bj_list) > 5 else "")
+            )
+            lines.append(f"┖ Huỷ TOÀN BỘ → /cancelbatch_{bid.replace('-', '')[:16]}")
 
     msg_text = "\n".join(lines)
-    kb = InlineKeyboardMarkup([
+    kb = InlineKeyboardMarkup(
         [
-            InlineKeyboardButton("🔄 Làm mới", callback_data=f"refresh_st:{cmd_msg_id}"),
-            InlineKeyboardButton("❌ Đóng", callback_data=f"closemsg:{cmd_msg_id}")
+            [
+                InlineKeyboardButton("🔄 Làm mới", callback_data=f"refresh_st:{cmd_msg_id}"),
+                InlineKeyboardButton("❌ Đóng", callback_data=f"closemsg:{cmd_msg_id}"),
+            ]
         ]
-    ])
+    )
     if message_to_edit:
         try:
-            await message_to_edit.edit_text(msg_text, parse_mode=constants.ParseMode.HTML, reply_markup=kb)
+            await message_to_edit.edit_text(
+                msg_text, parse_mode=constants.ParseMode.HTML, reply_markup=kb
+            )
         except Exception:
             pass
     else:
-        await _send_msg(update, context, msg_text, parse_mode=constants.ParseMode.HTML, reply_markup=kb)
+        await _send_msg(
+            update, context, msg_text, parse_mode=constants.ParseMode.HTML, reply_markup=kb
+        )
+
 
 async def cb_refresh_st(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -1370,13 +1280,21 @@ async def cb_refresh_st(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cmd_msg_id = 0
     await cmd_status(update, context, message_to_edit=q.message, cmd_msg_id=cmd_msg_id)
 
+
 def _run_button_text(repo_label: str, run: dict) -> str:
     n = run.get("run_number")
     status = run.get("status")
     name = run.get("name") or run.get("display_title") or "workflow"
     return f"{repo_label} • #{n} • {status} • {name[:24]}"
 
-async def show_list_page(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 1, message_to_edit=None, cmd_msg_id=0):
+
+async def show_list_page(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    page: int = 1,
+    message_to_edit=None,
+    cmd_msg_id=0,
+):
     gh: GitHubAPI = context.application.bot_data["gh"]
     repo = config.GKI_REPO
 
@@ -1464,18 +1382,26 @@ async def show_list_page(update: Update, context: ContextTypes.DEFAULT_TYPE, pag
         text += f"<b>{start_idx + i + 1}. Run #{run_id}</b> by {mention}\n"
         text += f"Time: {time_str}\n"
         text += f"Xoá: /delete_{run_id}\n"
-        text += f"<blockquote><b>Xem : <a href='{html_url}'>Github</a> | <a href='{nightly_url}'>File</a> | <a href='https://kernel.takeshi.dev/'>Dashboard</a></b></blockquote>\n\n"
+        text += f"<blockquote><b>Xem : <a href='{html_url}'>Github</a> | <a href='{nightly_url}'>File</a> | {_dashboard_link()}</b></blockquote>\n\n"
 
     kb = []
     if total_pages > 1:
-        kb.append([
-            InlineKeyboardButton("⬅️ Trước", callback_data=f"listpage:{page-1}"),
-            InlineKeyboardButton(f"{page}/{total_pages}", callback_data="none"),
-            InlineKeyboardButton("Sau ➡️", callback_data=f"listpage:{page+1}")
-        ])
+        kb.append(
+            [
+                InlineKeyboardButton("⬅️ Trước", callback_data=f"listpage:{page - 1}"),
+                InlineKeyboardButton(f"{page}/{total_pages}", callback_data="none"),
+                InlineKeyboardButton("Sau ➡️", callback_data=f"listpage:{page + 1}"),
+            ]
+        )
     kb.append([InlineKeyboardButton("❌ Đóng", callback_data=f"closemsg:{cmd_msg_id}")])
     reply_markup = InlineKeyboardMarkup(kb)
-    await message_to_edit.edit_text(text, parse_mode=constants.ParseMode.HTML, reply_markup=reply_markup, disable_web_page_preview=True)
+    await message_to_edit.edit_text(
+        text,
+        parse_mode=constants.ParseMode.HTML,
+        reply_markup=reply_markup,
+        disable_web_page_preview=True,
+    )
+
 
 async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _safe_delete_user_msg(update, context)
@@ -1483,14 +1409,15 @@ async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     storage: HybridStorage = context.application.bot_data["storage"]
     if not await is_admin(user.id, storage):
         return
-        
+
     await show_list_page(update, context, page=1, cmd_msg_id=update.message.message_id)
+
 
 def _format_build_lines(inputs: dict) -> list[str]:
     lines = []
     if not inputs:
         return lines
-        
+
     variant = inputs.get("variant")
     branch_raw = inputs.get("branch")
     branch = branch_raw.split("(")[0] if branch_raw else None
@@ -1500,25 +1427,30 @@ def _format_build_lines(inputs: dict) -> list[str]:
     has_kpm = "KPM" if inputs.get("use_kpm") else ""
     has_susfs = "SUSFS" if not inputs.get("cancel_susfs") else ""
     ksu = inputs.get("ksu_type", "")
-    
+
     parts = []
     for x in [variant, branch, c_name, has_zram, has_bbg, has_kpm, has_susfs, ksu]:
         if x:
             parts.append(str(x).strip())
-            
+
     prefix = "|".join(parts)
-    
+
     subs = inputs.get("sub_levels", "")
     sub_list = subs.split(",") if subs else []
-    
-    for tk, prefix_tk in [("build_a12_5_10", "A12-5.10"), ("build_a13_5_15", "A13-5.15"), 
-                          ("build_a14_6_1", "A14-6.1"), ("build_a15_6_6", "A15-6.6")]:
+
+    for tk, prefix_tk in [
+        ("build_a12_5_10", "A12-5.10"),
+        ("build_a13_5_15", "A13-5.15"),
+        ("build_a14_6_1", "A14-6.1"),
+        ("build_a15_6_6", "A15-6.6"),
+    ]:
         if inputs.get(tk):
             sl = sub_list if subs else SUB_LEVELS.get(tk, [])
             for s in sl:
                 lines.append(f"🌿 Build: {prefix}|{prefix_tk}.{s.strip()}")
-                
+
     return lines
+
 
 async def cb_list_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -1541,7 +1473,9 @@ async def cb_list_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         cmd_msg_id = int(btn.callback_data.split(":")[1])
                     except:
                         pass
-    await show_list_page(update, context, page=page, message_to_edit=q.message, cmd_msg_id=cmd_msg_id)
+    await show_list_page(
+        update, context, page=page, message_to_edit=q.message, cmd_msg_id=cmd_msg_id
+    )
 
 
 async def cb_run_controls(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1556,14 +1490,14 @@ async def cb_run_controls(update: Update, context: ContextTypes.DEFAULT_TYPE):
     repo = config.GKI_REPO
     view_url = f"https://github.com/{config.GITHUB_OWNER}/{repo}/actions/runs/{run_id}"
     kb = [
-        [InlineKeyboardButton("Hủy bỏ", callback_data=f"runctl:cancel:{repo_tag}:{run_id}"),
-         InlineKeyboardButton("Đóng", callback_data=f"runctl:close:{repo_tag}:{run_id}")],
-        [InlineKeyboardButton("Xem", url=view_url)]
+        [
+            InlineKeyboardButton("Hủy bỏ", callback_data=f"runctl:cancel:{repo_tag}:{run_id}"),
+            InlineKeyboardButton("Đóng", callback_data=f"runctl:close:{repo_tag}:{run_id}"),
+        ],
+        [InlineKeyboardButton("Xem", url=view_url)],
     ]
-    await q.edit_message_text(
-        text=f"Run #{run_id} — GKI",
-        reply_markup=InlineKeyboardMarkup(kb)
-    )
+    await q.edit_message_text(text=f"Run #{run_id} — GKI", reply_markup=InlineKeyboardMarkup(kb))
+
 
 async def cb_run_control_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -1572,7 +1506,7 @@ async def cb_run_control_action(update: Update, context: ContextTypes.DEFAULT_TY
         return await q.answer()
     gh: GitHubAPI = context.application.bot_data["gh"]
     await q.answer()
-    
+
     parts = q.data.split(":")
     action = parts[1]
     repo_tag = parts[2]
@@ -1585,18 +1519,21 @@ async def cb_run_control_action(update: Update, context: ContextTypes.DEFAULT_TY
     if action == "cancel":
         # 1. Hiển thị trạng thái đang hủy
         await q.edit_message_text(f"⏳ Đang gửi lệnh hủy run #{run_id}...")
-        
+
         # 2. Gửi lệnh hủy
         res = await gh.cancel_run(repo, run_id)
         if res["status"] not in (202, 204):
             await q.edit_message_text(f"❌ Gửi lệnh hủy thất bại: HTTP {res['status']}")
             return
-        
+
         # 3. Cập nhật trạng thái đang chờ
-        await q.edit_message_text(f"⏳ Đã gửi lệnh hủy run #{run_id}.\nĐang chờ xác nhận từ GitHub...")
-        
+        await q.edit_message_text(
+            f"⏳ Đã gửi lệnh hủy run #{run_id}.\nĐang chờ xác nhận từ GitHub..."
+        )
+
         # 4. Poll cho đến khi run thực sự cancelled (tối đa 60s)
         import asyncio
+
         for i in range(20):  # 20 x 3s = 60s
             await asyncio.sleep(3)
             check = await gh.get_run(repo, run_id)
@@ -1612,33 +1549,42 @@ async def cb_run_control_action(update: Update, context: ContextTypes.DEFAULT_TY
                         await q.edit_message_text(
                             f"✅ <b>Đã hủy và xoá thành công!</b>\n\n"
                             f"Run #{run_id} đã được hủy và dọn dẹp.",
-                            parse_mode="HTML"
+                            parse_mode="HTML",
                         )
                     else:
                         await q.edit_message_text(
                             f"ℹ️ Run #{run_id} đã hoàn tất với kết quả: <b>{conclusion}</b>",
-                            parse_mode="HTML"
+                            parse_mode="HTML",
                         )
                     # Xóa tin nhắn lệnh gốc
                     if cmd_msg_id:
                         try:
-                            await context.bot.delete_message(chat_id=q.message.chat_id, message_id=cmd_msg_id)
+                            await context.bot.delete_message(
+                                chat_id=q.message.chat_id, message_id=cmd_msg_id
+                            )
                         except Exception:
                             pass
                     # Tự xóa sau 60s
                     if context.job_queue:
-                        context.job_queue.run_once(_del_msg_job, when=60, chat_id=q.message.chat_id, data=q.message.message_id)
+                        context.job_queue.run_once(
+                            _del_msg_job,
+                            when=60,
+                            chat_id=q.message.chat_id,
+                            data=q.message.message_id,
+                        )
                     return
-        
+
         # Timeout - vẫn chưa cancelled sau 60s
         await q.edit_message_text(
             f"⚠️ Đã gửi lệnh hủy run #{run_id} nhưng chưa xác nhận được.\n"
             f"Vui lòng kiểm tra trên GitHub.",
-            parse_mode="HTML"
+            parse_mode="HTML",
         )
         if context.job_queue:
-            context.job_queue.run_once(_del_msg_job, when=60, chat_id=q.message.chat_id, data=q.message.message_id)
-            
+            context.job_queue.run_once(
+                _del_msg_job, when=60, chat_id=q.message.chat_id, data=q.message.message_id
+            )
+
     elif action == "close":
         # Xóa cả tin nhắn bot và lệnh gọi
         chat_id = q.message.chat_id
@@ -1652,6 +1598,7 @@ async def cb_run_control_action(update: Update, context: ContextTypes.DEFAULT_TY
                 await context.bot.delete_message(chat_id=chat_id, message_id=cmd_msg_id)
             except Exception:
                 pass
+
 
 async def check_user_job_limit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     user = update.effective_user
@@ -1672,10 +1619,13 @@ async def check_user_job_limit(update: Update, context: ContextTypes.DEFAULT_TYP
         elapsed = (datetime.now(timezone.utc) - job_created_at).total_seconds()
         if elapsed < 3600:
             remaining = int((3600 - elapsed) // 60) + 1
-            m = await update.message.reply_text(f"⚠️ Chỉ được 1 job/1h. Vui lòng đợi {remaining} phút.", quote=False)
+            m = await update.message.reply_text(
+                f"⚠️ Chỉ được 1 job/1h. Vui lòng đợi {remaining} phút.", quote=False
+            )
             context.job_queue.run_once(_del_msg_job, when=60, chat_id=m.chat_id, data=m.message_id)
             return False
     return True
+
 
 async def cb_close_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -1692,27 +1642,34 @@ async def cb_close_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error("Close msg failed: %s", e)
 
+
 async def send_saved_config(app, run_id, job, chat_id):
     inputs = job.get("inputs", {})
     if not inputs:
         return False
-        
+
     lines = [f"💾 <b>LƯU TRỮ CẤU HÌNH GKI BUILD #{run_id}</b>"]
     # Get build date from job if available, else current time
     job_created_at = job.get("created_at")
     if job_created_at:
         try:
-            dt = datetime.fromisoformat(job_created_at).replace(tzinfo=timezone.utc).astimezone(ZoneInfo("Asia/Ho_Chi_Minh"))
+            dt = (
+                datetime.fromisoformat(job_created_at)
+                .replace(tzinfo=timezone.utc)
+                .astimezone(ZoneInfo("Asia/Ho_Chi_Minh"))
+            )
             lines.append(f"🕒 <b>Ngày build</b>: <code>{dt.strftime('%H:%M %d/%m/%Y')}</code>\n")
         except:
             pass
     else:
         lines.append(f"🕒 <b>Ngày build</b>: <code>Chưa rõ</code>\n")
 
-    lines.append(f"• <b>KernelSU Variant</b>: <code>{inputs.get('kernelsu_variant', 'None')}</code>")
+    lines.append(
+        f"• <b>KernelSU Variant</b>: <code>{inputs.get('kernelsu_variant', 'None')}</code>"
+    )
     lines.append(f"• <b>KernelSU Branch</b>: <code>{inputs.get('kernelsu_branch', 'None')}</code>")
-    
-    if inputs.get('version'):
+
+    if inputs.get("version"):
         lines.append(f"• <b>Version Custom</b>: <code>{inputs.get('version')}</code>")
 
     lines.append(f"• <b>Compile BBG</b>: {'✅ Có' if inputs.get('use_bbg') else '❌ Không'}")
@@ -1720,40 +1677,55 @@ async def send_saved_config(app, run_id, job, chat_id):
     lines.append(f"• <b>Dùng ZRAM</b>: {'✅ Có' if inputs.get('use_zram') else '❌ Không'}")
     # Cancel SUSFS logic is inverted from 'Bật SUSFS', check 'cancel_susfs'
     lines.append(f"• <b>Bật SUSFS</b>: {'❌ Không' if inputs.get('cancel_susfs') else '✅ Có'}")
-    
+
     target_flags = []
-    if inputs.get('build_a12_5_10'): target_flags.append('A12 (5.10)')
-    if inputs.get('build_a13_5_15'): target_flags.append('A13 (5.15)')
-    if inputs.get('build_a14_6_1'): target_flags.append('A14 (6.1)')
-    if inputs.get('build_a15_6_6'): target_flags.append('A15 (6.6)')
-    
-    if inputs.get('build_all'):
+    if inputs.get("build_a12_5_10"):
+        target_flags.append("A12 (5.10)")
+    if inputs.get("build_a13_5_15"):
+        target_flags.append("A13 (5.15)")
+    if inputs.get("build_a14_6_1"):
+        target_flags.append("A14 (6.1)")
+    if inputs.get("build_a15_6_6"):
+        target_flags.append("A15 (6.6)")
+
+    if inputs.get("build_all"):
         lines.append(f"• <b>Phiên bản Android</b>: <code>Tất cả (A12-A15)</code>")
     elif target_flags:
         lines.append(f"• <b>Phiên bản Android</b>: <code>{', '.join(target_flags)}</code>")
-        
-    sub_levels = inputs.get('sub_levels')
+
+    sub_levels = inputs.get("sub_levels")
     if sub_levels:
-        lines.append(f"• <b>Sub-versions (chỉ định)</b>: <code>{sub_levels.replace(',', ', ')}</code>")
+        lines.append(
+            f"• <b>Sub-versions (chỉ định)</b>: <code>{sub_levels.replace(',', ', ')}</code>"
+        )
     else:
         lines.append(f"• <b>Sub-versions</b>: <code>Tất cả các bản cập nhật phụ</code>")
-        
+
     # Tạo Inline Keyboard cho tin nhắn lưu cấu hình
-    save_kb = InlineKeyboardMarkup([
+    save_kb = InlineKeyboardMarkup(
         [
-            InlineKeyboardButton("🌐 Xem trên GitHub", url=f"https://github.com/{config.GITHUB_OWNER}/{config.GKI_REPO}/actions/runs/{run_id}"),
-            InlineKeyboardButton("📦 Tải file", url=f"https://nightly.link/{config.GITHUB_OWNER}/{config.GKI_REPO}/actions/runs/{run_id}")
+            [
+                InlineKeyboardButton(
+                    "🌐 Xem trên GitHub",
+                    url=f"https://github.com/{config.GITHUB_OWNER}/{config.GKI_REPO}/actions/runs/{run_id}",
+                ),
+                InlineKeyboardButton(
+                    "📦 Tải file",
+                    url=f"https://nightly.link/{config.GITHUB_OWNER}/{config.GKI_REPO}/actions/runs/{run_id}",
+                ),
+            ]
         ]
-    ])
-    
+    )
+
     await app.bot.send_message(
         chat_id=chat_id,
         text="\n".join(lines),
         parse_mode=constants.ParseMode.HTML,
         reply_markup=save_kb,
-        disable_web_page_preview=True
+        disable_web_page_preview=True,
     )
     return True
+
 
 async def cb_save_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -1766,11 +1738,11 @@ async def cb_save_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
         run_id = int(run_id_str)
     except:
         return await q.answer("Lỗi ID", show_alert=True)
-        
+
     job = await storage.get_job_by_run_id(run_id)
     if not job:
         return await q.answer("Không tìm thấy dữ liệu build này trong hệ thống.", show_alert=True)
-        
+
     try:
         if await send_saved_config(context.application, run_id, job, q.from_user.id):
             await q.answer("Đã gửi tin nhắn cấu hình vào chat riêng của bạn! 📩", show_alert=True)
@@ -1779,7 +1751,11 @@ async def cb_save_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error("Failed to PM user: %s", e)
         # Nút "Lưu" có thể được bấm trong nhóm. Nếu user chưa start bot, sẽ ném lỗi Forbidden
-        await q.answer("❌ Lỗi: Bạn cần nhắn tin cho Bot trước (nhấn START) để nhận tin nhắn riêng.", show_alert=True)
+        await q.answer(
+            "❌ Lỗi: Bạn cần nhắn tin cho Bot trước (nhấn START) để nhận tin nhắn riêng.",
+            show_alert=True,
+        )
+
 
 async def cmd_cancel_batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Huỷ toàn bộ batch buildsave theo batch_id."""
@@ -1792,6 +1768,7 @@ async def cmd_cancel_batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = update.message.text or ""
     import re as _re
+
     m = _re.match(r"^/cancelbatch_([\w-]+)", text.strip())
     if not m:
         await update.message.reply_text("❌ Sai cú pháp.")
@@ -1799,10 +1776,14 @@ async def cmd_cancel_batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     batch_prefix = m.group(1).replace("-", "")
     jobs = await storage.get_jobs()
-    batch_jobs = [j for j in jobs if j.get("batch_id", "").replace("-", "")[:16] == batch_prefix[:16]]
+    batch_jobs = [
+        j for j in jobs if j.get("batch_id", "").replace("-", "")[:16] == batch_prefix[:16]
+    ]
 
     if not batch_jobs:
-        await update.message.reply_text(f"❌ Không tìm thấy batch `{batch_prefix[:8]}...`", parse_mode="Markdown")
+        await update.message.reply_text(
+            f"❌ Không tìm thấy batch `{batch_prefix[:8]}...`", parse_mode="Markdown"
+        )
         return
 
     cancelled = 0
@@ -1813,7 +1794,9 @@ async def cmd_cancel_batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if status in ("queued", "completed"):
             # Đánh dấu cancelled nếu chưa done thực sự
             if j.get("conclusion") not in ("success",):
-                await storage.update_job(j["_id"], {"status": "completed", "conclusion": "cancelled", "notified": True})
+                await storage.update_job(
+                    j["_id"], {"status": "completed", "conclusion": "cancelled", "notified": True}
+                )
                 cancelled += 1
         elif status in ("dispatched", "in_progress", "running"):
             # Huỷ trên GitHub nếu có run_id
@@ -1822,7 +1805,9 @@ async def cmd_cancel_batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await gh.cancel_run(j.get("repo", config.GKI_REPO), int(run_id))
                 except Exception as e:
                     logger.warning("cancel_batch: cancel_run error for %s: %s", run_id, e)
-            await storage.update_job(j["_id"], {"status": "completed", "conclusion": "cancelled", "notified": True})
+            await storage.update_job(
+                j["_id"], {"status": "completed", "conclusion": "cancelled", "notified": True}
+            )
             cancelled += 1
 
     # Cập nhật batch message và xử lý card web
@@ -1839,14 +1824,18 @@ async def cmd_cancel_batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 msg_id = first_job.get("batch_msg_id")
                 if chat_id and msg_id:
                     try:
-                        await context.application.bot.delete_message(chat_id=chat_id, message_id=msg_id)
+                        await context.application.bot.delete_message(
+                            chat_id=chat_id, message_id=msg_id
+                        )
                     except Exception:
                         # Nếu xoá không được thì cập nhật text thay thế
                         try:
                             await context.application.bot.edit_message_text(
-                                chat_id=chat_id, message_id=msg_id,
+                                chat_id=chat_id,
+                                message_id=msg_id,
                                 text=f"❌ <b>Đã huỷ batch build.</b>\n🔨 {first_job.get('bs_variant', '')} — Đã huỷ {cancelled}/{len(batch_jobs)} bản.",
-                                parse_mode="HTML", disable_web_page_preview=True
+                                parse_mode="HTML",
+                                disable_web_page_preview=True,
                             )
                         except Exception:
                             pass
@@ -1854,63 +1843,95 @@ async def cmd_cancel_batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Có ít nhất 1 bản thành công → cập nhật message
             await update_batch_message(batch_id, storage, context.application.bot)
 
-    msg = await update.message.reply_text(f"✅ Đã huỷ <b>{cancelled}/{len(batch_jobs)}</b> jobs trong batch.", parse_mode="HTML")
+    msg = await update.message.reply_text(
+        f"✅ Đã huỷ <b>{cancelled}/{len(batch_jobs)}</b> jobs trong batch.", parse_mode="HTML"
+    )
     if context.job_queue:
         context.job_queue.run_once(_del_msg_job, when=12, chat_id=msg.chat_id, data=msg.message_id)
         if update.message:
-            context.job_queue.run_once(_del_msg_job, when=12, chat_id=update.message.chat_id, data=update.message.message_id)
+            context.job_queue.run_once(
+                _del_msg_job,
+                when=12,
+                chat_id=update.message.chat_id,
+                data=update.message.message_id,
+            )
+
 
 async def cmd_rebuild(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Rebuild (các) job thất bại/hủy theo Custom ID."""
     await _safe_delete_user_msg(update, context)
     user = update.effective_user
     storage: HybridStorage = context.application.bot_data["storage"]
-    if not await is_admin(user.id, storage): return
+    if not await is_admin(user.id, storage):
+        return
 
     text = update.message.text.strip()
     parts = text.split()
     if len(parts) < 2:
-        return await _send_msg(update, context, "❌ Sai cú pháp. Dùng <code>/rb ID</code> (VD: <code>/rb NEXT0100.2227.280326</code>).", parse_mode="HTML")
+        return await _send_msg(
+            update,
+            context,
+            "❌ Sai cú pháp. Dùng <code>/rb ID</code> (VD: <code>/rb NEXT0100.2227.280326</code>).",
+            parse_mode="HTML",
+        )
     custom_id = parts[1].split(":")[0].strip()
-    
+
     jobs = await storage.get_jobs()
     target_batch_id = None
     for j in jobs:
         if j.get("type") == "buildsave" and j.get("batch_id"):
-            cid = _make_custom_id(j.get("bs_variant", "SukiSU"), j.get("inputs", {}), j.get("created_at", ""))
+            cid = _make_custom_id(
+                j.get("bs_variant", "SukiSU"), j.get("inputs", {}), j.get("created_at", "")
+            )
             if cid == custom_id:
                 target_batch_id = j["batch_id"]
                 break
-                
+
     if not target_batch_id:
-        return await _send_msg(update, context, f"❌ Không tìm thấy lô build khớp với ID <b>{custom_id}</b>.", parse_mode="HTML")
-        
-    batch_jobs = [j for j in jobs if j.get("batch_id") == target_batch_id and j.get("status") == "completed" and j.get("conclusion") in ("failed", "cancelled", "stale")]
+        return await _send_msg(
+            update,
+            context,
+            f"❌ Không tìm thấy lô build khớp với ID <b>{custom_id}</b>.",
+            parse_mode="HTML",
+        )
+
+    batch_jobs = [
+        j
+        for j in jobs
+        if j.get("batch_id") == target_batch_id
+        and j.get("status") == "completed"
+        and j.get("conclusion")
+        in ("failure", "failed", "cancelled", "stale", "timed_out", "action_required")
+    ]
     if not batch_jobs:
-        return await _send_msg(update, context, "✅ Không có dòng nào bị lỗi trong lô thẻ này để build lại.", parse_mode="HTML")
-        
+        return await _send_msg(
+            update,
+            context,
+            "✅ Không có dòng nào bị lỗi trong lô thẻ này để build lại.",
+            parse_mode="HTML",
+        )
+
     total = len(batch_jobs)
     chat_id = update.effective_chat.id
-    thread_id = update.effective_message.message_thread_id if (update.effective_message and update.effective_message.is_topic_message) else None
+    thread_id = (
+        update.effective_message.message_thread_id
+        if (update.effective_message and update.effective_message.is_topic_message)
+        else None
+    )
     msg = await _bot_send_topic_safe(
         context.bot,
         chat_id,
-        f"🔄 <b>Đang Rebuild... {custom_id}</b>\n<b>⏳ Tiến trình: 0/{total}</b>\n<blockquote>Xem: <a href='https://github.com/{config.GITHUB_OWNER}/{config.GKI_REPO}/actions'><b>Github</b></a> | <a href='https://kernel.takeshi.dev/'><b>Dashboard</b></a></blockquote>",
+        f"🔄 <b>Đang Rebuild... {custom_id}</b>\n<b>⏳ Tiến trình: 0/{total}</b>\n<blockquote>Xem: <a href='https://github.com/{config.GITHUB_OWNER}/{config.GKI_REPO}/actions'><b>Github</b></a> | {_dashboard_link()}</blockquote>",
         message_thread_id=thread_id,
-        parse_mode="HTML"
+        parse_mode="HTML",
     )
     rebuild_msg_id = f"{msg.message_id}|{msg.chat_id}|{custom_id}"
-    
+
     for j in batch_jobs:
-        await storage.update_job(j["_id"], {
-            "status": "rebuild_queued",
-            "rebuild_msg_id": rebuild_msg_id
-        })
-        
-    try:
-        from web_sync import generate_web_json
-        await generate_web_json(storage)
-    except: pass
+        await storage.update_job(
+            j["_id"], {"status": "rebuild_queued", "rebuild_msg_id": rebuild_msg_id}
+        )
+
 
 async def cmd_cancel_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _safe_delete_user_msg(update, context)
@@ -1918,7 +1939,7 @@ async def cmd_cancel_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     storage: HybridStorage = context.application.bot_data["storage"]
     if not await is_admin(user.id, storage):
         return
-    
+
     text = update.message.text.strip()
     try:
         raw_cmd = text.split()[0]
@@ -1926,18 +1947,20 @@ async def cmd_cancel_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
         run_id = int(run_id_str)
     except:
         return await _send_msg(update, context, "❌ ID không hợp lệ.")
-        
+
     gh: GitHubAPI = context.application.bot_data["gh"]
     msg = await _send_msg(update, context, f"⏳ Đang gửi lệnh hủy Run #{run_id} lên GitHub...")
     res = await gh.cancel_run(config.GKI_REPO, run_id)
-    
+
     if res["status"] in (202, 204, 404, 409):
         job = await storage.get_job_by_run_id(run_id)
         if job:
-            await storage.update_job(job["_id"], {"status": "completed", "conclusion": "cancelled", "notified": True})
+            await storage.update_job(
+                job["_id"], {"status": "completed", "conclusion": "cancelled", "notified": True}
+            )
             if job.get("batch_id"):
                 await update_batch_message(job["batch_id"], storage, context.application.bot)
-        
+
         # Dọn dẹp github run actions list
         async def _cleanup_gh():
             for _ in range(10):
@@ -1946,16 +1969,21 @@ async def cmd_cancel_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if rn["status"] == 200 and rn.get("json", {}).get("status") == "completed":
                     break
             await gh.delete_run(config.GKI_REPO, run_id)
-        
+
         context.application.create_task(_cleanup_gh())
         await msg.edit_text(f"✅ Đã hủy thành công Run #{run_id}.")
     else:
         await msg.edit_text(f"❌ Lỗi hủy: {res['status']} {res.get('json', '')}")
-        
+
     if context.job_queue:
         context.job_queue.run_once(_del_msg_job, when=10, chat_id=msg.chat_id, data=msg.message_id)
         if update.message:
-            context.job_queue.run_once(_del_msg_job, when=10, chat_id=update.message.chat_id, data=update.message.message_id)
+            context.job_queue.run_once(
+                _del_msg_job,
+                when=10,
+                chat_id=update.message.chat_id,
+                data=update.message.message_id,
+            )
 
 
 async def cmd_delete_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1964,7 +1992,7 @@ async def cmd_delete_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     storage: HybridStorage = context.application.bot_data["storage"]
     if not await is_admin(user.id, storage):
         return
-    
+
     text = update.message.text.strip()
     try:
         raw_cmd = text.split()[0]
@@ -1972,426 +2000,88 @@ async def cmd_delete_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
         run_id = int(run_id_str)
     except:
         return await _send_msg(update, context, "❌ ID không hợp lệ.")
-        
+
     gh: GitHubAPI = context.application.bot_data["gh"]
-    
+
     msg = await _send_msg(update, context, f"⏳ Đang gửi lệnh xoá Run #{run_id} lên GitHub...")
     res = await gh.delete_run(config.GKI_REPO, run_id)
-    
+
     if res["status"] in (202, 204):
         await msg.edit_text(f"✅ Đã yêu cầu xoá thành công Run #{run_id}.")
         await storage.delete_job_by_run_id(run_id)
     else:
         if res["status"] in (404,):
             await storage.delete_job_by_run_id(run_id)
-            await msg.edit_text(f"✅ Run #{run_id} không tồn tại trên GitHub. Đã xoá khỏi dữ liệu nội bộ.")
+            await msg.edit_text(
+                f"✅ Run #{run_id} không tồn tại trên GitHub. Đã xoá khỏi dữ liệu nội bộ."
+            )
         else:
             await msg.edit_text(f"❌ Lỗi xoá: {res['status']} {res.get('json', '')}")
-            
+
     # Xoá tin nhắn sau 10s
     if context.job_queue:
         context.job_queue.run_once(_del_msg_job, when=10, chat_id=msg.chat_id, data=msg.message_id)
         if update.message:
-            context.job_queue.run_once(_del_msg_job, when=10, chat_id=update.message.chat_id, data=update.message.message_id)
+            context.job_queue.run_once(
+                _del_msg_job,
+                when=10,
+                chat_id=update.message.chat_id,
+                data=update.message.message_id,
+            )
 
-def _truthy_feature(value) -> bool:
-    """Normalize workflow input values into booleans for web feature labels."""
-    if isinstance(value, bool):
-        return value
-    if value is None:
-        return False
-    return str(value).strip().lower() in {"1", "true", "yes", "on", "enabled", "enabled (开启)"}
-
-
-def _gki_web_config_label(inputs: dict) -> str:
-    """Build a compact config label shown after the KernelSU variant in the web modal."""
-    parts = []
-    if not _truthy_feature(inputs.get("cancel_susfs", True)):
-        parts.append("SUSFS")
-    if _truthy_feature(inputs.get("use_bbg")):
-        parts.append("BBG")
-    if _truthy_feature(inputs.get("use_zram")):
-        parts.append("ZRAM")
-    if _truthy_feature(inputs.get("use_kpm")):
-        parts.append("KPM")
-    if _truthy_feature(inputs.get("use_rekernel")):
-        parts.append("Re-Kernel")
-    droidspaces = str(inputs.get("droidspaces", "off") or "off").strip()
-    if droidspaces and droidspaces.lower() != "off":
-        parts.append(f"Droidspaces {droidspaces}")
-    if _truthy_feature(inputs.get("supp_op")):
-        parts.append("OP8E")
-    return " + ".join(parts)
-
-
-def _parse_job_created_at(job: dict):
-    raw = str(job.get("created_at", "") or "").strip()
-    if not raw:
-        return None
-    try:
-        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
-    except Exception:
-        return None
-
-
-def _iter_recent_web_catalog_gki_jobs(jobs, max_age_days: int = 90):
-    """Yield successful default-version single-target GKI jobs eligible for the web catalog."""
-    cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
-    for job in jobs:
-        if job.get("type") != "gki":
-            continue
-        if job.get("status") != "completed" or job.get("conclusion") != "success":
-            continue
-        if not job.get("run_id"):
-            continue
-        created_at = _parse_job_created_at(job)
-        if not created_at or created_at < cutoff:
-            continue
-        inputs = job.get("inputs") or {}
-        if str(inputs.get("version", "") or "").strip():
-            continue
-        target_keys = [key for key in TARGET_META if _truthy_feature(inputs.get(key))]
-        sub_levels = [s.strip() for s in str(inputs.get("sub_levels", "") or "").split(",") if s.strip()]
-        if len(target_keys) != 1 or len(sub_levels) != 1:
-            continue
-        if sub_levels[0].upper() == "X":
-            continue
-        yield created_at, job
-
-
-def _clear_web_downloads_before_rebuild():
-    """Remove every existing web download link before rebuilding from recent user GKI history."""
-    bot_dir = os.path.dirname(os.path.abspath(__file__))
-    data_root = os.path.normpath(os.path.join(bot_dir, "..", "web", "data"))
-    removed = 0
-    for android, kernel_v in TARGET_META.values():
-        json_path = os.path.join(data_root, android, f"{kernel_v}.json")
-        if not os.path.exists(json_path):
-            continue
-        try:
-            with open(json_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            touched = False
-            if data.pop("lts_downloads", None) is not None:
-                removed += 1
-                touched = True
-            for entry in data.get("entries", []):
-                downloads = entry.pop("downloads", None)
-                if isinstance(downloads, dict):
-                    removed += len(downloads)
-                    touched = True
-            if touched:
-                with open(json_path, "w", encoding="utf-8") as f:
-                    json.dump(data, f, ensure_ascii=False, indent=2)
-                    f.write("\n")
-        except Exception as e:
-            logger.error("web catalog: failed to clear downloads from %s: %s", json_path, e)
-    return removed
-
-
-async def _update_web_download_from_gki_job(job: dict, run_id, app):
-    """Use a successful default-version user /gki build as the web download source."""
-    import json as _json
-
-    inputs = job.get("inputs") or {}
-    if str(inputs.get("version", "") or "").strip():
-        logger.info("web catalog: skip GKI run %s because custom version is not default", run_id)
-        return
-
-    target_keys = [key for key in TARGET_META if _truthy_feature(inputs.get(key))]
-    sub_levels_raw = str(inputs.get("sub_levels", "") or "").strip()
-    sub_levels = [s.strip() for s in sub_levels_raw.split(",") if s.strip()]
-    if len(target_keys) != 1 or len(sub_levels) != 1:
-        logger.info(
-            "web catalog: skip GKI run %s because it is not a single target/sub build: targets=%s subs=%s",
-            run_id, target_keys, sub_levels,
-        )
-        return
-
-    sub_level = sub_levels[0]
-    if sub_level.upper() == "X":
-        logger.info("web catalog: skip GKI run %s because LTS/X catalog writes are not enabled", run_id)
-        return
-
-    target_key = target_keys[0]
-    android, kernel_v = TARGET_META[target_key]
-    full_ver = f"{kernel_v}.{sub_level}"
-    variant = str(inputs.get("kernelsu_variant", "SukiSU") or "SukiSU").strip() or "SukiSU"
-    nightly_link = (
-        f"https://nightly.link/{config.GITHUB_OWNER}/{config.GKI_REPO}"
-        f"/actions/runs/{run_id}"
-    )
-
-    bot_dir = os.path.dirname(os.path.abspath(__file__))
-    json_path = os.path.normpath(os.path.join(bot_dir, "..", "web", "data", android, f"{kernel_v}.json"))
-    if not os.path.exists(json_path):
-        logger.error("web catalog: không tìm thấy file JSON: %s", json_path)
-        return
-
-    with open(json_path, "r", encoding="utf-8") as f:
-        data = _json.load(f)
-
-    features = {
-        "susfs": not _truthy_feature(inputs.get("cancel_susfs", True)),
-        "bbg": _truthy_feature(inputs.get("use_bbg")),
-        "zram": _truthy_feature(inputs.get("use_zram")),
-        "kpm": _truthy_feature(inputs.get("use_kpm")),
-        "rekernel": _truthy_feature(inputs.get("use_rekernel")),
-        "droidspaces": str(inputs.get("droidspaces", "off") or "off"),
-        "supp_op": _truthy_feature(inputs.get("supp_op")),
-    }
-    download_info = {
-        "url": nightly_link,
-        "config": _gki_web_config_label(inputs),
-        "features": features,
-        "source": "user-gki-auto",
-        "run_id": int(run_id),
-        "user_name": job.get("user_name", ""),
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-    }
-
-    entries = data.setdefault("entries", [])
-    target_entry = None
-    for entry in entries:
-        if entry.get("kernel") == full_ver:
-            target_entry = entry
-            break
-
-    if target_entry is None:
-        meta = SUB_LEVEL_META.get(target_key, {}).get(sub_level, (datetime.now(timezone.utc).strftime("%Y-%m"), ""))
-        target_entry = {"date": meta[0], "kernel": full_ver}
-        entries.append(target_entry)
-        entries.sort(key=lambda item: [int(part) for part in str(item.get("kernel", "0.0.0")).split(".") if part.isdigit()])
-
-    downloads = target_entry.setdefault("downloads", {})
-    downloads[variant] = download_info
-
-    with open(json_path, "w", encoding="utf-8") as f:
-        _json.dump(data, f, ensure_ascii=False, indent=2)
-        f.write("\n")
-
-    logger.warning(
-        "web catalog: updated from user GKI %s %s %s -> %s",
-        full_ver, variant, download_info.get("config") or "default", nightly_link,
-    )
-
-
-async def _rebuild_web_downloads_from_recent_gki_jobs(storage: HybridStorage, app, max_age_days: int = 90):
-    """Rebuild generated web downloads from all recent qualifying user /gki jobs."""
-    try:
-        jobs = await storage.get_jobs()
-    except Exception as e:
-        logger.error("web catalog: cannot load jobs for rebuild: %s", e)
-        return
-
-    removed = _clear_web_downloads_before_rebuild()
-    eligible = sorted(_iter_recent_web_catalog_gki_jobs(jobs, max_age_days), key=lambda item: item[0])
-    updated = 0
-    for _, job in eligible:
-        try:
-            await _update_web_download_from_gki_job(job, job.get("run_id"), app)
-            updated += 1
-        except Exception as e:
-            logger.error("web catalog: rebuild failed for job %s run %s: %s", job.get("_id"), job.get("run_id"), e)
-
-    logger.warning(
-        "web catalog: rebuilt from recent user GKI jobs; max_age_days=%s eligible=%s removed=%s updated=%s",
-        max_age_days, len(eligible), removed, updated,
-    )
-
-
-async def _update_buildsave_download_link(job: dict, run_id, app):
-    """Cập nhật link tải xuống vào file JSON của web khi build lưu trữ hoàn tất."""
-    import json as _json
-    variant   = job.get("bs_variant", "")
-    android   = job.get("bs_android", "")       # e.g. "android12"
-    kernel_v  = job.get("bs_kernel_ver", "")    # e.g. "5.10"
-    sub_level = job.get("bs_sub_level", "")     # e.g. "149"
-    full_ver  = job.get("bs_full_ver", "")      # e.g. "5.10.149"
-
-    if not all([variant, android, kernel_v, sub_level]):
-        logger.warning("buildsave: thiếu metadata để cập nhật JSON")
-        return
-
-    nightly_link = (
-        f"https://nightly.link/{config.GITHUB_OWNER}/{config.GKI_REPO}"
-        f"/actions/runs/{run_id}"
-    )
-
-    # Đường dẫn file JSON tương đối từ bot/ → web/data/<android>/<kernel>.json
-    bot_dir  = os.path.dirname(os.path.abspath(__file__))
-    json_path = os.path.join(bot_dir, "..", "web", "data", android, f"{kernel_v}.json")
-    json_path = os.path.normpath(json_path)
-
-    if not os.path.exists(json_path):
-        logger.error("buildsave: không tìm thấy file JSON: %s", json_path)
-        return
-
-    with open(json_path, "r", encoding="utf-8") as f:
-        data = _json.load(f)
-
-    updated = False
-    for entry in data.get("entries", []):
-        if entry.get("kernel") == full_ver:
-            if "downloads" not in entry:
-                entry["downloads"] = {}
-            entry["downloads"][variant] = nightly_link
-            updated = True
-            # Không break — có thể có nhiều entry cùng kernel ver (khác date)
-
-    if not updated:
-        # Không tìm thấy entry → tự động tạo mới entry cho kernel version này
-        logger.warning("buildsave: entry kernel=%s chưa có trong %s → tự tạo mới", full_ver, json_path)
-        new_entry = {
-            "kernel": full_ver,
-            "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
-            "downloads": {variant: nightly_link}
-        }
-        if "entries" not in data:
-            data["entries"] = []
-        data["entries"].insert(0, new_entry)  # Thêm lên đầu danh sách (mới nhất)
-        updated = True
-
-    with open(json_path, "w", encoding="utf-8") as f:
-        _json.dump(data, f, ensure_ascii=False, indent=2)
-    logger.warning("buildsave: đã cập nhật %s → %s = %s", json_path, variant, nightly_link)
-
-    # Không gửi thông báo riêng lẻ từng sub
-    # Thông báo tổng hợp sẽ do update_batch_message xử lý khi tất cả xong
-    logger.info("buildsave: da cap nhat JSON cho %s %s", variant, full_ver)
-    
-    # --- AUTO BACKUP ---
-    try:
-        async def _delayed_backup():
-            import shutil, os, asyncio
-            await asyncio.sleep(30)  # Debounce 30s: đảm bảo ALL JSON đã ghi xong trước khi backup
-            if app.bot_data.get("_auto_backup_running"): return
-            app.bot_data["_auto_backup_running"] = True
-            try:
-                os.makedirs("temp_backup", exist_ok=True)
-                if os.path.exists("data.json"): shutil.copy("data.json", "temp_backup/data.json")
-                if os.path.exists("web/data"): shutil.copytree("web/data", "temp_backup/web_data")
-                shutil.make_archive("auto_backup", "zip", "temp_backup")
-                shutil.rmtree("temp_backup")
-                
-                # Cố gắng xoá file backup cũ
-                old_msg_id = app.bot_data.get("last_backup_msg_id")
-                if old_msg_id:
-                    try:
-                        await app.bot.delete_message(chat_id=config.OWNER_ID, message_id=old_msg_id)
-                    except Exception:
-                        pass
-
-                with open("auto_backup.zip", "rb") as bf:
-                    sent_msg = await app.bot.send_document(
-                        chat_id=config.OWNER_ID, document=bf,
-                        caption=f"📦 <b>AUTO-BACKUP DATA</b>\n<i>Tạo do bản build {variant} | {full_ver} hoàn tất</i>\n\n💡 Reply file này với lệnh /data để khôi phục.",
-                        parse_mode="HTML"
-                    )
-                    # Lưu lại ID để lần sau xoá
-                    app.bot_data["last_backup_msg_id"] = sent_msg.message_id
-                os.remove("auto_backup.zip")
-            except Exception as e:
-                logger.error("Auto backup send failed: %s", e)
-            app.bot_data["_auto_backup_running"] = False
-            
-        asyncio.create_task(_delayed_backup())
-    except Exception as e:
-        logger.error("Auto backup trigger failed: %s", e)
-import uuid
 
 async def cmd_data_restore(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Admin-only: reply 1 file .zip backup để khôi phục data."""
-    user = update.effective_user
-    storage_obj: HybridStorage = context.application.bot_data["storage"]
-    if not await is_admin(user.id, storage_obj):
+    """Restore a validated backup without extracting arbitrary archive paths."""
+    import pathlib
+    import shutil
+    import tempfile
+
+    storage = context.application.bot_data["storage"]
+    if not await is_admin(update.effective_user.id, storage):
+        return
+    message = update.effective_message
+    reply = message.reply_to_message
+    document = reply.document if reply else None
+    if document is None or not (document.file_name or "").lower().endswith(".zip"):
+        await message.reply_text("❌ Reply vào file .zip backup rồi gõ /data.")
         return
 
-    msg = update.message
-    # Phải reply vào 1 tin nhắn có file
-    reply = msg.reply_to_message
-    if not reply or not reply.document:
-        await msg.reply_text("❌ Cần reply vào file <code>.zip</code> backup rồi gõ /data.", parse_mode="HTML")
-        return
-
-    doc = reply.document
-    if not doc.file_name.endswith(".zip"):
-        await msg.reply_text("❌ Chỉ hỗ trợ file <code>.zip</code>.", parse_mode="HTML")
-        return
-
-    status = await msg.reply_text("⏳ Đang tải và giải nén dữ liệu...")
+    status = await message.reply_text("⏳ Đang kiểm tra và khôi phục dữ liệu...")
     try:
-        import zipfile, shutil, os, tempfile
-        tg_file = await context.bot.get_file(doc.file_id)
-        tmp_zip = tempfile.mktemp(suffix=".zip")
-        await tg_file.download_to_drive(tmp_zip)
-
         restored = []
-        with zipfile.ZipFile(tmp_zip, "r") as zf:
-            names = zf.namelist()
-            # Kiểm tra nội dung gói
-            has_data_json = any(n == "data.json" for n in names)
-            has_web_data = any(n.startswith("web_data/") for n in names)
+        web_root = pathlib.Path(__file__).resolve().parent.parent / "web" / "data"
+        with tempfile.TemporaryDirectory(prefix="kernel-restore-") as directory:
+            archive_path = pathlib.Path(directory) / "backup.zip"
+            telegram_file = await context.bot.get_file(document.file_id)
+            await telegram_file.download_to_drive(archive_path)
+            snapshot, web_files = read_backup(archive_path, web_root)
 
-            if not has_data_json and not has_web_data:
-                await status.edit_text("❌ Không tìm thấy <code>data.json</code> hay <code>web_data/</code> trong file zip này.", parse_mode="HTML")
-                os.remove(tmp_zip)
-                return
-
-            extract_dir = tempfile.mkdtemp()
-            zf.extractall(extract_dir)
-
-        # Restore data.json
-        if has_data_json:
-            src = os.path.join(extract_dir, "data.json")
-            if os.path.exists("data.json"):
-                shutil.copy("data.json", "data.json.bak")
-            shutil.copy(src, "data.json")
-            restored.append("<code>data.json</code>")
-
-        # Restore web/data/*
-        if has_web_data:
-            src_web = os.path.join(extract_dir, "web_data")
-            if os.path.exists("web/data"):
-                if os.path.exists("web/data.bak"): shutil.rmtree("web/data.bak")
-                shutil.copytree("web/data", "web/data.bak")
-                shutil.rmtree("web/data")
-            shutil.copytree(src_web, "web/data")
-            restored.append("<code>web/data/</code>")
-
-        shutil.rmtree(extract_dir)
-        os.remove(tmp_zip)
-
-        txt = (
-            f"✅ <b>Khôi phục thành công!</b>\n"
-            f"📂 Đã restore: {', '.join(restored)}\n"
-            f"📌 File cũ được lưu tền <code>.bak</code> dự phòng."
+            # Validate every input before replacing any file. Storage performs
+            # the data replacement atomically under its normal mutation lock.
+            if snapshot is not None:
+                await storage.restore_data(snapshot)
+                restored.append("data.json")
+            for relative_path, content in web_files:
+                destination = web_root / relative_path
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                if destination.exists():
+                    shutil.copy2(destination, str(destination) + ".bak")
+                fd, temporary = tempfile.mkstemp(prefix=".restore-", dir=destination.parent)
+                try:
+                    with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                        json.dump(content, stream, ensure_ascii=False, indent=2)
+                    os.replace(temporary, destination)
+                finally:
+                    if os.path.exists(temporary):
+                        os.unlink(temporary)
+            if web_files:
+                restored.append("web/data/")
+        await status.edit_text(
+            "✅ Khôi phục thành công: " + ", ".join(restored) + ". File cũ được lưu với đuôi .bak."
         )
-        await status.edit_text(txt, parse_mode="HTML")
-    except Exception as e:
-        await status.edit_text(f"❌ Lỗi khôi phục: {e}")
-
-
-def _load_web_kernel_downloads(version: str) -> dict:
-    """Đọc các variant/link của kernel từ cùng nguồn JSON mà website sử dụng."""
-    import glob
-    import json as _json
-
-    web_data_dir = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "web", "data"))
-    variants = {}
-    for json_path in glob.glob(os.path.join(web_data_dir, "android*", "*.json")):
-        try:
-            with open(json_path, "r", encoding="utf-8") as f:
-                data = _json.load(f)
-            for entry in data.get("entries", []):
-                if str(entry.get("kernel", "")).strip() != version:
-                    continue
-                for variant, url in (entry.get("downloads") or {}).items():
-                    if variant and url:
-                        variants[str(variant)] = str(url)
-        except (OSError, ValueError, TypeError) as exc:
-            logger.warning("/dl: không đọc được %s: %s", json_path, exc)
-    return variants
+    except Exception as error:
+        logger.exception("Backup restore failed")
+        await status.edit_text(f"❌ Không thể khôi phục: {error}")
 
 
 async def cmd_dl(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2402,10 +2092,10 @@ async def cmd_dl(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if context.job_queue:
             context.job_queue.run_once(_del_msg_job, when=10, chat_id=chat_id, data=msg.message_id)
         return
-        
+
     version = args[0].strip()
     storage: HybridStorage = context.application.bot_data["storage"]
-    
+
     all_jobs = await storage.get_jobs()
     variants_map = {}
 
@@ -2415,18 +2105,24 @@ async def cmd_dl(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Lịch sử bot là nguồn bổ sung, đồng thời cung cấp metadata cấu hình nếu còn giữ job.
     for job in sorted(all_jobs, key=lambda x: x.get("created_at", "")):
-        if job.get("type") == "buildsave" and job.get("status") == "completed" and job.get("conclusion") == "success":
+        if (
+            job.get("type") == "buildsave"
+            and job.get("status") == "completed"
+            and job.get("conclusion") == "success"
+        ):
             if job.get("bs_full_ver") == version:
                 variant = job.get("bs_variant")
                 if variant:
                     variants_map.setdefault(variant, {}).update({"job": job})
 
     if not variants_map:
-        msg = await update.message.reply_text(f"Chưa có link tải nào cho version {version} trên website hoặc lịch sử bot")
+        msg = await update.message.reply_text(
+            f"Chưa có link tải nào cho version {version} trên website hoặc lịch sử bot"
+        )
         if context.job_queue:
             context.job_queue.run_once(_del_msg_job, when=10, chat_id=chat_id, data=msg.message_id)
         return
-        
+
     keyboard = []
     row = []
     for var in sorted(variants_map.keys()):
@@ -2436,26 +2132,32 @@ async def cmd_dl(update: Update, context: ContextTypes.DEFAULT_TYPE):
             row = []
     if row:
         keyboard.append(row)
-        
-    await update.message.reply_text(f"📦 Chọn bản KernelSU cho {version}:", reply_markup=InlineKeyboardMarkup(keyboard))
+
+    await update.message.reply_text(
+        f"📦 Chọn bản KernelSU cho {version}:", reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
 
 async def cb_dl_variant(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    
+
     data = query.data
     _, version, variant = data.split(":", 2)
-    
+
     storage: HybridStorage = context.application.bot_data["storage"]
     gh: GitHubAPI = context.application.bot_data["gh"]
-    
+
     await query.edit_message_text(f"⏳ Đang lấy thông tin {version} - {variant}...")
-    
+
     all_jobs = await storage.get_jobs()
     target_job = None
     for job in sorted(all_jobs, key=lambda x: x.get("created_at", ""), reverse=True):
-        if job.get("type") == "buildsave" and job.get("status") == "completed" and job.get("conclusion") == "success":
+        if (
+            job.get("type") == "buildsave"
+            and job.get("status") == "completed"
+            and job.get("conclusion") == "success"
+        ):
             if job.get("bs_full_ver") == version and job.get("bs_variant") == variant:
                 target_job = job
                 break
@@ -2465,12 +2167,15 @@ async def cb_dl_variant(update: Update, context: ContextTypes.DEFAULT_TYPE):
     run_id = target_job.get("run_id") if target_job else None
     if not run_id and download_url:
         import re
+
         match = re.search(r"/actions/runs/(\d+)", download_url)
         if match:
             run_id = int(match.group(1))
 
     if not run_id:
-        await query.edit_message_text("❌ Có kernel trên website nhưng link không chứa GitHub run ID hợp lệ.")
+        await query.edit_message_text(
+            "❌ Có kernel trên website nhưng link không chứa GitHub run ID hợp lệ."
+        )
         return
 
     resp = await gh.list_artifacts_for_run(config.GKI_REPO, run_id)
@@ -2484,32 +2189,40 @@ async def cb_dl_variant(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             await query.edit_message_text(text, parse_mode="HTML", disable_web_page_preview=True)
         else:
-            await query.edit_message_text("❌ Lỗi lấy thông tin API hoặc bản build đã hết hạn (quá 90 ngày).")
+            await query.edit_message_text(
+                "❌ Lỗi lấy thông tin API hoặc bản build đã hết hạn (quá 90 ngày)."
+            )
         return
-        
+
     artifacts = resp.get("json", {}).get("artifacts", [])
     if not artifacts:
         await query.edit_message_text("❌ Không có file zip nào trong bản build này.")
         return
-        
+
     selected_artifact = None
     selected_size = 0
     for a in artifacts:
         name = a.get("name", "")
-        if name.startswith(variant) and "Rejects" not in name and "Manager" not in name and "susfs-release" not in name and "AnyKernel" not in name:
+        if (
+            name.startswith(variant)
+            and "Rejects" not in name
+            and "Manager" not in name
+            and "susfs-release" not in name
+            and "AnyKernel" not in name
+        ):
             selected_artifact = name
             selected_size = a.get("size_in_bytes", 0)
             break
-            
+
     if not selected_artifact:
         selected_artifact = artifacts[0]["name"]
         selected_size = artifacts[0].get("size_in_bytes", 0)
-        
+
     # Link tới trang run (tổng hợp tất cả artifacts)
     run_url = f"https://nightly.link/{config.GITHUB_OWNER}/{config.GKI_REPO}/actions/runs/{run_id}"
     # Link tải trực tiếp file zip cụ thể
     dl_url = f"https://nightly.link/{config.GITHUB_OWNER}/{config.GKI_REPO}/actions/runs/{run_id}/{selected_artifact}.zip"
-    website_url = "https://kernel.takeshi.dev/"
+    website_url = config.DASHBOARD_URL
 
     # Kích thước lấy từ GitHub API (đã có sẵn, không cần HEAD)
     if selected_size:
@@ -2522,14 +2235,20 @@ async def cb_dl_variant(update: Update, context: ContextTypes.DEFAULT_TYPE):
     inputs = target_job.get("inputs", {}) if target_job else {}
     zram = inputs.get("use_zram", target_job.get("use_zram", True) if target_job else True)
     bbg = inputs.get("use_bbg", target_job.get("use_bbg", True) if target_job else True)
-    susfs = not inputs.get("cancel_susfs", target_job.get("cancel_susfs", False) if target_job else False)
+    susfs = not inputs.get(
+        "cancel_susfs", target_job.get("cancel_susfs", False) if target_job else False
+    )
     kpm = inputs.get("use_kpm", target_job.get("use_kpm", False) if target_job else False)
 
     cfg_parts = []
-    if zram: cfg_parts.append("ZRAM")
-    if bbg: cfg_parts.append("BBG")
-    if susfs: cfg_parts.append("SUSFS")
-    if kpm: cfg_parts.append("KPM")
+    if zram:
+        cfg_parts.append("ZRAM")
+    if bbg:
+        cfg_parts.append("BBG")
+    if susfs:
+        cfg_parts.append("SUSFS")
+    if kpm:
+        cfg_parts.append("KPM")
     cfg_str = " + ".join(cfg_parts) if cfg_parts else "Mặc định"
 
     filename = f"{selected_artifact}.zip"
@@ -2544,40 +2263,42 @@ async def cb_dl_variant(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def start_web_server(app_bot):
-
     """Khởi chạy API Web Server cục bộ phục vụ Dashboard Realtime"""
     app = aiohttp_web.Application()
-    
+
     async def api_data(request):
         try:
             data = await get_realtime_data(app_bot)
-            return aiohttp_web.json_response(data, headers={'Access-Control-Allow-Origin': '*'})
+            return aiohttp_web.json_response(data, headers={"Access-Control-Allow-Origin": "*"})
         except Exception as e:
             logger.error("Web API Error: %s", e)
             return aiohttp_web.json_response({"error": str(e)}, status=500)
-            
-    app.router.add_get('/api/data', api_data)
-    
+
+    app.router.add_get("/api/data", api_data)
+
     base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    
+
     # Phục vụ static files cho source web mới (do webpack build ra)
-    app.router.add_static('/dist', os.path.join(base_dir, 'web', 'dist'))
-    app.router.add_static('/data', os.path.join(base_dir, 'web', 'data'))
-    
+    app.router.add_static("/dist", os.path.join(base_dir, "web", "dist"))
+    app.router.add_static("/data", os.path.join(base_dir, "web", "data"))
+
     async def index(request):
-        return aiohttp_web.FileResponse(os.path.join(base_dir, 'web', 'index.html'))
-        
-    app.router.add_get('/', index)
-    app.router.add_get('/index.html', index)
-    
+        return aiohttp_web.FileResponse(os.path.join(base_dir, "web", "index.html"))
+
+    app.router.add_get("/", index)
+    app.router.add_get("/index.html", index)
+
     runner = aiohttp_web.AppRunner(app)
     await runner.setup()
-    
-    port = int(os.getenv("WEB_PORT", 5000))
-    site = aiohttp_web.TCPSite(runner, '0.0.0.0', port)
-    await site.start()
+
+    site = aiohttp_web.TCPSite(runner, config.WEB_HOST, config.WEB_PORT)
+    try:
+        await site.start()
+    except Exception:
+        await runner.cleanup()
+        raise
     app_bot.bot_data["web_runner"] = runner
-    logger.info(f"✅ Real-time Web Dashboard started natively on 0.0.0.0:{port}")
+    logger.info("Dashboard listening on %s:%s", config.WEB_HOST, config.WEB_PORT)
 
 
 async def _register_bot_commands(app):
@@ -2608,7 +2329,6 @@ def main():
         writer_hostname=config.MONGODB_SYNC_WRITER_HOSTNAME,
     )
     gh = GitHubAPI(config.GITHUB_TOKEN, config.GITHUB_OWNER)
-    telegraph = TelegraphAPI(storage)
 
     app = (
         ApplicationBuilder()
@@ -2617,18 +2337,20 @@ def main():
         .read_timeout(30)
         .write_timeout(30)
         .pool_timeout(30)
+        .rate_limiter(AIORateLimiter(max_retries=3))
         .build()
     )
-    
+
     app.bot_data["storage"] = storage
     app.bot_data["gh"] = gh
-    app.bot_data["telegraph"] = telegraph
 
     # Background tasks sẽ được chạy trong _post_init
 
     # Owner-only commands
     app.add_handler(CommandHandler("key", cmd_key, filters=filters.User(user_id=config.OWNER_ID)))
-    app.add_handler(CommandHandler("keyvip", cmd_keyvip, filters=filters.User(user_id=config.OWNER_ID)))
+    app.add_handler(
+        CommandHandler("keyvip", cmd_keyvip, filters=filters.User(user_id=config.OWNER_ID))
+    )
     app.add_handler(CommandHandler("keys", cmd_keys, filters=filters.User(user_id=config.OWNER_ID)))
 
     # Admin commands (owner + static admins in .env)
@@ -2638,19 +2360,27 @@ def main():
     app.add_handler(CommandHandler("ping", cmd_ping))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler(["bc", "broadcast"], cmd_broadcast))
-    app.add_handler(CallbackQueryHandler(
-        cb_broadcast_target,
-        pattern=r"^broadcast:(dm|group|all)$",
-        block=False,
-    ))
+    app.add_handler(
+        CallbackQueryHandler(
+            cb_broadcast_target,
+            pattern=r"^broadcast:(dm|group|all)$",
+            block=False,
+        )
+    )
     app.add_handler(CallbackQueryHandler(cb_list_page, pattern=r"^listpage:\d+$"))
     app.add_handler(CallbackQueryHandler(cb_close_msg, pattern=r"^closemsg"))
     app.add_handler(CallbackQueryHandler(cb_refresh_st, pattern=r"^refresh_st"))
     app.add_handler(CallbackQueryHandler(cb_run_controls, pattern=r"^run:gki:\d+$"))
-    app.add_handler(CallbackQueryHandler(cb_run_control_action, pattern=r"^runctl:(cancel|close):gki:\d+(?::\d+)?$"))
+    app.add_handler(
+        CallbackQueryHandler(
+            cb_run_control_action, pattern=r"^runctl:(cancel|close):gki:\d+(?::\d+)?$", block=False
+        )
+    )
     app.add_handler(CallbackQueryHandler(cb_save_run, pattern=r"^saverun:\d+$"))
     app.add_handler(MessageHandler(filters.Regex(r"^/cancel_\d+(?:@[\w_]+)?$"), cmd_cancel_run))
-    app.add_handler(MessageHandler(filters.Regex(r"^/cancelbatch_[\w-]+(?:@[\w_]+)?$"), cmd_cancel_batch))
+    app.add_handler(
+        MessageHandler(filters.Regex(r"^/cancelbatch_[\w-]+(?:@[\w_]+)?$"), cmd_cancel_batch)
+    )
     app.add_handler(CommandHandler("rb", cmd_rebuild))
     app.add_handler(CommandHandler("rebuild", cmd_rebuild))
     app.add_handler(MessageHandler(filters.Regex(r"^/delete_\d+(?:@[\w_]+)?$"), cmd_delete_run))
@@ -2672,14 +2402,16 @@ def main():
             return ConversationHandler.END
         return await gki_conv.entry_points[0].callback(update, context)
 
-    app.add_handler(ConversationHandler(
-        entry_points=[CommandHandler("gki", gki_entry)],
-        states=gki_conv.states,
-        fallbacks=gki_conv.fallbacks,
-        per_user=True,
-        per_chat=False,
-        conversation_timeout=60  # 60s timeout tránh conversation treo
-    ))
+    app.add_handler(
+        ConversationHandler(
+            entry_points=[CommandHandler("gki", gki_entry)],
+            states=gki_conv.states,
+            fallbacks=gki_conv.fallbacks,
+            per_user=True,
+            per_chat=False,
+            conversation_timeout=60,  # 60s timeout tránh conversation treo
+        )
+    )
 
     # OKI conversation
     oki_conv = build_oki_conversation(gh, storage, config)
@@ -2689,34 +2421,43 @@ def main():
             return ConversationHandler.END
         return await oki_conv.entry_points[0].callback(update, context)
 
-    app.add_handler(ConversationHandler(
-        entry_points=[CommandHandler("oki", oki_entry)],
-        states=oki_conv.states,
-        fallbacks=oki_conv.fallbacks,
-        per_user=True,
-        per_chat=False,
-        conversation_timeout=60,
-    ))
+    app.add_handler(
+        ConversationHandler(
+            entry_points=[CommandHandler("oki", oki_entry)],
+            states=oki_conv.states,
+            fallbacks=oki_conv.fallbacks,
+            per_user=True,
+            per_chat=False,
+            conversation_timeout=60,
+        )
+    )
 
     # /build — Build kernel lưu trữ (admin only)
-    buildsave_conv = build_buildsave_conversation(gh, storage, config)
+    buildsave_conv = build_buildsave_conversation(gh, storage, config, update_batch_message)
 
     async def buildsave_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await ensure_user_started_bot(update, context):
             return ConversationHandler.END
         return await buildsave_conv.entry_points[0].callback(update, context)
 
-    app.add_handler(ConversationHandler(
-        entry_points=[CommandHandler("build", buildsave_entry)],
-        states=buildsave_conv.states,
-        fallbacks=buildsave_conv.fallbacks,
-        allow_reentry=True,
-        name="buildsave_conversation",
-        persistent=False,
-        conversation_timeout=60,
-    ))
+    app.add_handler(
+        ConversationHandler(
+            entry_points=[CommandHandler("build", buildsave_entry)],
+            states=buildsave_conv.states,
+            fallbacks=buildsave_conv.fallbacks,
+            allow_reentry=True,
+            name="buildsave_conversation",
+            persistent=False,
+            per_user=True,
+            per_chat=False,
+            conversation_timeout=60,
+        )
+    )
 
     async def _post_init(app_):
+        # Resolve the initial local/cloud snapshot before any seed, poll or web
+        # reader mutates it. Background initialization can overwrite live jobs.
+        await app_.bot_data["storage"]._sync_with_cloud()
         # Seed dm_users từ lịch sử jobs cũ
         seeded = await app_.bot_data["storage"].seed_dm_users_from_jobs()
         if seeded:
@@ -2726,33 +2467,31 @@ def main():
         if seeded_grp:
             logger.warning("Seeded %d group chats from job history", seeded_grp)
         await _register_bot_commands(app_)
-        app_.create_task(app_.bot_data["storage"]._sync_with_cloud())
-        app_.create_task(poller(app_))
-        app_.create_task(start_web_server(app_))
+        _start_background_task(app_, poller(app_), "github-poller")
+        await start_web_server(app_)
+        logger.warning(
+            "Telegram bot initialized; dashboard at %s:%s", config.WEB_HOST, config.WEB_PORT
+        )
+
     app.post_init = _post_init
 
     async def _post_shutdown(app_):
+        workers = tuple(app_.bot_data.get("background_tasks", ()))
+        for worker in workers:
+            worker.cancel()
+        if workers:
+            await asyncio.gather(*workers, return_exceptions=True)
         runner = app_.bot_data.pop("web_runner", None)
         if runner is not None:
             await runner.cleanup()
         await app_.bot_data["gh"].close()
         app_.bot_data["storage"].close()
+
     app.post_shutdown = _post_shutdown
 
-    print("\n" + "="*60)
-    print("🚀 GKI BOT ĐÃ KHỞI ĐỘNG THÀNH CÔNG!")
-    print("✅ Hệ thống đang lắng nghe tin nhắn Telegram...")
-    print("✅ Express Web Server đang chạy ngầm...")
-    print("-" * 60)
-    print("💡 MỘT SỐ LỆNH PM2 CƠ BẢN DÀNH CHO BÁC:")
-    print("   👉 Xem bảng điều khiển: pm2 list")
-    print("   👉 Xem Log thời gian thực: pm2 log gki-bot")
-    print("   👉 Khởi động lại toàn bộ: pm2 restart all")
-    print("   👉 Xoá trắng rác Log cũ: pm2 flush")
-    print("="*60 + "\n")
-
-    logger.info("Bot is polling...")
+    logger.warning("Starting Telegram bot...")
     app.run_polling()
+
 
 if __name__ == "__main__":
     main()

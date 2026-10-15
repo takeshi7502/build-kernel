@@ -1,48 +1,73 @@
-# Secrets
+# Secrets (keep legacy Telegram session files untracked during migration).
 .env
+.env.*
+!.env.example
 *.session
+*.session-journal
+# Historical local login helpers may contain credentials.
 gen_session.py
 login.py
 
-# Runtime data
+# Runtime data; do not overwrite existing state during deployment.
 data.json
+bot/data.json
+*.json.bak
+/data/
+/logs/
+*.log
 log.txt
+web/data/**/*.json
+# The announcement is maintained as static content.
+!web/data/announcement.json
 
-# Python
+# Python environments and caches.
 venv/
+.venv/
+venv.incomplete.*/
+.venv-check.*/
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
 *.egg-info/
-dist/
-!web/dist/
-build/
 *.egg
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+junit*.xml
+# Local regression tests are not part of the deployed source.
+/tests/
+dist/
+build/
 
-# IDE
+# Local maintenance artifacts.
+temp_repo/
+workflows_patch/
+patch_*.py
+*.bak
+*.tmp
+*.temp
+.web-setup.lock
+.web-config-*
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Frontend dependencies.
+node_modules/
+.npm/
+.cache/
+*.tsbuildinfo
+
+# Editors and operating systems.
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
-
-# OS
 .DS_Store
 Thumbs.db
 desktop.ini
-
-# Local temp/workflow patch artifacts
-temp_repo/
-workflows_patch/
-
-# Node
-node_modules/
-
-patch_*.py
-
-# Bỏ theo dõi toàn bộ Data động (do bot tự ghi)
-data.json
-bot/data.json
-web/data/**/*.json
-# Ngoại lệ: announcement.json là content tĩnh do admin viết → track git bình thường
-!web/data/announcement.json
