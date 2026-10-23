@@ -18,14 +18,22 @@ venv/bin/python tools/manage_backups.py verify /path/to/backup.zip
 
 Các lệnh không gọi API remote. `create` lấy snapshot qua storage lock và tạo ZIP đã kiểm tra tại `BACKUP_DIR`; có thể chạy trong lúc bot hoạt động trên Linux. `verify` không ghi/giải nén. Backup chứa dữ liệu riêng tư; xem [vận hành](../docs/reliability.md) trước khi chia sẻ/khôi phục. `bash run.sh backup` và `bash run.sh backups` là cách gọi nhanh trên VPS.
 
-## Patch workflow trên local clone
+## Kiểm tra workflow trên local clone
 
 ```bash
 python tools/local_patch.py /path/to/GKI_KernelSU_SUSFS
-python tools/local_patch.py /path/to/GKI_KernelSU_SUSFS --apply
 ```
 
-Mặc định in diff; `--apply` ghi file. Patch bổ sung input `sub_levels`, tạo ma trận lọc phiên bản, bỏ concurrency ở workflow tổng và chuyển job thực thi sang `self-hosted`. Xem kỹ diff, vì đây là thay đổi hành vi build của repository kernel, không phải bước setup bot. Công cụ không commit/push.
+Chỉ kiểm tra hợp đồng workflow hiện đại; không sửa file, không thay runner. Cờ `--apply` cũ bị từ chối. Bộ vá cũ đã ngừng vì có thể phá matrix động và chuyển job sang self-hosted ngoài ý muốn. Merge upstream và sửa conflict tại repo build bằng Git.
+
+## Cập nhật danh mục phiên bản cho bot
+
+```bash
+python tools/update_gki_manifest.py /path/to/GKI_KernelSU_SUSFS
+python tools/update_gki_manifest.py /path/to/GKI_KernelSU_SUSFS --apply
+```
+
+Đọc clone workflow đã rà soát, giữ revision của matrix và bổ sung bản mới từ catalog. Mặc định in JSON; `--apply` chỉ cập nhật `bot/gki_manifest.json` để review/commit/deploy cùng bot. Không dùng `.env`, không gọi API, không sửa workflow. Xem [hợp đồng GKI mới](../docs/gki-build-contract.md).
 
 ## Đổi loại runner
 
@@ -34,17 +42,15 @@ python tools/switch_runner.py github /path/to/GKI_KernelSU_SUSFS
 python tools/switch_runner.py vps /path/to/GKI_KernelSU_SUSFS --apply
 ```
 
-`github` dùng `ubuntu-latest`, `vps` dùng `self-hosted`. Chỉ thay nhãn đơn tương ứng; giữ job `setup-*`, nhãn tùy biến, danh sách nhãn và biểu thức. Không sửa workflow bằng regex.
+`github` dùng `ubuntu-24.04`, `vps` dùng `self-hosted`. Chỉ thay nhãn đơn tương ứng; giữ job `setup-*`/`prepare-*`, nhãn tùy biến, danh sách nhãn và biểu thức. Không sửa workflow bằng regex. Đây là thao tác riêng, không tự chạy khi setup bot.
 
-## Đồng bộ fork và patch qua GitHub API
+## Kiểm tra fork qua GitHub API (chỉ đọc)
 
 ```bash
 python tools/sync_and_patch.py
-python tools/sync_and_patch.py --apply
-python tools/sync_and_patch.py --apply --skip-sync
 ```
 
-Đọc cấu hình GitHub từ `.env` gốc qua `bot.config`. Chế độ mặc định chỉ đọc workflow hiện tại và báo file sẽ đổi; chưa merge upstream. `--apply` merge upstream rồi ghi patch, tạo commit trực tiếp vào branch được cấu hình. `--skip-sync` chỉ patch. Nếu fork đã diverge, công cụ dừng để xử lý merge thủ công; không force-reset branch. Các lệnh ghi không tự rollback commit trước đó nếu một file sau gặp lỗi.
+Đọc cấu hình GitHub từ `.env` gốc qua `bot.config`, chỉ GET workflow trên nhánh được cấu hình và kiểm tra contract. Không merge upstream, không PUT file, không commit hay đổi runner. `--apply` đã ngừng và sẽ báo lỗi trước khi đọc cấu hình/kết nối mạng; `--skip-sync` chỉ được giữ tương thích CLI và không làm thay đổi hành vi kiểm tra.
 
 ## Khôi phục link dashboard
 

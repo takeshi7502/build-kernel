@@ -4,6 +4,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 from . import config
+from .gki_contract import MODE_NO_KSU, effective_mode, kpm_enabled, mode_label, susfs_enabled
 from .status import cached_run
 
 
@@ -16,10 +17,7 @@ def _enabled(value, default=False) -> bool:
 
 
 def _is_kpm_enabled(inputs: dict) -> bool:
-    raw = inputs.get("use_kpm", False)
-    if isinstance(raw, bool):
-        return raw
-    return _enabled(raw) or str(raw).strip().lower().startswith("enabled")
+    return kpm_enabled(inputs)
 
 
 def _make_custom_id(variant, inputs, created_at_iso):
@@ -31,7 +29,7 @@ def _make_custom_id(variant, inputs, created_at_iso):
     z_n = "1" if _enabled(inputs.get("use_zram"), True) else "0"
     b_n = "1" if _enabled(inputs.get("use_bbg"), True) else "0"
     k_n = "1" if _is_kpm_enabled(inputs) else "0"
-    s_n = "0" if _enabled(inputs.get("cancel_susfs"), True) else "1"
+    s_n = "1" if susfs_enabled(inputs) else "0"
     try:
         dt = datetime.fromisoformat(created_at_iso.replace("Z", "+00:00")) + timedelta(hours=7)
         time_str = dt.strftime("%H%M.%d%m%y")
@@ -134,7 +132,11 @@ async def get_realtime_data(app):
 
             if j.get("_batch_jobs"):  # Đây là đại diện của 1 batch buildsave
                 bjobs = j["_batch_jobs"]
-                variant = _html_text(j.get("bs_variant", "SukiSU"))
+                variant = _html_text(
+                    "GKI thuần"
+                    if effective_mode(inputs) == MODE_NO_KSU
+                    else j.get("bs_variant", "SukiSU")
+                )
                 android_v = _html_text(j.get("bs_android", "").upper())
 
                 # Tạo subtitle gộp các sub-levels lại
@@ -168,19 +170,13 @@ async def get_realtime_data(app):
                     else f"{', '.join(sub_labels[:3])}... (+{len(sub_labels) - 3})"
                 )
 
-                branch = (
-                    str(inputs.get("kernelsu_branch", "Stable"))
-                    .replace("(标准)", "")
-                    .replace("(开发)", "")
-                    .strip()
-                    or "Stable"
-                )
+                branch = mode_label(inputs)
                 sub_title = f"{android_v} | {sub_title_str} | {branch}"
                 custom_version = str(inputs.get("version", "")).strip("-")
                 zram = "Bật" if _enabled(inputs.get("use_zram"), True) else "Tắt"
                 bbg = "Bật" if _enabled(inputs.get("use_bbg"), True) else "Tắt"
                 kpm = "Bật" if _is_kpm_enabled(inputs) else "Tắt"
-                susfs = "Tắt" if _enabled(inputs.get("cancel_susfs"), True) else "Bật"
+                susfs = "Bật" if susfs_enabled(inputs) else "Tắt"
 
                 # Tính trạng thái tổng hợp của cả batch
                 if all(bj.get("status") == "completed" for bj in bjobs):
@@ -320,6 +316,11 @@ async def get_realtime_data(app):
                     "kpm": kpm,
                     "bbg": bbg,
                     "susfs": susfs,
+                    "ksu_mode": effective_mode(inputs) if j.get("type") != "oki" else "",
+                    "nomount": _enabled(inputs.get("use_nomount")),
+                    "networking": _enabled(inputs.get("use_networking")),
+                    "ntsync": _enabled(inputs.get("droidspaces_ntsync")),
+                    "cve_2026_43499_patch": _enabled(inputs.get("cve_2026_43499_patch")),
                     "status": batch_status,
                     "duration": batch_dur_str,
                     "date": j.get("created_at"),
@@ -380,19 +381,18 @@ async def get_realtime_data(app):
 
             elif j.get("type") == "buildsave":
                 # Buildsave đơn lẻ (không có batch_id) - fallback
-                variant = _html_text(j.get("bs_variant", "SukiSU"))
+                variant = _html_text(
+                    "GKI thuần"
+                    if effective_mode(inputs) == MODE_NO_KSU
+                    else j.get("bs_variant", "SukiSU")
+                )
                 title = variant
 
                 android_v = _html_text(j.get("bs_android", "").upper())
                 full_ver = _html_text(j.get("bs_full_ver", ""))
                 os_str = f"{android_v}-{full_ver}"
 
-                branch = (
-                    str(inputs.get("kernelsu_branch", "Stable"))
-                    .replace("(标准)", "")
-                    .replace("(开发)", "")
-                    .strip()
-                )
+                branch = mode_label(inputs)
                 if not branch:
                     branch = "Stable"
                 run_id_str = str(j.get("run_id")) if j.get("run_id") else "Đang chờ..."
@@ -402,7 +402,7 @@ async def get_realtime_data(app):
                 zram = "Bật" if _enabled(inputs.get("use_zram"), True) else "Tắt"
                 bbg = "Bật" if _enabled(inputs.get("use_bbg"), True) else "Tắt"
                 kpm = "Bật" if _is_kpm_enabled(inputs) else "Tắt"
-                susfs = "Tắt" if _enabled(inputs.get("cancel_susfs"), True) else "Bật"
+                susfs = "Bật" if susfs_enabled(inputs) else "Tắt"
 
             else:
                 # Normal GKI parsing
@@ -426,13 +426,12 @@ async def get_realtime_data(app):
                 if sub and sub.lower() not in ["all", "*"]:
                     os_str = f"{os_str}.{sub}"
 
-                variant = inputs.get("kernelsu_variant", "NoKSU")
-                branch = (
-                    str(inputs.get("kernelsu_branch", "Stable"))
-                    .replace("(标准)", "")
-                    .replace("(开发)", "")
-                    .strip()
+                variant = (
+                    "GKI thuần"
+                    if effective_mode(inputs) == MODE_NO_KSU
+                    else inputs.get("kernelsu_variant", "NoKSU")
                 )
+                branch = mode_label(inputs)
                 if not branch:
                     branch = "Stable"
 
@@ -446,7 +445,7 @@ async def get_realtime_data(app):
                 zram = "Bật" if _enabled(inputs.get("use_zram"), True) else "Tắt"
                 bbg = "Bật" if _enabled(inputs.get("use_bbg"), True) else "Tắt"
                 kpm = "Bật" if _is_kpm_enabled(inputs) else "Tắt"
-                susfs = "Tắt" if _enabled(inputs.get("cancel_susfs"), True) else "Bật"
+                susfs = "Bật" if susfs_enabled(inputs) else "Tắt"
 
             status = "building"
             if j.get("status") == "completed":
@@ -507,6 +506,11 @@ async def get_realtime_data(app):
                 "kpm": kpm,
                 "bbg": bbg,
                 "susfs": susfs,
+                "ksu_mode": effective_mode(inputs) if j.get("type") != "oki" else "",
+                "nomount": _enabled(inputs.get("use_nomount")),
+                "networking": _enabled(inputs.get("use_networking")),
+                "ntsync": _enabled(inputs.get("droidspaces_ntsync")),
+                "cve_2026_43499_patch": _enabled(inputs.get("cve_2026_43499_patch")),
                 "status": status,
                 "duration": _html_text(duration),
                 "date": j.get("created_at"),

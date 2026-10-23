@@ -5,6 +5,7 @@ import html
 import logging
 
 from . import config
+from .gki_contract import upgrade_queued_job
 from .workers import heartbeat
 
 logger = logging.getLogger(__name__)
@@ -20,6 +21,20 @@ async def dispatch_once(app):
     inflight = app.bot_data.setdefault("dispatch_inflight", set())
     inflight.add(job["_id"])
     try:
+        try:
+            fields = upgrade_queued_job(job, next(iter(config.GKI_WORKFLOWS.values()), "main.yml"))
+        except ValueError as error:
+            await storage.finish_dispatch(job["_id"], accepted=False, error=str(error))
+            await storage.update_job(
+                job["_id"],
+                {
+                    "completion_text": f"❌ Cấu hình build cũ không còn hợp lệ: {html.escape(str(error))}\nLượt key đã được hoàn nếu có. Mở lại menu để chọn cấu hình mới."
+                },
+            )
+            return True
+        if fields:
+            await storage.update_job(job["_id"], fields)
+            job.update(fields)
         result = await github.dispatch_workflow(
             job["repo"],
             job["workflow_file"],

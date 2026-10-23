@@ -18,10 +18,17 @@ def switch_runner(content, target):
         return content
     changed = False
     for name, job in data["jobs"].items():
-        if not isinstance(job, dict) or "runs-on" not in job or str(name).startswith("setup-"):
+        if (
+            not isinstance(job, dict)
+            or "runs-on" not in job
+            or str(name).startswith(("setup-", "prepare-"))
+        ):
             continue
         # Preserve custom labels, expressions, OS-specific jobs and label arrays.
-        if job["runs-on"] in ("ubuntu-latest", "self-hosted") and job["runs-on"] != target:
+        if (
+            job["runs-on"] in ("ubuntu-latest", "ubuntu-24.04", "self-hosted")
+            and job["runs-on"] != target
+        ):
             job["runs-on"] = target
             changed = True
     if not changed:
@@ -44,7 +51,7 @@ def main():
     files = sorted([*directory.glob("*.yml"), *directory.glob("*.yaml")])
     if not files:
         parser.error(f"Không tìm thấy workflow trong {directory}")
-    target = "self-hosted" if args.target == "vps" else "ubuntu-latest"
+    target = "self-hosted" if args.target == "vps" else "ubuntu-24.04"
     for path in files:
         original = path.read_text(encoding="utf-8")
         updated = switch_runner(original, target)

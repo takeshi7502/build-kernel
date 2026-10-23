@@ -20,6 +20,8 @@ bot/                         Backend Python
   catalog.py                 Cập nhật link tải kernel, giữ catalog đã có
   backups.py                 Kiểm tra ZIP backup trước khi khôi phục
   gki.py                     Hội thoại /gki
+  gki_contract.py            Chuẩn hóa input, tính năng và định tuyến workflow GKI
+  gki_manifest.json          Danh mục phiên bản lấy từ repo build đã rà soát
   oki.py                     Hội thoại /oki
   buildsave.py               Hội thoại build hàng loạt
   permissions.py             Quyền owner/admin/member
@@ -40,6 +42,8 @@ run.sh                       Thao tác hằng ngày
 ```
 
 Đọc thêm [kiến trúc và dữ liệu](docs/architecture.md), [vận hành và xử lý sự cố](docs/reliability.md), [nâng cấp từ bản cũ](docs/migration.md) và [công cụ bảo trì](tools/README.md).
+
+Bot đã chuyển sang [hợp đồng build GKI mới ngày 24/10/2026](docs/gki-build-contract.md). Cần cập nhật cả repo workflow trước khi chạy bot mới; không cần thêm biến `.env`.
 
 ## Cài mới trên Ubuntu/Debian
 

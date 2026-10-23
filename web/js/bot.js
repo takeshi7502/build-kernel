@@ -3,6 +3,19 @@ const DATA_URL = "/api/data";
 
 let currentBuilds = [];
 
+// Labels are fixed strings; do not inject arbitrary workflow inputs into HTML.
+function renderGkiFeatures(build) {
+    const features = [];
+    if (build.ksu_mode === '禁用KSU') features.push('GKI thuần · Không KSU/SUSFS');
+    for (const [key, label] of [
+        ['nomount', 'NoMount'], ['networking', 'Networking'],
+        ['ntsync', 'NTSync'], ['cve_2026_43499_patch', 'CVE-2026-43499'],
+    ]) {
+        if (build[key] === true) features.push(label);
+    }
+    return features.length ? `<div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:12px;">${features.join(' · ')}</div>` : '';
+}
+
 // Hàm format thời gian
 function formatDate(isoString) {
     if (!isoString) return "";
@@ -77,6 +90,7 @@ function createBuildCard(build) {
                     <span style="color: var(--text-muted); font-weight: 500;">Custom version:</span>
                     <span style="font-weight: 600; color: var(--text-primary); text-align: right; max-width: 60%; word-break: break-all;">${build.custom_version || '(Mặc định)'}</span>
                 </div>
+                ${renderGkiFeatures(build)}
                 
                 <div style="display: flex; gap: 15px; font-size: 0.85rem; margin-bottom: 12px;">
                     <div style="flex: 1; display: flex; justify-content: space-between; align-items: center;">
@@ -180,6 +194,7 @@ function createWebBuildCard(build) {
                     <span style="color: var(--text-muted); font-weight: 500;">Custom version:</span>
                     <span style="font-weight: 600; color: var(--text-primary); text-align: right; max-width: 60%; word-break: break-all;">${build.custom_version}</span>
                 </div>` : ''}
+                ${renderGkiFeatures(build)}
                 
                 <div style="display: flex; gap: 15px; font-size: 0.85rem; margin-bottom: 10px;">
                     <div style="flex: 1; display: flex; justify-content: space-between; align-items: center;">

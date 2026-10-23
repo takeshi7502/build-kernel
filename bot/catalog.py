@@ -7,7 +7,14 @@ from datetime import datetime, timedelta, timezone
 
 from . import config
 from .github import parse_utc as _parse_utc
-from .gki import SUB_LEVEL_META, TARGET_META
+from .gki_contract import (
+    MODE_NO_KSU,
+    SUB_LEVEL_META,
+    TARGET_META,
+    effective_mode,
+    kpm_enabled,
+    susfs_enabled,
+)
 from .storage import HybridStorage
 from .workers import heartbeat
 
@@ -48,13 +55,15 @@ def _truthy_feature(value) -> bool:
 def _gki_web_config_label(inputs: dict) -> str:
     """Build a compact config label shown after the KernelSU variant in the web modal."""
     parts = []
-    if not _truthy_feature(inputs.get("cancel_susfs", True)):
+    if effective_mode(inputs) == MODE_NO_KSU:
+        parts.append("No KSU")
+    if susfs_enabled(inputs):
         parts.append("SUSFS")
     if _truthy_feature(inputs.get("use_bbg")):
         parts.append("BBG")
     if _truthy_feature(inputs.get("use_zram")):
         parts.append("ZRAM")
-    if _truthy_feature(inputs.get("use_kpm")):
+    if kpm_enabled(inputs):
         parts.append("KPM")
     if _truthy_feature(inputs.get("use_rekernel")):
         parts.append("Re-Kernel")
@@ -63,6 +72,14 @@ def _gki_web_config_label(inputs: dict) -> str:
         parts.append(f"Droidspaces {droidspaces}")
     if _truthy_feature(inputs.get("supp_op")):
         parts.append("OP8E")
+    for key, label in (
+        ("use_nomount", "NoMount"),
+        ("use_networking", "Networking"),
+        ("droidspaces_ntsync", "NTSync"),
+        ("cve_2026_43499_patch", "CVE-2026-43499"),
+    ):
+        if _truthy_feature(inputs.get(key)):
+            parts.append(label)
     return " + ".join(parts)
 
 
@@ -160,6 +177,8 @@ async def update_download(job: dict, run_id, app):
     android, kernel_v = TARGET_META[target_key]
     full_ver = f"{kernel_v}.{sub_level}"
     variant = str(inputs.get("kernelsu_variant", "SukiSU") or "SukiSU").strip() or "SukiSU"
+    if effective_mode(inputs) == MODE_NO_KSU:
+        variant = "GKI"
     nightly_link = (
         f"https://nightly.link/{config.GITHUB_OWNER}/{config.GKI_REPO}/actions/runs/{run_id}"
     )
@@ -173,13 +192,18 @@ async def update_download(job: dict, run_id, app):
         data = {"entries": []}
 
     features = {
-        "susfs": not _truthy_feature(inputs.get("cancel_susfs", True)),
+        "susfs": susfs_enabled(inputs),
+        "ksu_mode": effective_mode(inputs),
         "bbg": _truthy_feature(inputs.get("use_bbg")),
         "zram": _truthy_feature(inputs.get("use_zram")),
-        "kpm": _truthy_feature(inputs.get("use_kpm")),
+        "kpm": kpm_enabled(inputs),
         "rekernel": _truthy_feature(inputs.get("use_rekernel")),
         "droidspaces": str(inputs.get("droidspaces", "off") or "off"),
         "supp_op": _truthy_feature(inputs.get("supp_op")),
+        "nomount": _truthy_feature(inputs.get("use_nomount")),
+        "networking": _truthy_feature(inputs.get("use_networking")),
+        "ntsync": _truthy_feature(inputs.get("droidspaces_ntsync")),
+        "cve_2026_43499_patch": _truthy_feature(inputs.get("cve_2026_43499_patch")),
     }
     download_info = {
         "url": nightly_link,

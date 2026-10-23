@@ -35,7 +35,7 @@ def recover_links(android, kernel, filepath, owner, repo, token, *, apply=False)
     url = f"https://api.github.com/repos/{repository}/actions/runs?status=success&event=workflow_dispatch&per_page=100"
     runs = gh_api(url, token).get("workflow_runs", [])
     pattern = re.compile(
-        r"^(SukiSU|ReSukiSU|KittiSU|MKSU|Next)_kernel-"
+        r"^(SukiSU(?:\(\d+\))?|BakaSU|ReSukiSU|KittiSU|Official|MKSU|Next)_kernel-"
         + re.escape(android)
         + "-"
         + re.escape(kernel)

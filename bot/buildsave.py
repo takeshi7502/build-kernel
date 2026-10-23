@@ -3,7 +3,7 @@ buildsave.py — /build command: Build kernel cố định để lưu trữ trê
 
 Flow:
   /build → Chọn Variant → Chọn Android Target → Chọn Sub-level → Confirm → Dispatch
-Cấu hình cố định: Stable, no custom version, ZRAM/BBG/SUSFS=on, KPM=off, Actions release.
+Cấu hình mặc định: branch tự động, ZRAM/BBG/SUSFS bật, KPM tắt, Actions.
 """
 
 import html
@@ -19,14 +19,17 @@ from telegram.ext import (
     filters,
 )
 
-from .gki import (
+from .gki import _feature_buttons
+from .gki_contract import (
     CUSTOM_WORKFLOW,
-    SUB_LEVEL_META,
+    KPM_OPTIONS,
+    MODE_FULL,
     SUB_LEVELS,
-    SUPP_OP_TARGETS,
     TARGET_META,
-    TOGGLE_FEATURES,
     VARIANTS,
+    custom_inputs,
+    cycle_feature,
+    normalize_inputs,
 )
 from .permissions import is_admin
 
@@ -38,19 +41,8 @@ BS_TOGGLES = 4
 
 
 def _bs_toggles_keyboard(inputs: dict, selected_target: str) -> InlineKeyboardMarkup:
-    rows = []
-    btns = []
-    for label, key, _ in TOGGLE_FEATURES:
-        if key == "supp_op" and selected_target not in SUPP_OP_TARGETS:
-            continue
-        if key == "cancel_susfs":
-            active = not inputs.get(key, True)
-        else:
-            active = inputs.get(key, False)
-        icon = "✅" if active else "⬜"
-        btns.append(InlineKeyboardButton(f"{icon} {label}", callback_data=f"bstog:{key}"))
-    for i in range(0, len(btns), 2):
-        rows.append(btns[i : i + 2])
+    buttons = _feature_buttons(inputs, selected_target, buildsave=True)
+    rows = [buttons[i : i + 2] for i in range(0, len(buttons), 2)]
     rows.append(
         [
             InlineKeyboardButton("⬅️ Quay lại", callback_data="bsback:target"),
@@ -63,12 +55,12 @@ def _bs_toggles_keyboard(inputs: dict, selected_target: str) -> InlineKeyboardMa
 
 # Cấu hình cố định cho build lưu trữ
 _FIXED_CONFIG = {
-    "kernelsu_branch": "Stable(标准)",
     "version": "",  # mặc định
+    "build_time": "Sun Dec 01 08:10:00 UTC 2024",
     "use_zram": True,
     "use_bbg": True,
-    "use_kpm": False,
-    "cancel_susfs": False,  # SUSFS bật
+    "use_kpm": KPM_OPTIONS[0],
+    "ksu_mode": MODE_FULL,
     "release_type": "Actions",
 }
 
@@ -96,6 +88,22 @@ def _back_cancel_kb(back_cb: str):
     )
 
 
+async def _ensure_owner(update, context):
+    message = update.effective_message
+    if (
+        "bs" in context.user_data
+        and update.effective_user.id == context.user_data.get("bs_owner")
+        and message
+        and message.message_id == context.user_data.get("bs_message_id")
+        and message.chat_id == context.user_data.get("bs_chat_id")
+    ):
+        return True
+    await update.callback_query.answer(
+        "Phiên này không thuộc về bạn hoặc đã hết hạn.", show_alert=True
+    )
+    return False
+
+
 class BuildSaveFlow:
     def __init__(self, gh, storage, config, update_batch_message):
         self.gh = gh
@@ -111,14 +119,9 @@ class BuildSaveFlow:
             return ConversationHandler.END
 
         context.user_data["bs"] = {
-            "inputs": {
-                "use_zram": _FIXED_CONFIG["use_zram"],
-                "use_bbg": _FIXED_CONFIG["use_bbg"],
-                "use_kpm": _FIXED_CONFIG["use_kpm"],
-                "cancel_susfs": _FIXED_CONFIG["cancel_susfs"],
-                "supp_op": False,
-            }
+            "inputs": {**_FIXED_CONFIG, "supp_op": False, "artifact_upload_mode": "all"}
         }
+        context.user_data["bs_owner"] = user.id
 
         rows = []
         for i, v in enumerate(VARIANTS, 1):
@@ -150,9 +153,16 @@ class BuildSaveFlow:
 
     # ─── Chọn Variant ────────────────────────────────────────────────
     async def set_variant(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await _ensure_owner(update, context):
+            return ConversationHandler.END
         q = update.callback_query
         await q.answer()
         variant = q.data.split(":", 1)[1]
+        variant = "BakaSU" if variant == "ReSukiSU" else variant
+        if variant not in VARIANTS:
+            await q.answer("Biến thể không còn được hỗ trợ; mở lại /build.", show_alert=True)
+            return BS_VARIANT
+        context.user_data["bs"]["inputs"]["kernelsu_variant"] = variant
         context.user_data["bs"]["variant"] = variant
 
         rows = []
@@ -179,10 +189,16 @@ class BuildSaveFlow:
 
     # ─── Chọn Target ─────────────────────────────────────────────────
     async def set_target(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await _ensure_owner(update, context):
+            return ConversationHandler.END
         q = update.callback_query
         await q.answer()
         target_key = q.data.split(":", 1)[1]
+        if target_key not in TARGET_META:
+            return BS_TARGET
         context.user_data["bs"]["target_key"] = target_key
+        values = context.user_data["bs"]["inputs"]
+        values.update(normalize_inputs(values, target_key))
 
         label = next((l for l, k in _TARGET_LABELS if k == target_key), target_key)
         context.user_data["bs"]["target_label"] = label
@@ -246,6 +262,8 @@ class BuildSaveFlow:
 
     # ─── Chọn Sub-level ─────────────────────────────────────────────
     async def toggle_sub(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await _ensure_owner(update, context):
+            return ConversationHandler.END
         q = update.callback_query
         await q.answer()
         sv = q.data.split(":", 1)[1]
@@ -259,7 +277,7 @@ class BuildSaveFlow:
             bs["subs"] = list(subs_list)
         elif sv == "none":
             bs["subs"] = []
-        else:
+        elif sv in subs_list:
             if sv in selected:
                 selected.remove(sv)
             else:
@@ -269,6 +287,8 @@ class BuildSaveFlow:
 
     # ─── Màn hình Tính năng chung ────────────────────────────────────
     async def next_toggles(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await _ensure_owner(update, context):
+            return ConversationHandler.END
         q = update.callback_query
         await q.answer()
         bs = context.user_data.get("bs", {})
@@ -286,6 +306,8 @@ class BuildSaveFlow:
         return BS_TOGGLES
 
     async def toggle_feature(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await _ensure_owner(update, context):
+            return ConversationHandler.END
         q = update.callback_query
         await q.answer()
         _, key = q.data.split(":", 1)
@@ -293,7 +315,11 @@ class BuildSaveFlow:
         inputs = bs.setdefault("inputs", {})
         target_key = bs.get("target_key", "")
 
-        inputs[key] = not inputs.get(key, False)
+        try:
+            cycle_feature(inputs, key, target_key)
+        except ValueError as error:
+            await q.answer(str(error), show_alert=True)
+            return BS_TOGGLES
 
         await q.edit_message_text(
             f"🔨 <b>Build Kernel Lưu Trữ</b>\n\n<b>Tùy chỉnh tính năng chung cho {len(bs.get('subs', []))} bản build:</b>",
@@ -304,6 +330,8 @@ class BuildSaveFlow:
 
     # ─── Confirm → Queue Dispatch ───────────────────────────────────
     async def do_dispatch(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await _ensure_owner(update, context):
+            return ConversationHandler.END
         import uuid
 
         q = update.callback_query
@@ -319,7 +347,23 @@ class BuildSaveFlow:
             await q.answer("Bạn chưa chọn bản nào!", show_alert=True)
             return BS_SUB
 
-        android_ver, kernel_ver = TARGET_META.get(target_key, ("", ""))
+        if not await is_admin(user.id, self.storage):
+            return ConversationHandler.END
+        try:
+            payloads = [
+                (
+                    sv,
+                    custom_inputs(
+                        {**bs.get("inputs", {}), "kernelsu_variant": variant}, target_key, sv
+                    ),
+                )
+                for sv in selected_subs
+            ]
+        except ValueError as error:
+            await q.edit_message_text(f"❌ {error}\nMở lại /build để chọn cấu hình.")
+            context.user_data.pop("bs", None)
+            return ConversationHandler.END
+        android_ver, kernel_ver = TARGET_META[target_key]
         batch_id = str(uuid.uuid4())
 
         msg = await q.edit_message_text(
@@ -327,31 +371,12 @@ class BuildSaveFlow:
         )
         batch_msg_id = msg.message_id
 
-        inputs = bs.get("inputs", {})
-
         now_iso = datetime.now(timezone.utc).isoformat()
         jobs_to_create = []
         index = 1
 
-        for sv in selected_subs:
-            meta = SUB_LEVEL_META.get(target_key, {}).get(sv, ("lts", ""))
-            full_ver = f"{kernel_ver}.{sv}" if sv != "X" else f"{kernel_ver}.X"
-
-            dispatch_inputs = {
-                "android_version": android_ver,
-                "kernel_version": kernel_ver,
-                "sub_level": sv,
-                "os_patch_level": meta[0],
-                "revision": meta[1],
-                "kernelsu_variant": variant,
-                "kernelsu_branch": _FIXED_CONFIG["kernelsu_branch"],
-                "version": _FIXED_CONFIG["version"],
-                "use_zram": inputs.get("use_zram", True),
-                "use_bbg": inputs.get("use_bbg", True),
-                "use_kpm": inputs.get("use_kpm", False),
-                "cancel_susfs": inputs.get("cancel_susfs", False),
-                "supp_op": inputs.get("supp_op", False),
-            }
+        for sv, dispatch_inputs in payloads:
+            full_ver = f"{kernel_ver}.{sv}"
 
             job = {
                 "type": "buildsave",
@@ -399,11 +424,13 @@ class BuildSaveFlow:
 
     # ─── Back navigation ────────────────────────────────────────────
     async def back(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await _ensure_owner(update, context):
+            return ConversationHandler.END
         q = update.callback_query
         await q.answer()
         step = q.data.split(":", 1)[1]
         if step == "variant":
-            context.user_data["bs"] = {}
+            context.user_data["bs"] = {"inputs": {**_FIXED_CONFIG, "artifact_upload_mode": "all"}}
             return await self.start_from_query(q, context)
         elif step == "target":
             return await self.set_variant_from_back(q, context)
@@ -449,11 +476,12 @@ class BuildSaveFlow:
         return BS_TARGET
 
     async def set_target_from_back(self, q, context):
-        bs = context.user_data["bs"]
         return await self.render_sub_menu(q, context)
 
     # ─── Cancel ─────────────────────────────────────────────────────
     async def cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await _ensure_owner(update, context):
+            return ConversationHandler.END
         q = update.callback_query
         await q.answer()
         context.user_data.pop("bs", None)

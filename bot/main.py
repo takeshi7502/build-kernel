@@ -40,6 +40,7 @@ from .dispatch import dispatch_worker
 from .github import GitHubAPI, match_workflow_run
 from .github import parse_utc as _parse_utc
 from .gki import SUB_LEVELS, _del_msg_job, build_gki_conversation
+from .gki_contract import enabled, kpm_enabled, mode_label, susfs_enabled
 from .maintenance import backup_worker, catalog_worker, cleanup_worker, cloud_worker
 from .notifications import broadcast_worker, notification_worker
 from .oki import build_oki_conversation
@@ -1391,14 +1392,18 @@ def _format_build_lines(inputs: dict) -> list[str]:
     if not inputs:
         return lines
 
-    variant = inputs.get("variant")
+    variant = inputs.get("kernelsu_variant", inputs.get("variant"))
     branch_raw = inputs.get("branch")
-    branch = branch_raw.split("(")[0] if branch_raw else None
-    c_name = inputs.get("custom_name", "")
-    has_zram = "ZRAM" if inputs.get("use_zram") else ""
-    has_bbg = "BBG" if inputs.get("use_bbg") else ""
-    has_kpm = "KPM" if inputs.get("use_kpm") else ""
-    has_susfs = "SUSFS" if not inputs.get("cancel_susfs") else ""
+    branch = (
+        mode_label(inputs)
+        if "kernelsu_variant" in inputs
+        else (branch_raw.split("(")[0] if branch_raw else None)
+    )
+    c_name = inputs.get("version", inputs.get("custom_name", ""))
+    has_zram = "ZRAM" if enabled(inputs.get("use_zram")) else ""
+    has_bbg = "BBG" if enabled(inputs.get("use_bbg")) else ""
+    has_kpm = "KPM" if kpm_enabled(inputs) else ""
+    has_susfs = "SUSFS" if susfs_enabled(inputs) else ""
     ksu = inputs.get("ksu_type", "")
 
     parts = []
@@ -1416,6 +1421,7 @@ def _format_build_lines(inputs: dict) -> list[str]:
         ("build_a13_5_15", "A13-5.15"),
         ("build_a14_6_1", "A14-6.1"),
         ("build_a15_6_6", "A15-6.6"),
+        ("build_a16_6_12", "A16-6.12"),
     ]:
         if inputs.get(tk):
             sl = sub_list if subs else SUB_LEVELS.get(tk, [])
@@ -1640,16 +1646,23 @@ async def send_saved_config(app, run_id, job, chat_id):
     lines.append(
         f"• <b>KernelSU Variant</b>: <code>{inputs.get('kernelsu_variant', 'None')}</code>"
     )
-    lines.append(f"• <b>KernelSU Branch</b>: <code>{inputs.get('kernelsu_branch', 'None')}</code>")
+    lines.append(f"• <b>Chế độ KSU/SUSFS</b>: <code>{mode_label(inputs)}</code> (branch tự động)")
 
     if inputs.get("version"):
         lines.append(f"• <b>Version Custom</b>: <code>{inputs.get('version')}</code>")
 
     lines.append(f"• <b>Compile BBG</b>: {'✅ Có' if inputs.get('use_bbg') else '❌ Không'}")
-    lines.append(f"• <b>Compile KPM</b>: {'✅ Có' if inputs.get('use_kpm') else '❌ Không'}")
+    lines.append(f"• <b>Compile KPM</b>: {'✅ Có' if kpm_enabled(inputs) else '❌ Không'}")
     lines.append(f"• <b>Dùng ZRAM</b>: {'✅ Có' if inputs.get('use_zram') else '❌ Không'}")
-    # Cancel SUSFS logic is inverted from 'Bật SUSFS', check 'cancel_susfs'
-    lines.append(f"• <b>Bật SUSFS</b>: {'❌ Không' if inputs.get('cancel_susfs') else '✅ Có'}")
+    # Native mode and legacy cancel_susfs use the same shared semantics.
+    lines.append(f"• <b>Bật SUSFS</b>: {'✅ Có' if susfs_enabled(inputs) else '❌ Không'}")
+    for key, label in (
+        ("use_nomount", "NoMount"),
+        ("use_networking", "Networking"),
+        ("droidspaces_ntsync", "NTSync"),
+        ("cve_2026_43499_patch", "CVE-2026-43499"),
+    ):
+        lines.append(f"• <b>{label}</b>: {'✅ Có' if enabled(inputs.get(key)) else '❌ Không'}")
 
     target_flags = []
     if inputs.get("build_a12_5_10"):
@@ -1660,9 +1673,11 @@ async def send_saved_config(app, run_id, job, chat_id):
         target_flags.append("A14 (6.1)")
     if inputs.get("build_a15_6_6"):
         target_flags.append("A15 (6.6)")
+    if inputs.get("build_a16_6_12"):
+        target_flags.append("A16 (6.12)")
 
     if inputs.get("build_all"):
-        lines.append("• <b>Phiên bản Android</b>: <code>Tất cả (A12-A15)</code>")
+        lines.append("• <b>Phiên bản Android</b>: <code>Tất cả (A12-A16)</code>")
     elif target_flags:
         lines.append(f"• <b>Phiên bản Android</b>: <code>{', '.join(target_flags)}</code>")
 
@@ -2208,10 +2223,8 @@ async def cb_dl_variant(update: Update, context: ContextTypes.DEFAULT_TYPE):
     inputs = target_job.get("inputs", {}) if target_job else {}
     zram = inputs.get("use_zram", target_job.get("use_zram", True) if target_job else True)
     bbg = inputs.get("use_bbg", target_job.get("use_bbg", True) if target_job else True)
-    susfs = not inputs.get(
-        "cancel_susfs", target_job.get("cancel_susfs", False) if target_job else False
-    )
-    kpm = inputs.get("use_kpm", target_job.get("use_kpm", False) if target_job else False)
+    susfs = susfs_enabled(inputs)
+    kpm = kpm_enabled(inputs)
 
     cfg_parts = []
     if zram:
@@ -2222,6 +2235,14 @@ async def cb_dl_variant(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cfg_parts.append("SUSFS")
     if kpm:
         cfg_parts.append("KPM")
+    for feature, label in (
+        ("use_nomount", "NoMount"),
+        ("use_networking", "Networking"),
+        ("droidspaces_ntsync", "NTSync"),
+        ("cve_2026_43499_patch", "CVE-2026-43499"),
+    ):
+        if enabled(inputs.get(feature)):
+            cfg_parts.append(label)
     cfg_str = " + ".join(cfg_parts) if cfg_parts else "Mặc định"
 
     filename = f"{selected_artifact}.zip"

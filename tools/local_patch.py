@@ -1,4 +1,4 @@
-"""Preview or apply workflow patches to an explicitly selected local clone."""
+"""Audit modern workflows in a local clone; legacy auto-patching is retired."""
 
 import argparse
 import difflib
@@ -17,8 +17,14 @@ def main():
             stream.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("repository", type=Path, help="Đường dẫn local clone của repository kernel")
-    parser.add_argument("--apply", action="store_true", help="Ghi thay đổi; mặc định chỉ in diff")
+    parser.add_argument(
+        "--apply", action="store_true", help="Deprecated; audit never writes workflows"
+    )
     args = parser.parse_args()
+    if args.apply:
+        parser.error(
+            "Auto-patching đã ngừng. Chạy không có --apply để kiểm tra, sửa workflow tại repo build."
+        )
     workflow_dir = args.repository.resolve() / ".github" / "workflows"
     if not workflow_dir.is_dir():
         parser.error(f"Không tìm thấy thư mục workflow: {workflow_dir}")
@@ -54,7 +60,7 @@ def main():
             path.write_text(updated, encoding="utf-8")
     if not found:
         parser.error("Không tìm thấy workflow GKI được hỗ trợ.")
-    print("Đã ghi thay đổi." if args.apply else "Xem trước; thêm --apply để ghi thay đổi.")
+    print("Kiểm tra thành công; không sửa workflow hay loại runner.")
 
 
 if __name__ == "__main__":
